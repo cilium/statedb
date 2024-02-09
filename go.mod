@@ -3,8 +3,8 @@ module github.com/cilium/statedb
 go 1.21.3
 
 require (
-	github.com/cilium/hive v0.0.0-20240209113057-b7fb4a290e6c
-	github.com/cilium/stream v0.0.0-20240209112636-fcc074fbb98f
+	github.com/cilium/hive v0.0.0-20240209163124-bd6ebb4ec11d
+	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
 	github.com/hashicorp/go-immutable-radix/v2 v2.1.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
