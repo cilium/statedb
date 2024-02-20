@@ -635,9 +635,10 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	// Updating an object with matching revision number works
 	wtxn = db.WriteTxn(table)
 	obj.Tags = []string{"updated"} // NOTE: testObject stored by value so no explicit copy needed.
-	_, hadOld, err := table.CompareAndSwap(wtxn, rev1, obj)
+	oldObj, hadOld, err := table.CompareAndSwap(wtxn, rev1, obj)
 	require.NoError(t, err)
 	require.True(t, hadOld)
+	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
 	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
@@ -648,9 +649,10 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	// Updating an object with mismatching revision number fails
 	wtxn = db.WriteTxn(table)
 	obj.Tags = []string{"mismatch"}
-	_, hadOld, err = table.CompareAndSwap(wtxn, rev1, obj)
+	oldObj, hadOld, err = table.CompareAndSwap(wtxn, rev1, obj)
 	require.ErrorIs(t, ErrRevisionNotEqual, err)
 	require.True(t, hadOld)
+	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
 	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
@@ -661,9 +663,10 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	// Deleting an object with mismatching revision number fails
 	wtxn = db.WriteTxn(table)
 	obj.Tags = []string{"mismatch"}
-	_, hadOld, err = table.CompareAndDelete(wtxn, rev1, obj)
+	oldObj, hadOld, err = table.CompareAndDelete(wtxn, rev1, obj)
 	require.ErrorIs(t, ErrRevisionNotEqual, err)
 	require.True(t, hadOld)
+	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
 	obj, rev2, ok := table.First(db.ReadTxn(), idIndex.Query(1))
@@ -674,9 +677,10 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	// Deleting with matching revision number works
 	wtxn = db.WriteTxn(table)
 	obj.Tags = []string{"mismatch"}
-	_, hadOld, err = table.CompareAndDelete(wtxn, rev2, obj)
+	oldObj, hadOld, err = table.CompareAndDelete(wtxn, rev2, obj)
 	require.NoError(t, err)
 	require.True(t, hadOld)
+	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
 	_, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))

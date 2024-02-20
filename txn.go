@@ -154,16 +154,16 @@ func (txn *txn) mustIndexWriteTxn(name TableName, index IndexName) indexWriteTxn
 	return indexTxn
 }
 
-func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (any, bool, error) {
+func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
 	if txn.rootReadTxn == nil {
-		return nil, false, ErrTransactionClosed
+		return object{}, false, ErrTransactionClosed
 	}
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
 	table, ok := txn.modifiedTables[tableName]
 	if !ok {
-		return nil, false, tableError(tableName, ErrTableNotLockedForWriting)
+		return object{}, false, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
 	table.revision++
@@ -186,7 +186,7 @@ func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (any, b
 			// the insert.
 			idIndexTxn.txn.Delete(idKey)
 			table.revision = oldRevision
-			return nil, false, ErrObjectNotFound
+			return object{}, false, ErrObjectNotFound
 		}
 		if oldObj.revision != guardRevision {
 			// Revert the change. We're assuming here that it's rarer for CompareAndSwap() to
@@ -245,7 +245,7 @@ func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (any, b
 		})
 	}
 
-	return oldObj.data, oldExists, nil
+	return oldObj, oldExists, nil
 }
 
 func (txn *txn) hasDeleteTrackers(name TableName) bool {
@@ -277,16 +277,16 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt deleteTr
 
 }
 
-func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (any, bool, error) {
+func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
 	if txn.rootReadTxn == nil {
-		return nil, false, ErrTransactionClosed
+		return object{}, false, ErrTransactionClosed
 	}
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
 	table, ok := txn.modifiedTables[tableName]
 	if !ok {
-		return nil, false, tableError(tableName, ErrTableNotLockedForWriting)
+		return object{}, false, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
 	table.revision++
@@ -299,7 +299,7 @@ func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (any, b
 	idIndexTree := txn.mustIndexWriteTxn(tableName, meta.primary().name)
 	obj, existed := idIndexTree.txn.Delete(idKey)
 	if !existed {
-		return nil, false, nil
+		return object{}, false, nil
 	}
 
 	// For CompareAndDelete() validate against guard revision and if there's a mismatch,
@@ -338,7 +338,7 @@ func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (any, b
 		txn.mustIndexWriteTxn(tableName, GraveyardRevisionIndex).txn.Insert(index.Uint64(revision), obj)
 	}
 
-	return obj.data, true, nil
+	return obj, true, nil
 }
 
 // encodeNonUniqueKey constructs the internal key to use with non-unique indexes.

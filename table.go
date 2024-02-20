@@ -237,37 +237,37 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan st
 }
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var data any
-	data, hadOld, err = txn.getTxn().Insert(t, Revision(0), obj)
-	if err == nil && hadOld {
-		oldObj = data.(Obj)
+	var old object
+	old, hadOld, err = txn.getTxn().Insert(t, Revision(0), obj)
+	if hadOld {
+		oldObj = old.data.(Obj)
 	}
 	return
 }
 
 func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var data any
-	data, hadOld, err = txn.getTxn().Insert(t, rev, obj)
-	if err == nil && hadOld {
-		oldObj = data.(Obj)
+	var old object
+	old, hadOld, err = txn.getTxn().Insert(t, rev, obj)
+	if hadOld {
+		oldObj = old.data.(Obj)
 	}
 	return
 }
 
 func (t *genTable[Obj]) Delete(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var data any
-	data, hadOld, err = txn.getTxn().Delete(t, Revision(0), obj)
-	if err == nil && hadOld {
-		oldObj = data.(Obj)
+	var old object
+	old, hadOld, err = txn.getTxn().Delete(t, Revision(0), obj)
+	if hadOld {
+		oldObj = old.data.(Obj)
 	}
 	return
 }
 
 func (t *genTable[Obj]) CompareAndDelete(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var data any
-	data, hadOld, err = txn.getTxn().Delete(t, rev, obj)
-	if err == nil && hadOld {
-		oldObj = data.(Obj)
+	var old object
+	old, hadOld, err = txn.getTxn().Delete(t, rev, obj)
+	if hadOld {
+		oldObj = old.data.(Obj)
 	}
 	return
 }
