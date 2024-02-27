@@ -103,6 +103,36 @@ func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWT
 	return db, table, metrics
 }
 
+func TestDB_Insert_SamePointer(t *testing.T) {
+	db, _ := NewDB(nil, NewExpVarMetrics(false))
+	idIndex := Index[*testObject, uint64]{
+		Name: "id",
+		FromObject: func(t *testObject) index.KeySet {
+			return index.NewKeySet(index.Uint64(t.ID))
+		},
+		FromKey: index.Uint64,
+		Unique:  true,
+	}
+	table, _ := NewTable[*testObject]("test", idIndex)
+	db.RegisterTable(table)
+
+	txn := db.WriteTxn(table)
+	obj := &testObject{ID: 1}
+	table.Insert(txn, obj)
+	txn.Commit()
+
+	defer func() {
+		if err := recover(); err == nil {
+			t.Fatalf("Inserting the same object again didn't fatal")
+		}
+	}()
+
+	txn = db.WriteTxn(table)
+	table.Insert(txn, obj)
+	txn.Commit()
+
+}
+
 func TestDB_LowerBound_ByRevision(t *testing.T) {
 	t.Parallel()
 

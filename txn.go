@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"time"
 
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
@@ -178,6 +179,20 @@ func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (object
 	idKey := meta.primary().fromObject(obj).First()
 	idIndexTxn := txn.mustIndexWriteTxn(tableName, meta.primary().name)
 	oldObj, oldExists := idIndexTxn.txn.Insert(idKey, obj)
+
+	// Sanity check: is the same object being inserted back and thus the
+	// immutable object is being mutated?
+	if oldExists {
+		val := reflect.ValueOf(data)
+		if val.Kind() == reflect.Pointer {
+			oldVal := reflect.ValueOf(oldObj.data)
+			if val.UnsafePointer() == oldVal.UnsafePointer() {
+				panic(fmt.Sprintf(
+					"Insert() of the same object (%T) back into the table. Is the immutable object being mutated?",
+					data))
+			}
+		}
+	}
 
 	// For CompareAndSwap() validate against the given guard revision
 	if guardRevision > 0 {
