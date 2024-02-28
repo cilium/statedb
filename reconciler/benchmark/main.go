@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"runtime/pprof"
@@ -19,7 +20,6 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/reconciler"
-	"github.com/sagikazarmark/slog-shim"
 )
 
 var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{

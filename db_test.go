@@ -9,11 +9,11 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/sagikazarmark/slog-shim"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
