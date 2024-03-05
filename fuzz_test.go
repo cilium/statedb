@@ -164,59 +164,97 @@ type actionLogEntry struct {
 	value uint64
 }
 
-type action func(log *debugLogger, actLog actionLog, txn statedb.WriteTxn, target statedb.RWTable[fuzzObj])
+type tableAndID struct {
+	table string
+	id    uint64
+}
 
-func insertAction(log *debugLogger, actLog actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+type txnActionLog struct {
+	latest map[tableAndID]actionLogEntry
+}
+
+type actionContext struct {
+	log    *debugLogger
+	actLog actionLog
+	txnLog *txnActionLog
+	txn    statedb.WriteTxn
+	table  statedb.RWTable[fuzzObj]
+}
+
+type action func(ctx actionContext)
+
+func insertAction(ctx actionContext) {
 	id := mkID()
 	value := rand.Uint64()
-	log.log("%s: Insert %d", table.Name(), id)
-	table.Insert(txn, fuzzObj{id, value})
-	actLog.append(actionLogEntry{table, actInsert, id, value})
+	ctx.log.log("%s: Insert %d", ctx.table.Name(), id)
+	ctx.table.Insert(ctx.txn, fuzzObj{id, value})
+	e := actionLogEntry{ctx.table, actInsert, id, value}
+	ctx.actLog.append(e)
+	ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}] = e
 }
 
-func deleteAction(log *debugLogger, actLog actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+func deleteAction(ctx actionContext) {
 	id := mkID()
-	log.log("%s: Delete %d", table.Name(), id)
-	table.Delete(txn, fuzzObj{id, 0})
-	actLog.append(actionLogEntry{table, actDelete, id, 0})
+	ctx.log.log("%s: Delete %d", ctx.table.Name(), id)
+	ctx.table.Delete(ctx.txn, fuzzObj{id, 0})
+	e := actionLogEntry{ctx.table, actDelete, id, 0}
+	ctx.actLog.append(e)
+	ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}] = e
 }
 
-func deleteAllAction(log *debugLogger, actLog actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
-	log.log("%s: DeleteAll", table.Name())
-	table.DeleteAll(txn)
-	actLog.append(actionLogEntry{table, actDeleteAll, 0, 0})
+func deleteAllAction(ctx actionContext) {
+	ctx.log.log("%s: DeleteAll", ctx.table.Name())
+	ctx.table.DeleteAll(ctx.txn)
+	ctx.actLog.append(actionLogEntry{ctx.table, actDeleteAll, 0, 0})
+	clear(ctx.txnLog.latest)
 }
 
-func allAction(log *debugLogger, _ actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
-	iter, _ := table.All(txn)
-	log.log("%s: All => %d found", table.Name(), len(statedb.Collect(iter)))
+func allAction(ctx actionContext) {
+	iter, _ := ctx.table.All(ctx.txn)
+	ctx.log.log("%s: All => %d found", ctx.table.Name(), len(statedb.Collect(iter)))
 }
 
-func getAction(log *debugLogger, _ actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+func getAction(ctx actionContext) {
 	id := mkID()
-	iter, _ := table.Get(txn, idIndex.Query(mkID()))
-	log.log("%s: Get(%d) => %d found", table.Name(), id, len(statedb.Collect(iter)))
+	iter, _ := ctx.table.Get(ctx.txn, idIndex.Query(mkID()))
+	ctx.log.log("%s: Get(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
-func firstAction(log *debugLogger, _ actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+func firstAction(ctx actionContext) {
 	id := mkID()
-	_, rev, ok := table.First(txn, idIndex.Query(id))
-	log.log("%s: First(%d) => rev=%d, ok=%v", table.Name(), id, rev, ok)
+	obj, rev, ok := ctx.table.First(ctx.txn, idIndex.Query(id))
+
+	if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}]; ok2 {
+		if e.act == actInsert {
+			if !ok {
+				panic("First() returned not found, expected last inserted value")
+			}
+			if e.value != obj.value {
+				panic("First() did not return the last write")
+			}
+		} else if e.act == actDelete {
+			if ok {
+				panic("First() returned value even though it was deleted")
+			}
+		}
+	}
+	ctx.log.log("%s: First(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
-func lastAction(log *debugLogger, _ actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+func lastAction(ctx actionContext) {
 	id := mkID()
-	_, rev, ok := table.First(txn, idIndex.Query(id))
-	log.log("%s: First(%d) => rev=%d, ok=%v", table.Name(), id, rev, ok)
+	_, rev, ok := ctx.table.Last(ctx.txn, idIndex.Query(id))
+	ctx.log.log("%s: Last(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
-func lowerboundAction(log *debugLogger, _ actionLog, txn statedb.WriteTxn, table statedb.RWTable[fuzzObj]) {
+func lowerboundAction(ctx actionContext) {
 	id := mkID()
-	iter, _ := table.LowerBound(txn, idIndex.Query(id))
-	log.log("%s: LowerBound(%d) => %d found", table.Name(), id, len(statedb.Collect(iter)))
+	iter, _ := ctx.table.LowerBound(ctx.txn, idIndex.Query(id))
+	ctx.log.log("%s: LowerBound(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
 var actions = []action{
+	insertAction, insertAction, insertAction, insertAction, insertAction,
 	insertAction, insertAction, insertAction, insertAction, insertAction,
 	insertAction, insertAction, insertAction, insertAction, insertAction,
 
@@ -224,9 +262,9 @@ var actions = []action{
 
 	deleteAllAction,
 
+	firstAction, firstAction, firstAction, firstAction, firstAction,
 	allAction, lowerboundAction,
 	getAction, getAction, getAction,
-	firstAction, firstAction,
 	lastAction, lastAction,
 }
 
@@ -239,6 +277,9 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 	for iterations > 0 {
 		targets := randomSubset(fuzzTables)
 		txn := fuzzDB.WriteTxn(targets[0], targets[1:]...)
+		txnActionLog := &txnActionLog{
+			latest: map[tableAndID]actionLogEntry{},
+		}
 
 		// Try to run other goroutines with write lock held.
 		runtime.Gosched()
@@ -251,8 +292,18 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 		}
 
 		for _, target := range targets {
-			randomAction()(log, actLog, txn, target.(statedb.RWTable[fuzzObj]))
-			runtime.Gosched()
+			ctx := actionContext{
+				log:    log,
+				actLog: actLog,
+				txnLog: txnActionLog,
+				txn:    txn,
+				table:  target.(statedb.RWTable[fuzzObj]),
+			}
+			numActs := rand.Intn(20)
+			for i := 0; i < numActs; i++ {
+				randomAction()(ctx)
+				runtime.Gosched()
+			}
 		}
 		runtime.Gosched()
 
