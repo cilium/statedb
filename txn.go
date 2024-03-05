@@ -39,6 +39,13 @@ type indexTxn struct {
 	entry indexEntry
 }
 
+func (i indexTxn) Clone() indexTxn {
+	return indexTxn{
+		i.Txn.Clone(),
+		i.entry,
+	}
+}
+
 var zeroTxn = txn{}
 
 // txn fulfills the ReadTxn/WriteTxn interface.
@@ -66,18 +73,12 @@ func (txn *txn) GetRevision(name TableName) Revision {
 // If the table or index is not found this returns nil & error.
 func (txn *txn) indexReadTxn(name TableName, index IndexName) (indexTxn, error) {
 	if txn.writeTxns != nil {
-		// Try to look up or create the transaction against this table & index,
-		// in case we're writing to it so that the writes can be read.
-		indexWriteTxn, ok := txn.writeTxns[tableIndex{name, index}]
-		if ok {
-			return indexWriteTxn, nil
-		}
-		if !ok {
-			// No write transaction yet, but we are modifying this table => create
-			// the transaction.
-			if _, ok := txn.modifiedTables[name]; ok {
-				return txn.indexWriteTxn(name, index)
+		if _, ok := txn.modifiedTables[name]; ok {
+			itxn, err := txn.indexWriteTxn(name, index)
+			if err == nil {
+				return itxn.Clone(), nil
 			}
+			return indexTxn{}, err
 		}
 	}
 
