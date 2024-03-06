@@ -215,7 +215,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 		acquiredAt.Sub(lockAt),
 	)
 
-	return &txn{
+	txn := &txn{
 		db:             db,
 		rootReadTxn:    rootReadTxn,
 		modifiedTables: tableEntries,
@@ -224,6 +224,8 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 		acquiredAt:     acquiredAt,
 		packageName:    callerPkg,
 	}
+	runtime.SetFinalizer(txn, txnFinalizer)
+	return txn
 }
 
 func (db *DB) Start(cell.HookContext) error {

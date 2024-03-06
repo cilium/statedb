@@ -122,15 +122,15 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 	txn.Commit()
 
 	defer func() {
+		txn.Abort()
 		if err := recover(); err == nil {
 			t.Fatalf("Inserting the same object again didn't fatal")
 		}
 	}()
 
+	// Try to insert the same again. This will panic.
 	txn = db.WriteTxn(table)
 	table.Insert(txn, obj)
-	txn.Commit()
-
 }
 
 func TestDB_LowerBound_ByRevision(t *testing.T) {

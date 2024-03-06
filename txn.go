@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"runtime"
 	"time"
 
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
@@ -51,6 +52,15 @@ var zeroTxn = txn{}
 // txn fulfills the ReadTxn/WriteTxn interface.
 func (txn *txn) getTxn() *txn {
 	return txn
+}
+
+// txnFinalizer is called when the GC frees *txn. It checks that a WriteTxn
+// has been Aborted or Committed. This is a safeguard against forgetting to
+// Abort/Commit which would cause the table to be locked forever.
+func txnFinalizer(txn *txn) {
+	if txn.writeTxns != nil {
+		panic(fmt.Sprintf("WriteTxn from package %q against tables %v was never Abort()'d or Commit()'d", txn.packageName, maps.Keys(txn.modifiedTables)))
+	}
 }
 
 func (txn *txn) GetRevision(name TableName) Revision {
@@ -365,6 +375,8 @@ func decodeNonUniqueKey(key []byte) (primary []byte, secondary []byte) {
 }
 
 func (txn *txn) Abort() {
+	runtime.SetFinalizer(txn, nil)
+
 	// If writeTxns is nil, this transaction has already been committed or aborted, and
 	// thus there is nothing to do. We allow this without failure to allow for defer
 	// pattern:
@@ -394,6 +406,8 @@ func (txn *txn) Abort() {
 }
 
 func (txn *txn) Commit() {
+	runtime.SetFinalizer(txn, nil)
+
 	// We operate here under the following properties:
 	//
 	// - Each table that we're modifying has its SortableMutex locked and held by
