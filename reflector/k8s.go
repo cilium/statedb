@@ -208,7 +208,9 @@ func (s *k8sReflector[Obj]) run(ctx context.Context, health cell.Health) error {
 				table.Delete(txn, obj)
 			}
 			for _, item := range buf.replaceItems {
-				table.Insert(txn, item.(Obj))
+				if obj, ok := transform(item); ok {
+					table.Insert(txn, obj)
+				}
 			}
 		}
 
