@@ -150,8 +150,10 @@ type RWTable[Obj any] interface {
 // the object type (the 'Obj' constraint).
 type TableMeta interface {
 	Name() TableName // The name of the table
+	tableEntry() tableEntry
 	tablePos() int
 	setTablePos(int)
+	indexPos(string) int
 	tableKey() []byte                      // The radix key for the table in the root tree
 	primary() anyIndexer                   // The untyped primary indexer for the table
 	secondary() map[string]anyIndexer      // Secondary indexers (if any)
@@ -279,10 +281,17 @@ type TableWritable interface {
 //
 
 const (
-	reservedIndexPrefix    = "__"
-	RevisionIndex          = "__revision__"
-	GraveyardIndex         = "__graveyard__"
-	GraveyardRevisionIndex = "__graveyard_revision__"
+	PrimaryIndexPos = 0
+
+	reservedIndexPrefix       = "__"
+	RevisionIndex             = "__revision__"
+	RevisionIndexPos          = 1
+	GraveyardIndex            = "__graveyard__"
+	GraveyardIndexPos         = 2
+	GraveyardRevisionIndex    = "__graveyard_revision__"
+	GraveyardRevisionIndexPos = 3
+
+	SecondaryIndexStartPos = 4
 )
 
 // object is the format in which data is stored in the tables.
@@ -305,6 +314,9 @@ type anyIndexer struct {
 	// values returned by fromObject. If false the primary
 	// key of the object will be appended to the key.
 	unique bool
+
+	// pos is the position of the index in [tableEntry.indexes]
+	pos int
 }
 
 type deleteTracker interface {
@@ -314,28 +326,23 @@ type deleteTracker interface {
 
 type indexEntry struct {
 	tree   *iradix.Tree[object]
+	txn    *iradix.Txn[object]
 	unique bool
 }
 
 type tableEntry struct {
 	meta           TableMeta
-	indexes        *iradix.Tree[indexEntry]
+	indexes        []indexEntry
 	deleteTrackers *iradix.Tree[deleteTracker]
 	revision       uint64
 }
 
 func (t *tableEntry) numObjects() int {
-	indexEntry, ok := t.indexes.Get([]byte(RevisionIndex))
-	if ok {
-		return indexEntry.tree.Len()
-	}
-	return 0
+	indexEntry := t.indexes[t.meta.indexPos(RevisionIndex)]
+	return indexEntry.tree.Len()
 }
 
 func (t *tableEntry) numDeletedObjects() int {
-	indexEntry, ok := t.indexes.Get([]byte(GraveyardIndex))
-	if ok {
-		return indexEntry.tree.Len()
-	}
-	return 0
+	indexEntry := t.indexes[t.meta.indexPos(GraveyardIndex)]
+	return indexEntry.tree.Len()
 }

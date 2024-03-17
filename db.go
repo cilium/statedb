@@ -15,8 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	iradix "github.com/hashicorp/go-immutable-radix/v2"
-
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb/internal"
 )
@@ -153,21 +151,7 @@ func (db *DB) registerTable(table TableMeta, root *dbRoot) error {
 
 	pos := len(*root)
 	table.setTablePos(pos)
-
-	var entry tableEntry
-	entry.meta = table
-	entry.deleteTrackers = iradix.New[deleteTracker]()
-	indexTxn := iradix.New[indexEntry]().Txn()
-	indexTxn.Insert([]byte(table.primary().name), indexEntry{iradix.New[object](), true})
-	indexTxn.Insert([]byte(RevisionIndex), indexEntry{iradix.New[object](), true})
-	indexTxn.Insert([]byte(GraveyardIndex), indexEntry{iradix.New[object](), true})
-	indexTxn.Insert([]byte(GraveyardRevisionIndex), indexEntry{iradix.New[object](), true})
-	for index, indexer := range table.secondary() {
-		indexTxn.Insert([]byte(index), indexEntry{iradix.New[object](), indexer.unique})
-	}
-	entry.indexes = indexTxn.CommitOnly()
-
-	*root = append(*root, entry)
+	*root = append(*root, table.tableEntry())
 	return nil
 }
 
@@ -205,6 +189,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 	var tableNames []string
 	for _, table := range allTables {
 		tableEntry := root[table.tablePos()]
+		tableEntry.indexes = slices.Clone(tableEntry.indexes)
 		tableEntries[table.tablePos()] = &tableEntry
 		tableNames = append(tableNames, table.Name())
 
@@ -224,7 +209,6 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 		db:             db,
 		root:           root,
 		modifiedTables: tableEntries,
-		writeTxns:      make(map[tableIndex]indexTxn),
 		smus:           smus,
 		acquiredAt:     acquiredAt,
 		packageName:    callerPkg,
