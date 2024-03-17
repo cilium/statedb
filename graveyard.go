@@ -39,9 +39,8 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 
 		// Do a lockless read transaction to find potential dead objects.
 		txn := db.ReadTxn().getTxn()
-		tableIter := txn.rootReadTxn.Root().Iterator()
-		for nameKey, table, ok := tableIter.Next(); ok; nameKey, table, ok = tableIter.Next() {
-			tableName := string(nameKey)
+		for _, table := range txn.root {
+			tableName := table.meta.Name()
 			start := time.Now()
 
 			// Find the low watermark
@@ -64,7 +63,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 
 			// Find objects to be deleted by iterating over the graveyard revision index up
 			// to the low watermark.
-			indexTree := txn.mustIndexReadTxn(tableName, GraveyardRevisionIndex)
+			indexTree := txn.mustIndexReadTxn(table.meta, GraveyardRevisionIndex)
 
 			objIter := indexTree.Root().Iterator()
 			for key, obj, ok := objIter.Next(); ok; key, obj, ok = objIter.Next() {
@@ -93,12 +92,12 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 			tableName := meta.Name()
 			start := time.Now()
 			for _, key := range deadObjs {
-				oldObj, existed := txn.mustIndexWriteTxn(tableName, GraveyardRevisionIndex).Delete(key)
+				oldObj, existed := txn.mustIndexWriteTxn(meta, GraveyardRevisionIndex).Delete(key)
 				if existed {
 					// The dead object still existed (and wasn't replaced by a create->delete),
 					// delete it from the primary index.
 					key = meta.primary().fromObject(oldObj).First()
-					txn.mustIndexWriteTxn(tableName, GraveyardIndex).Delete(key)
+					txn.mustIndexWriteTxn(meta, GraveyardIndex).Delete(key)
 				}
 			}
 			cleaningTimes[tableName] = time.Since(start)
@@ -114,8 +113,8 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 
 		// Update object count metrics.
 		txn = db.ReadTxn().getTxn()
-		tableIter = txn.rootReadTxn.Root().Iterator()
-		for name, table, ok := tableIter.Next(); ok; name, table, ok = tableIter.Next() {
+		for _, table := range txn.root {
+			name := table.meta.Name()
 			db.metrics.GraveyardObjectCount(string(name), table.numDeletedObjects())
 			db.metrics.ObjectCount(string(name), table.numObjects())
 		}
@@ -126,8 +125,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 // Used in tests.
 func (db *DB) graveyardIsEmpty() bool {
 	txn := db.ReadTxn().getTxn()
-	tableIter := txn.rootReadTxn.Root().Iterator()
-	for _, table, ok := tableIter.Next(); ok; _, table, ok = tableIter.Next() {
+	for _, table := range txn.root {
 		indexEntry, ok := table.indexes.Get([]byte(GraveyardIndex))
 		if !ok {
 			panic("BUG: GraveyardIndex not found from table")

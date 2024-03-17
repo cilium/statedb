@@ -10,7 +10,7 @@ import (
 type Metrics interface {
 	WriteTxnTableAcquisition(tableName string, acquire time.Duration)
 	WriteTxnTotalAcquisition(goPackage string, tables []string, acquire time.Duration)
-	WriteTxnDuration(goPackage string, s []string, acquire time.Duration)
+	WriteTxnDuration(goPackage string, acquire time.Duration)
 
 	GraveyardLowWatermark(tableName string, lowWatermark Revision)
 	GraveyardCleaningDuration(tableName string, duration time.Duration)
@@ -121,7 +121,7 @@ func (m *ExpVarMetrics) ObjectCount(name string, numObjects int) {
 	m.ObjectCountVar.Set(name, &intVar)
 }
 
-func (m *ExpVarMetrics) WriteTxnDuration(goPackage string, s []string, acquire time.Duration) {
+func (m *ExpVarMetrics) WriteTxnDuration(goPackage string, acquire time.Duration) {
 	m.WriteTxnDurationVar.AddFloat(goPackage, acquire.Seconds())
 }
 
@@ -162,7 +162,7 @@ func (*NopMetrics) Revision(tableName string, revision uint64) {
 }
 
 // WriteTxnDuration implements Metrics.
-func (*NopMetrics) WriteTxnDuration(goPackage string, s []string, acquire time.Duration) {
+func (*NopMetrics) WriteTxnDuration(goPackage string, acquire time.Duration) {
 }
 
 // WriteTxnTableAcquisition implements Metrics.

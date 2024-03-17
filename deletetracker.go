@@ -36,7 +36,7 @@ func (dt *DeleteTracker[Obj]) getRevision() uint64 {
 // 'minRevision'. The deleted objects are not garbage-collected unless 'Mark' is
 // called!
 func (dt *DeleteTracker[Obj]) Deleted(txn ReadTxn, minRevision Revision) Iterator[Obj] {
-	indexTxn := txn.getTxn().mustIndexReadTxn(dt.table.Name(), GraveyardRevisionIndex)
+	indexTxn := txn.getTxn().mustIndexReadTxn(dt.table, GraveyardRevisionIndex)
 	iter := indexTxn.Root().Iterator()
 	iter.SeekLowerBound(index.Uint64(minRevision))
 	return &iterator[Obj]{iter}
@@ -57,7 +57,7 @@ func (dt *DeleteTracker[Obj]) Close() {
 	// Remove the delete tracker from the table.
 	txn := dt.db.WriteTxn(dt.table).getTxn()
 	db := txn.db
-	table := txn.modifiedTables[dt.table.Name()]
+	table := txn.modifiedTables[dt.table.tablePos()]
 	if table == nil {
 		panic("BUG: Table missing from write transaction")
 	}

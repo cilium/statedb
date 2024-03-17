@@ -88,11 +88,20 @@ func MustNewTable[Obj any](
 }
 
 type genTable[Obj any] struct {
+	pos                  int
 	table                TableName
 	smu                  internal.SortableMutex
 	primaryIndexer       Indexer[Obj]
 	primaryAnyIndexer    anyIndexer
 	secondaryAnyIndexers map[string]anyIndexer
+}
+
+func (t *genTable[Obj]) setTablePos(pos int) {
+	t.pos = pos
+}
+
+func (t *genTable[Obj]) tablePos() int {
+	return t.pos
 }
 
 func (t *genTable[Obj]) tableKey() []byte {
@@ -120,11 +129,11 @@ func (t *genTable[Obj]) ToTable() Table[Obj] {
 }
 
 func (t *genTable[Obj]) Revision(txn ReadTxn) Revision {
-	return txn.getTxn().GetRevision(t.table)
+	return txn.getTxn().getRevision(t)
 }
 
 func (t *genTable[Obj]) NumObjects(txn ReadTxn) int {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, t.primaryAnyIndexer.name)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.primaryAnyIndexer.name)
 	return indexTxn.entry.tree.Len()
 }
 
@@ -134,7 +143,7 @@ func (t *genTable[Obj]) First(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint
 }
 
 func (t *genTable[Obj]) FirstWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, q.index)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, q.index)
 	iter := indexTxn.Root().Iterator()
 	watch = iter.SeekPrefixWatch(q.key)
 
@@ -172,7 +181,7 @@ func (t *genTable[Obj]) Last(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint6
 }
 
 func (t *genTable[Obj]) LastWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, q.index)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, q.index)
 	iter := indexTxn.Root().ReverseIterator()
 	watch = iter.SeekPrefixWatch(q.key)
 
@@ -205,7 +214,7 @@ func (t *genTable[Obj]) LastWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision 
 }
 
 func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, q.index)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, q.index)
 	root := indexTxn.Root()
 
 	// Since LowerBound query may be invalidated by changes in another branch
@@ -218,7 +227,7 @@ func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-
 }
 
 func (t *genTable[Obj]) All(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, t.primaryAnyIndexer.name)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.primaryAnyIndexer.name)
 	root := indexTxn.Root()
 	// Grab the watch channel for the root node
 	watchCh, _, _ := root.GetWatch(nil)
@@ -226,7 +235,7 @@ func (t *genTable[Obj]) All(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
 }
 
 func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t.table, q.index)
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, q.index)
 	iter := indexTxn.Root().Iterator()
 	watchCh := iter.SeekPrefixWatch(q.key)
 

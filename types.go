@@ -149,7 +149,9 @@ type RWTable[Obj any] interface {
 // TableMeta provides information about the table that is independent of
 // the object type (the 'Obj' constraint).
 type TableMeta interface {
-	Name() TableName                       // The name of the table
+	Name() TableName // The name of the table
+	tablePos() int
+	setTablePos(int)
 	tableKey() []byte                      // The radix key for the table in the root tree
 	primary() anyIndexer                   // The untyped primary indexer for the table
 	secondary() map[string]anyIndexer      // Secondary indexers (if any)
