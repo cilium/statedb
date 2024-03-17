@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -87,29 +88,29 @@ import (
 //     the lowest revision of all delete trackers.
 type DB struct {
 	mu                  sync.Mutex // protects 'tables' and sequences modifications to the root tree
-	tables              map[TableName]TableMeta
 	ctx                 context.Context
 	cancel              context.CancelFunc
-	root                atomic.Pointer[iradix.Tree[tableEntry]]
+	root                atomic.Pointer[dbRoot]
 	gcTrigger           chan struct{} // trigger for graveyard garbage collection
 	gcExited            chan struct{}
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
 }
 
+type dbRoot []tableEntry
+
 func NewDB(tables []TableMeta, metrics Metrics) (*DB, error) {
-	txn := iradix.New[tableEntry]().Txn()
 	db := &DB{
-		tables:              make(map[TableName]TableMeta),
 		metrics:             metrics,
 		gcRateLimitInterval: defaultGCRateLimitInterval,
 	}
+	root := make(dbRoot, 0, len(tables))
 	for _, t := range tables {
-		if err := db.registerTable(t, txn); err != nil {
+		if err := db.registerTable(t, &root); err != nil {
 			return nil, err
 		}
 	}
-	db.root.Store(txn.CommitOnly())
+	db.root.Store(&root)
 
 	return db, nil
 }
@@ -128,25 +129,31 @@ func (db *DB) RegisterTable(table TableMeta, tables ...TableMeta) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 
-	txn := db.root.Load().Txn()
-	if err := db.registerTable(table, txn); err != nil {
+	root := slices.Clone(*db.root.Load())
+
+	if err := db.registerTable(table, &root); err != nil {
 		return err
 	}
 	for _, t := range tables {
-		if err := db.registerTable(t, txn); err != nil {
+		if err := db.registerTable(t, &root); err != nil {
 			return err
 		}
 	}
-	db.root.Store(txn.CommitOnly())
+	db.root.Store(&root)
 	return nil
 }
 
-func (db *DB) registerTable(table TableMeta, txn *iradix.Txn[tableEntry]) error {
+func (db *DB) registerTable(table TableMeta, root *dbRoot) error {
 	name := table.Name()
-	if _, ok := db.tables[name]; ok {
-		return tableError(name, ErrDuplicateTable)
+	for _, t := range *root {
+		if t.meta.Name() == name {
+			return tableError(name, ErrDuplicateTable)
+		}
 	}
-	db.tables[name] = table
+
+	pos := len(*root)
+	table.setTablePos(pos)
+
 	var entry tableEntry
 	entry.meta = table
 	entry.deleteTrackers = iradix.New[deleteTracker]()
@@ -159,7 +166,8 @@ func (db *DB) registerTable(table TableMeta, txn *iradix.Txn[tableEntry]) error 
 		indexTxn.Insert([]byte(index), indexEntry{iradix.New[object](), indexer.unique})
 	}
 	entry.indexes = indexTxn.CommitOnly()
-	txn.Insert(table.tableKey(), entry)
+
+	*root = append(*root, entry)
 	return nil
 }
 
@@ -169,8 +177,8 @@ func (db *DB) registerTable(table TableMeta, txn *iradix.Txn[tableEntry]) error 
 // ReadTxn is not thread-safe!
 func (db *DB) ReadTxn() ReadTxn {
 	return &txn{
-		db:          db,
-		rootReadTxn: db.root.Load().Txn(),
+		db:   db,
+		root: *db.root.Load(),
 	}
 }
 
@@ -192,15 +200,12 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 	smus.Lock()
 	acquiredAt := time.Now()
 
-	rootReadTxn := db.root.Load().Txn()
-	tableEntries := make(map[TableName]*tableEntry, len(tables))
+	root := *db.root.Load()
+	tableEntries := make([]*tableEntry, len(root))
 	var tableNames []string
 	for _, table := range allTables {
-		tableEntry, ok := rootReadTxn.Get(table.tableKey())
-		if !ok {
-			panic("BUG: Table '" + table.Name() + "' not found")
-		}
-		tableEntries[table.Name()] = &tableEntry
+		tableEntry := root[table.tablePos()]
+		tableEntries[table.tablePos()] = &tableEntry
 		tableNames = append(tableNames, table.Name())
 
 		db.metrics.WriteTxnTableAcquisition(
@@ -217,7 +222,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 
 	txn := &txn{
 		db:             db,
-		rootReadTxn:    rootReadTxn,
+		root:           root,
 		modifiedTables: tableEntries,
 		writeTxns:      make(map[tableIndex]indexTxn),
 		smus:           smus,
@@ -278,6 +283,7 @@ var ciliumPackagePrefix = func() string {
 func callerPackage() string {
 	var callerPkg string
 	pc, _, _, ok := runtime.Caller(2)
+
 	if ok {
 		f := runtime.FuncForPC(pc)
 		if f != nil {
@@ -288,7 +294,9 @@ func callerPackage() string {
 			callerPkg = "unknown"
 		}
 	} else {
+
 		callerPkg = "unknown"
 	}
+
 	return callerPkg
 }
