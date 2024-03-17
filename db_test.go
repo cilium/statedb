@@ -424,7 +424,7 @@ func TestDB_All(t *testing.T) {
 
 	select {
 	case <-watch:
-		t.Fatalf("expected All() watch channel to not close before changes")
+		t.Fatalf("expected All() watch channel to not close before delete")
 	default:
 	}
 
@@ -434,10 +434,15 @@ func TestDB_All(t *testing.T) {
 		txn.Commit()
 	}
 
+	// Prior read transaction not affected by delete.
+	iter, _ = table.All(txn)
+	objs = Collect(iter)
+	require.Len(t, objs, 3)
+
 	select {
 	case <-watch:
 	case <-time.After(time.Second):
-		t.Fatalf("expceted All() watch channel to close after changes")
+		t.Fatalf("expected All() watch channel to close after delete")
 	}
 }
 
