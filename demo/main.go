@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/reconciler"
 	"github.com/cilium/statedb/reflector"
+	"github.com/spf13/cobra"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -56,8 +57,23 @@ var Hive = hive.New(
 	),
 )
 
+var cmd = &cobra.Command{
+	Use: "example",
+	RunE: func(_ *cobra.Command, args []string) error {
+		return Hive.Run()
+	},
+}
+
 func main() {
-	Hive.Run()
+	// Register all configuration flags in the hive to the command
+	Hive.RegisterFlags(cmd.Flags())
+
+	// Add the "hive" sub-command for inspecting the hive
+	cmd.AddCommand(Hive.Command())
+
+	// And finally execute the command to parse the command-line flags and
+	// run the hive
+	cmd.Execute()
 }
 
 func podReflectorConfig(client *kubernetes.Clientset, pods statedb.RWTable[*Pod]) reflector.KubernetesConfig[*Pod] {
