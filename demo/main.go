@@ -86,7 +86,7 @@ func podReflectorConfig(client *kubernetes.Clientset, pods statedb.RWTable[*Pod]
 		Transform: func(obj any) (*Pod, bool) {
 			pod, ok := obj.(*v1.Pod)
 			if ok {
-				return &Pod{Pod: pod, reconciliationStatus: reconciler.StatusPending()}, true
+				return fromV1Pod(pod), true
 			}
 			return nil, false
 		},

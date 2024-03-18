@@ -19,9 +19,9 @@ func registerPodHTTPHandler(mux *http.ServeMux, db *statedb.DB, pods statedb.Tab
 		txn := db.ReadTxn()
 		iter, _ := pods.Get(txn, PodPhaseIndex.Query(v1.PodRunning))
 		t := tabwriter.NewWriter(w, 10, 4, 2, ' ', 0)
-		fmt.Fprintf(t, "NAME\tSTARTED\tPOD IP\tSTATUS\n")
+		fmt.Fprintf(t, "NAME\tSTARTED\tSTATUS\n")
 		for pod, _, ok := iter.Next(); ok; pod, _, ok = iter.Next() {
-			fmt.Fprintf(t, "%s/%s\t%s ago\t%s\t%s\n", pod.Namespace, pod.Name, time.Since(pod.Status.StartTime.Time), pod.Status.PodIP, pod.ReconciliationStatus())
+			fmt.Fprintf(t, "%s/%s\t%s ago\t\t%s\n", pod.Namespace, pod.Name, time.Since(pod.StartTime), pod.ReconciliationStatus())
 		}
 		t.Flush()
 	})

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/cilium/statedb"
@@ -9,9 +11,21 @@ import (
 )
 
 type Pod struct {
-	*v1.Pod
+	Name, Namespace string
+	Phase           v1.PodPhase
+	StartTime       time.Time
 
 	reconciliationStatus reconciler.Status
+}
+
+func fromV1Pod(p *v1.Pod) *Pod {
+	return &Pod{
+		Name:                 p.Name,
+		Namespace:            p.Namespace,
+		Phase:                p.Status.Phase,
+		StartTime:            p.Status.StartTime.Time,
+		reconciliationStatus: reconciler.StatusPending(),
+	}
 }
 
 func (p *Pod) ReconciliationStatus() reconciler.Status {
@@ -19,7 +33,9 @@ func (p *Pod) ReconciliationStatus() reconciler.Status {
 }
 
 func (p *Pod) WithReconciliationStatus(s reconciler.Status) *Pod {
-	return &Pod{Pod: p.Pod, reconciliationStatus: s}
+	p2 := *p
+	p2.reconciliationStatus = s
+	return &p2
 }
 
 const PodTableName = "pods"
@@ -36,7 +52,7 @@ var (
 	PodPhaseIndex = statedb.Index[*Pod, v1.PodPhase]{
 		Name: "phase",
 		FromObject: func(pod *Pod) index.KeySet {
-			return index.NewKeySet(index.String(string(pod.Status.Phase)))
+			return index.NewKeySet(index.String(string(pod.Phase)))
 		},
 		FromKey: func(key v1.PodPhase) index.Key {
 			return index.String(string(key))

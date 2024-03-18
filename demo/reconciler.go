@@ -26,7 +26,7 @@ func (o *podOps) Prune(context.Context, statedb.ReadTxn, statedb.Iterator[*Pod])
 
 // Update implements reconciler.Operations.
 func (o *podOps) Update(ctx context.Context, txn statedb.ReadTxn, pod *Pod, changed *bool) error {
-	o.log.Info("Pod updated", "name", pod.Namespace+"/"+pod.Name, "phase", pod.Status.Phase)
+	o.log.Info("Pod updated", "name", pod.Namespace+"/"+pod.Name, "phase", pod.Phase)
 	return nil
 }
 
