@@ -19,11 +19,15 @@ type Pod struct {
 }
 
 func fromV1Pod(p *v1.Pod) *Pod {
+	var startTime time.Time
+	if p.Status.StartTime != nil {
+		startTime = p.Status.StartTime.Time
+	}
 	return &Pod{
 		Name:                 p.Name,
 		Namespace:            p.Namespace,
 		Phase:                p.Status.Phase,
-		StartTime:            p.Status.StartTime.Time,
+		StartTime:            startTime,
 		reconciliationStatus: reconciler.StatusPending(),
 	}
 }
