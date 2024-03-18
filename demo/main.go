@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log/slog"
+	"net/http"
 	"path"
 	"time"
 
@@ -21,20 +23,37 @@ var Hive = hive.New(
 	statedb.Cell,
 	cell.SimpleHealthCell,
 
+	// Kubernetes client
+	cell.Provide(
+		newClientset,
+	),
+
+	// HTTP server
+	cell.Provide(
+		http.NewServeMux,
+	),
+	cell.Invoke(
+		registerHTTPServer,
+		registerStateDBHTTPHandler,
+	),
+
+	// Pod tables and the reconciler
 	cell.Provide(
 		NewPodTable,
-		newClientset,
+		statedb.RWTable[*Pod].ToTable,
 		podReflectorConfig,
 		podReconcilerConfig,
 	),
+
+	reflector.KubernetesCell[*Pod](),
 
 	cell.Invoke(
 		statedb.RegisterTable[*Pod],
 
 		reconciler.Register[*Pod],
-	),
 
-	reflector.KubernetesCell[*Pod](),
+		registerPodHTTPHandler,
+	),
 )
 
 func main() {
@@ -65,4 +84,19 @@ func newClientset() (*kubernetes.Clientset, error) {
 	}
 
 	return kubernetes.NewForConfig(cfg)
+}
+
+func registerHTTPServer(log *slog.Logger, mux *http.ServeMux, lc cell.Lifecycle) {
+	s := &http.Server{Addr: ":8080", Handler: mux}
+	lc.Append(cell.Hook{
+		OnStart: func(cell.HookContext) error {
+			log.Info("Serving HTTP", "addr", s.Addr)
+			go s.ListenAndServe()
+			return nil
+		},
+		OnStop: func(ctx cell.HookContext) error {
+			return s.Shutdown(ctx)
+		},
+	})
+
 }
