@@ -22,11 +22,12 @@ import (
 
 type txn struct {
 	db             *DB
+	handle         string
 	root           dbRoot
 	modifiedTables []*tableEntry            // table entries being modified
 	smus           internal.SortableMutexes // the (sorted) table locks
 	acquiredAt     time.Time                // the time at which the transaction acquired the locks
-	packageName    string                   // name of the package that created the transaction
+	tableNames     []string
 }
 
 type tableIndex struct {
@@ -61,7 +62,7 @@ func (txn *txn) getTxn() *txn {
 // Abort/Commit which would cause the table to be locked forever.
 func txnFinalizer(txn *txn) {
 	if txn.db != nil {
-		panic(fmt.Sprintf("WriteTxn acquired by package %q was never Abort()'d or Commit()'d", txn.packageName))
+		panic(fmt.Sprintf("WriteTxn from handle %s against tables %v was never Abort()'d or Commit()'d", txn.handle, txn.tableNames))
 	}
 }
 
@@ -375,7 +376,8 @@ func (txn *txn) Abort() {
 
 	txn.smus.Unlock()
 	txn.db.metrics.WriteTxnDuration(
-		txn.packageName,
+		txn.handle,
+		txn.tableNames,
 		time.Since(txn.acquiredAt))
 
 	*txn = zeroTxn
@@ -467,7 +469,8 @@ func (txn *txn) Commit() {
 	}
 
 	txn.db.metrics.WriteTxnDuration(
-		txn.packageName,
+		txn.handle,
+		txn.tableNames,
 		time.Since(txn.acquiredAt))
 
 	// Zero out the transaction to make it inert.

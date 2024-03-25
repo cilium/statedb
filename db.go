@@ -7,10 +7,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"reflect"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,6 +91,7 @@ type DB struct {
 	gcExited            chan struct{}
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
+	defaultHandle       Handle
 }
 
 type dbRoot []tableEntry
@@ -102,6 +101,7 @@ func NewDB(tables []TableMeta, metrics Metrics) (*DB, error) {
 		metrics:             metrics,
 		gcRateLimitInterval: defaultGCRateLimitInterval,
 	}
+	db.defaultHandle = Handle{db, "DB"}
 	root := make(dbRoot, 0, len(tables))
 	for _, t := range tables {
 		if err := db.registerTable(t, &root); err != nil {
@@ -158,12 +158,9 @@ func (db *DB) registerTable(table TableMeta, root *dbRoot) error {
 // ReadTxn constructs a new read transaction for performing reads against
 // a snapshot of the database.
 //
-// ReadTxn is not thread-safe!
+// The returned ReadTxn is not thread-safe.
 func (db *DB) ReadTxn() ReadTxn {
-	return &txn{
-		db:   db,
-		root: *db.root.Load(),
-	}
+	return db.defaultHandle.ReadTxn()
 }
 
 // WriteTxn constructs a new write transaction against the given set of tables.
@@ -171,50 +168,9 @@ func (db *DB) ReadTxn() ReadTxn {
 // The modifications performed in the write transaction are not visible outside
 // it until Commit() is called. To discard the changes call Abort().
 //
-// WriteTxn is not thread-safe!
+// The returned WriteTxn is not thread-safe.
 func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
-	callerPkg := callerPackage()
-
-	allTables := append(tables, table)
-	smus := internal.SortableMutexes{}
-	for _, table := range allTables {
-		smus = append(smus, table.sortableMutex())
-	}
-	lockAt := time.Now()
-	smus.Lock()
-	acquiredAt := time.Now()
-
-	root := *db.root.Load()
-	tableEntries := make([]*tableEntry, len(root))
-	var tableNames []string
-	for _, table := range allTables {
-		tableEntry := root[table.tablePos()]
-		tableEntry.indexes = slices.Clone(tableEntry.indexes)
-		tableEntries[table.tablePos()] = &tableEntry
-		tableNames = append(tableNames, table.Name())
-
-		db.metrics.WriteTxnTableAcquisition(
-			table.Name(),
-			table.sortableMutex().AcquireDuration(),
-		)
-	}
-
-	db.metrics.WriteTxnTotalAcquisition(
-		callerPkg,
-		tableNames,
-		acquiredAt.Sub(lockAt),
-	)
-
-	txn := &txn{
-		db:             db,
-		root:           root,
-		modifiedTables: tableEntries,
-		smus:           smus,
-		acquiredAt:     acquiredAt,
-		packageName:    callerPkg,
-	}
-	runtime.SetFinalizer(txn, txnFinalizer)
-	return txn
+	return db.defaultHandle.WriteTxn(table, tables...)
 }
 
 func (db *DB) Start(cell.HookContext) error {
@@ -255,32 +211,73 @@ func (db *DB) setGCRateLimitInterval(interval time.Duration) {
 	db.gcRateLimitInterval = interval
 }
 
-var ciliumPackagePrefix = func() string {
-	sentinel := func() {}
-	name := runtime.FuncForPC(reflect.ValueOf(sentinel).Pointer()).Name()
-	if idx := strings.LastIndex(name, "/"); idx >= 0 {
-		return name[:idx+1]
+// NewHandle returns a named handle to the DB. The handle has the same ReadTxn and
+// WriteTxn methods as DB, but annotated with the given name for more accurate
+// cost accounting in e.g. metrics.
+func (db *DB) NewHandle(name string) Handle {
+	return Handle{db, name}
+}
+
+// Handle is a named handle to the database for constructing read or write
+// transactions.
+type Handle struct {
+	db   *DB
+	name string
+}
+
+func (h Handle) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
+	db := h.db
+	allTables := append(tables, table)
+	smus := internal.SortableMutexes{}
+	for _, table := range allTables {
+		smus = append(smus, table.sortableMutex())
 	}
-	return ""
-}()
+	lockAt := time.Now()
+	smus.Lock()
+	acquiredAt := time.Now()
 
-func callerPackage() string {
-	var callerPkg string
-	pc, _, _, ok := runtime.Caller(2)
+	root := *db.root.Load()
+	tableEntries := make([]*tableEntry, len(root))
+	var tableNames []string
+	for _, table := range allTables {
+		tableEntry := root[table.tablePos()]
+		tableEntry.indexes = slices.Clone(tableEntry.indexes)
+		tableEntries[table.tablePos()] = &tableEntry
+		tableNames = append(tableNames, table.Name())
 
-	if ok {
-		f := runtime.FuncForPC(pc)
-		if f != nil {
-			callerPkg = f.Name()
-			callerPkg, _ = strings.CutPrefix(callerPkg, ciliumPackagePrefix)
-			callerPkg = strings.SplitN(callerPkg, ".", 2)[0]
-		} else {
-			callerPkg = "unknown"
-		}
-	} else {
-
-		callerPkg = "unknown"
+		db.metrics.WriteTxnTableAcquisition(
+			h.name,
+			table.Name(),
+			table.sortableMutex().AcquireDuration(),
+		)
 	}
 
-	return callerPkg
+	db.metrics.WriteTxnTotalAcquisition(
+		h.name,
+		tableNames,
+		acquiredAt.Sub(lockAt),
+	)
+
+	txn := &txn{
+		db:             db,
+		root:           root,
+		modifiedTables: tableEntries,
+		smus:           smus,
+		acquiredAt:     acquiredAt,
+		tableNames:     tableNames,
+		handle:         h.name,
+	}
+	runtime.SetFinalizer(txn, txnFinalizer)
+	return txn
+}
+
+// ReadTxn constructs a new read transaction for performing reads against
+// a snapshot of the database.
+//
+// The returned ReadTxn is not thread-safe.
+func (h Handle) ReadTxn() ReadTxn {
+	return &txn{
+		db:   h.db,
+		root: *h.db.root.Load(),
+	}
 }
