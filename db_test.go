@@ -69,6 +69,12 @@ var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 }))
 
 func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject], *ExpVarMetrics) {
+	metrics := NewExpVarMetrics(false)
+	db, table := newTestDBWithMetrics(t, metrics, secondaryIndexers...)
+	return db, table, metrics
+}
+
+func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject]) {
 	var (
 		db *DB
 	)
@@ -78,8 +84,6 @@ func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWT
 		secondaryIndexers...,
 	)
 	require.NoError(t, err, "NewTable[testObject]")
-
-	metrics := NewExpVarMetrics(false)
 
 	h := hive.NewWithOptions(
 		hive.Options{Logger: logger},
@@ -100,7 +104,7 @@ func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWT
 	t.Cleanup(func() {
 		assert.NoError(t, h.Stop(context.TODO()))
 	})
-	return db, table, metrics
+	return db, table
 }
 
 func TestDB_Insert_SamePointer(t *testing.T) {
@@ -136,7 +140,7 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 func TestDB_LowerBound_ByRevision(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
 
 	{
 		txn := db.WriteTxn(table)

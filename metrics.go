@@ -134,3 +134,43 @@ func (m *ExpVarMetrics) WriteTxnTableAcquisition(name string, acquire time.Durat
 }
 
 var _ Metrics = &ExpVarMetrics{}
+
+type NopMetrics struct{}
+
+// DeleteTrackerCount implements Metrics.
+func (*NopMetrics) DeleteTrackerCount(tableName string, numTrackers int) {
+}
+
+// GraveyardCleaningDuration implements Metrics.
+func (*NopMetrics) GraveyardCleaningDuration(tableName string, duration time.Duration) {
+}
+
+// GraveyardLowWatermark implements Metrics.
+func (*NopMetrics) GraveyardLowWatermark(tableName string, lowWatermark uint64) {
+}
+
+// GraveyardObjectCount implements Metrics.
+func (*NopMetrics) GraveyardObjectCount(tableName string, numDeletedObjects int) {
+}
+
+// ObjectCount implements Metrics.
+func (*NopMetrics) ObjectCount(tableName string, numObjects int) {
+}
+
+// Revision implements Metrics.
+func (*NopMetrics) Revision(tableName string, revision uint64) {
+}
+
+// WriteTxnDuration implements Metrics.
+func (*NopMetrics) WriteTxnDuration(goPackage string, s []string, acquire time.Duration) {
+}
+
+// WriteTxnTableAcquisition implements Metrics.
+func (*NopMetrics) WriteTxnTableAcquisition(tableName string, acquire time.Duration) {
+}
+
+// WriteTxnTotalAcquisition implements Metrics.
+func (*NopMetrics) WriteTxnTotalAcquisition(goPackage string, tables []string, acquire time.Duration) {
+}
+
+var _ Metrics = &NopMetrics{}
