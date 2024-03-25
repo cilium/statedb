@@ -607,7 +607,8 @@ func TestDB_GetFirstLast(t *testing.T) {
 func TestDB_CommitAbort(t *testing.T) {
 	t.Parallel()
 
-	db, table, metrics := newTestDB(t, tagsIndex)
+	dbX, table, metrics := newTestDB(t, tagsIndex)
+	db := dbX.NewHandle("test-handle")
 
 	txn := db.WriteTxn(table)
 	_, _, err := table.Insert(txn, testObject{ID: 123, Tags: nil})
@@ -616,8 +617,8 @@ func TestDB_CommitAbort(t *testing.T) {
 
 	assert.EqualValues(t, table.Revision(db.ReadTxn()), expvarInt(metrics.RevisionVar.Get("test")), "Revision")
 	assert.EqualValues(t, 1, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
-	assert.Greater(t, expvarFloat(metrics.WriteTxnAcquisitionVar.Get("statedb")), 0.0, "WriteTxnAcquisition")
-	assert.Greater(t, expvarFloat(metrics.WriteTxnDurationVar.Get("statedb")), 0.0, "WriteTxnDuration")
+	assert.Greater(t, expvarFloat(metrics.WriteTxnAcquisitionVar.Get("test-handle/test")), 0.0, "WriteTxnAcquisition")
+	assert.Greater(t, expvarFloat(metrics.WriteTxnDurationVar.Get("test-handle/test")), 0.0, "WriteTxnDuration")
 
 	obj, rev, ok := table.First(db.ReadTxn(), idIndex.Query(123))
 	require.True(t, ok, "expected First(1) to return result")
@@ -777,15 +778,6 @@ func TestWriteJSON(t *testing.T) {
 		require.NoError(t, err)
 	}
 	txn.Commit()
-}
-
-func Test_callerPackage(t *testing.T) {
-	t.Parallel()
-
-	pkg := func() string {
-		return callerPackage()
-	}()
-	require.Equal(t, "statedb", pkg)
 }
 
 func Test_nonUniqueKey(t *testing.T) {

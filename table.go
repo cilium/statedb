@@ -59,10 +59,11 @@ func NewTable[Obj any](
 
 	indexPos := SecondaryIndexStartPos
 	for _, indexer := range secondaryIndexers {
+		name := indexer.indexName()
 		anyIndexer := toAnyIndexer(indexer)
 		anyIndexer.pos = indexPos
-		table.secondaryAnyIndexers[indexer.indexName()] = anyIndexer
-		table.indexPositions[indexer.indexName()] = indexPos
+		table.secondaryAnyIndexers[name] = anyIndexer
+		table.indexPositions[name] = indexPos
 		indexPos++
 	}
 
