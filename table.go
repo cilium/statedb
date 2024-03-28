@@ -6,6 +6,7 @@ package statedb
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
@@ -165,6 +166,27 @@ func (t *genTable[Obj]) Name() string {
 
 func (t *genTable[Obj]) ToTable() Table[Obj] {
 	return t
+}
+
+func (t *genTable[Obj]) Initialized(txn ReadTxn) bool {
+	return txn.getTxn().root[t.pos].initializers == 0
+}
+
+func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn) func(WriteTxn) {
+	table := txn.getTxn().modifiedTables[t.pos]
+	if table != nil {
+		table.initializers++
+		return func(txn WriteTxn) {
+			var once sync.Once
+			once.Do(func() {
+				if table := txn.getTxn().modifiedTables[t.pos]; table != nil {
+					table.initializers--
+				}
+			})
+		}
+	} else {
+		return func(WriteTxn) {}
+	}
 }
 
 func (t *genTable[Obj]) Revision(txn ReadTxn) Revision {

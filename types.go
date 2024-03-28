@@ -31,6 +31,10 @@ type Table[Obj any] interface {
 	// NumObjects returns the number of objects stored in the table.
 	NumObjects(ReadTxn) int
 
+	// Initialized returns true if the registered table initializers have
+	// completed.
+	Initialized(ReadTxn) bool
+
 	// Revision of the table. Constant for a read transaction, but
 	// increments in a write transaction on each Insert and Delete.
 	Revision(ReadTxn) Revision
@@ -78,6 +82,12 @@ type RWTable[Obj any] interface {
 	// RWTable[Obj] is a superset of Table[Obj]. Queries made with a
 	// write transaction return the fresh uncommitted modifications if any.
 	Table[Obj]
+
+	// RegisterInitializer adds an initializers to the table. Returns
+	// a function to mark the initializer done. Once all initializers are
+	// done, Table[*].Initialized() will return true.
+	// This should only be used before the application has started.
+	RegisterInitializer(WriteTxn) func(WriteTxn)
 
 	// ToTable returns the Table[Obj] interface. Useful with cell.Provide
 	// to avoid the anonymous function:
@@ -335,6 +345,7 @@ type tableEntry struct {
 	indexes        []indexEntry
 	deleteTrackers *iradix.Tree[deleteTracker]
 	revision       uint64
+	initializers   int // Number of table initializers pending
 }
 
 func (t *tableEntry) numObjects() int {
