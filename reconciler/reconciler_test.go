@@ -194,6 +194,15 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opPrune(0))
 			h.expectHealthLevel(cell.StatusOK)
 
+			// Register a table initializer to prohibit pruning.
+			markInitialized := h.registerInitializer()
+
+			// With table not initialized, we should not see the prune.
+			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+			h.triggerFullReconciliation()
+			h.expectOp(opUpdate(ID_1))
+			markInitialized()
+
 			// Add few objects and wait until incremental reconciliation is done.
 			t.Log("Insert test objects")
 			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
@@ -454,6 +463,17 @@ const (
 	Faulty    = true
 	NonFaulty = false
 )
+
+func (h testHelper) registerInitializer() func() {
+	wtxn := h.db.WriteTxn(h.tbl)
+	done := h.tbl.RegisterInitializer(wtxn)
+	wtxn.Commit()
+	return func() {
+		wtxn := h.db.WriteTxn(h.tbl)
+		done(wtxn)
+		wtxn.Commit()
+	}
+}
 
 func (h testHelper) insert(id uint64, faulty bool, status reconciler.Status) {
 	wtxn := h.db.WriteTxn(h.tbl)

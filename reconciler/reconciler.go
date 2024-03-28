@@ -152,7 +152,7 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 			errs = append(errs, err)
 		}
 
-		if fullReconciliation {
+		if fullReconciliation && r.Table.Initialized(txn) {
 			// Time to perform a full reconciliation. An incremental reconciliation
 			// has been performed prior to this, so the assumption is that everything
 			// is up to date (provided incremental reconciliation did not fail). We
