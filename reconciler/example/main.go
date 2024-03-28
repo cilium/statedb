@@ -131,7 +131,7 @@ var Hive = hive.New(
 	),
 )
 
-func NewReconcilerConfig(ops reconciler.Operations[*Memo], m reconciler.Metrics) reconciler.Config[*Memo] {
+func NewReconcilerConfig(ops reconciler.Operations[*Memo], m *reconciler.ExpVarMetrics) reconciler.Config[*Memo] {
 	return reconciler.Config[*Memo]{
 		Metrics:                   m,
 		FullReconcilationInterval: 10 * time.Second,

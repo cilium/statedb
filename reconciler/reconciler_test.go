@@ -56,7 +56,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 		fakeHealth *cell.SimpleHealth
 	)
 
-	expVarMetrics := reconciler.NewExpVarMetrics(false)
+	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
 
 	testObjects, err := statedb.NewTable[*testObject]("test-objects", idIndex, statusIndex)
 	require.NoError(t, err, "NewTable")

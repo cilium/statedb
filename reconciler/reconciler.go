@@ -31,7 +31,7 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 	}
 
 	if p.Config.Metrics == nil {
-		p.Config.Metrics = NewExpVarMetrics(false)
+		p.Config.Metrics = NewUnpublishedExpVarMetrics()
 	}
 
 	idx := p.Table.PrimaryIndexer()

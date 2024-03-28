@@ -70,7 +70,15 @@ func (m *ExpVarMetrics) IncrementalReconciliationErrors(moduleID cell.FullModule
 
 var _ Metrics = &ExpVarMetrics{}
 
-func NewExpVarMetrics(publish bool) *ExpVarMetrics {
+func NewExpVarMetrics() *ExpVarMetrics {
+	return newExpVarMetrics(true)
+}
+
+func NewUnpublishedExpVarMetrics() *ExpVarMetrics {
+	return newExpVarMetrics(false)
+}
+
+func newExpVarMetrics(publish bool) *ExpVarMetrics {
 	newMap := func(name string) *expvar.Map {
 		if publish {
 			return expvar.NewMap(name)
