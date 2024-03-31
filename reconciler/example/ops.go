@@ -11,8 +11,6 @@ import (
 	"os"
 	"path"
 
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/reconciler"
@@ -46,19 +44,19 @@ func (ops *MemoOps) Delete(ctx context.Context, txn statedb.ReadTxn, memo *Memo)
 
 // Prune unexpected memos.
 func (ops *MemoOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*Memo]) error {
-	expected := sets.New[string]()
+	expected := map[string]bool{}
 	for memo, _, ok := iter.Next(); ok; memo, _, ok = iter.Next() {
-		expected.Insert(memo.Name)
+		expected[memo.Name] = true
 	}
 
 	// Find unexpected files
-	unexpected := sets.New[string]()
+	unexpected := map[string]bool{}
 	if entries, err := os.ReadDir(ops.directory); err != nil {
 		return err
 	} else {
 		for _, entry := range entries {
-			if !expected.Has(entry.Name()) {
-				unexpected.Insert(entry.Name())
+			if !expected[entry.Name()] {
+				unexpected[entry.Name()] = true
 			}
 		}
 	}

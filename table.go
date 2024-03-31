@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/util/sets"
-
 	"github.com/cilium/statedb/internal"
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
 
@@ -74,13 +72,13 @@ func NewTable[Obj any](
 	}
 
 	// Validate that indexes have unique ids.
-	indexNames := sets.New[string]()
-	indexNames.Insert(primaryIndexer.indexName())
+	indexNames := map[string]bool{}
+	indexNames[primaryIndexer.indexName()] = true
 	for _, indexer := range secondaryIndexers {
-		if indexNames.Has(indexer.indexName()) {
+		if indexNames[indexer.indexName()] {
 			return nil, tableError(tableName, fmt.Errorf("index %q: %w", indexer.indexName(), ErrDuplicateIndex))
 		}
-		indexNames.Insert(indexer.indexName())
+		indexNames[indexer.indexName()] = true
 	}
 	for name := range indexNames {
 		if strings.HasPrefix(name, reservedIndexPrefix) {

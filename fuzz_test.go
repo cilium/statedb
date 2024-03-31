@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
@@ -117,33 +116,54 @@ func (a *realActionLog) validate(db *statedb.DB, t *testing.T) {
 	defer a.Unlock()
 
 	// Collapse the log down to objects that are alive at the end.
-	alive := map[statedb.Table[fuzzObj]]sets.Set[uint64]{}
+	alive := map[statedb.Table[fuzzObj]]map[uint64]bool{}
 	for _, e := range a.log {
 		aliveThis, ok := alive[e.table]
 		if !ok {
-			aliveThis = sets.New[uint64]()
+			aliveThis = map[uint64]bool{}
 			alive[e.table] = aliveThis
 		}
 		switch e.act {
 		case actInsert:
-			aliveThis.Insert(e.id)
+			aliveThis[e.id] = true
 		case actDelete:
-			aliveThis.Delete(e.id)
+			delete(aliveThis, e.id)
 		case actDeleteAll:
-			aliveThis.Clear()
+			clear(aliveThis)
 		}
 	}
 
 	for table, expected := range alive {
 		txn := db.ReadTxn()
 		iter, _ := table.All(txn)
-		actual := sets.New[uint64]()
+		actual := map[uint64]bool{}
 		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-			actual.Insert(obj.id)
+			actual[obj.id] = true
 		}
-		require.True(t, expected.Equal(actual), "validate failed, mismatching ids: %v",
-			actual.SymmetricDifference(expected))
+		require.Equal(t, expected, actual, "validate failed, mismatching ids: %v",
+			setSymmetricDifference(actual, expected))
 	}
+}
+
+func setSymmetricDifference[T comparable, M map[T]bool](s1, s2 M) M {
+	counts := make(map[T]int, len(s1)+len(s2))
+	for k1, v1 := range s1 {
+		if v1 {
+			counts[k1] = 1
+		}
+	}
+	for k2, v2 := range s2 {
+		if v2 {
+			counts[k2]++
+		}
+	}
+	result := M{}
+	for k, count := range counts {
+		if count == 1 {
+			result[k] = true
+		}
+	}
+	return result
 }
 
 type nopActionLog struct {
