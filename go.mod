@@ -12,7 +12,6 @@ require (
 	go.uber.org/goleak v1.3.0
 	golang.org/x/exp v0.0.0-20240119083558-1b970713d09a
 	golang.org/x/time v0.5.0
-	k8s.io/apimachinery v0.29.1
 )
 
 require (

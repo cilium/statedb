@@ -37,7 +37,7 @@ func TestFilter(t *testing.T) {
 	txn.Commit()
 
 	iter, _ := table.All(db.ReadTxn())
-	filtered := CollectSet(
+	filtered := Collect(
 		Map(
 			Filter(
 				iter,
@@ -51,6 +51,5 @@ func TestFilter(t *testing.T) {
 		),
 	)
 	assert.Len(t, filtered, 2)
-	assert.True(t, filtered.Has(2))
-	assert.True(t, filtered.Has(4))
+	assert.Equal(t, filtered, []int{2, 4})
 }
