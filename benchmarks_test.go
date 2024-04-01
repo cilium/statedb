@@ -10,9 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alecthomas/assert/v2"
 	iradix "github.com/hashicorp/go-immutable-radix/v2"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
@@ -187,13 +186,13 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 		txn := db.WriteTxn(table)
 		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
 			_, _, err := table.Insert(txn, testObject{ID: id, Tags: nil})
-			require.NoError(b, err)
+			assert.NoError(b, err)
 		}
 		txn.Commit()
 	}
 	b.StopTimer()
 
-	require.EqualValues(b, table.NumObjects(db.ReadTxn()), numObjectsToInsert)
+	assert.Equal(b, table.NumObjects(db.ReadTxn()), numObjectsToInsert)
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
@@ -205,7 +204,7 @@ func BenchmarkDB_Baseline_SingleRadix_Insert(b *testing.B) {
 			txn.Insert(index.Uint64(j), j)
 		}
 		tree = txn.Commit()
-		require.Equal(b, tree.Len(), numObjectsToInsert)
+		assert.Equal(b, tree.Len(), numObjectsToInsert)
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -219,7 +218,7 @@ func BenchmarkDB_Baseline_SingleRadix_TrackMutate_Insert(b *testing.B) {
 			txn.Insert(index.Uint64(j), j)
 		}
 		tree = txn.Commit() // Commit and notify
-		require.Equal(b, tree.Len(), numObjectsToInsert)
+		assert.Equal(b, tree.Len(), numObjectsToInsert)
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -298,7 +297,7 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 		// Create objects
 		txn := db.WriteTxn(table)
 		dt, err := table.DeleteTracker(txn, "test")
-		require.NoError(b, err)
+		assert.NoError(b, err)
 		defer dt.Close()
 		for i := 0; i < numObjectsToInsert; i++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
@@ -320,7 +319,7 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 			func(obj testObject, deleted bool, _ Revision) {
 				nDeleted++
 			})
-		require.EqualValues(b, nDeleted, numObjectsToInsert)
+		assert.Equal(b, nDeleted, numObjectsToInsert)
 		dt.Close()
 	}
 	b.StopTimer()
@@ -336,7 +335,7 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 	for i := 0; i < numObjectsToInsert; i++ {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}
 	wtxn.Commit()
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
@@ -363,7 +362,7 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	for i := 0; i < numObjectsToInsert; i++ {
 		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}
 	wtxn.Commit()
 	b.ResetTimer()
@@ -388,7 +387,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 	wtxn := db.WriteTxn(table)
 	for i := 0; i < numObjectsToInsert; i++ {
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}
 	wtxn.Commit()
 	b.ResetTimer()
@@ -403,7 +402,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 			}
 			i++
 		}
-		require.EqualValues(b, i, numObjectsToInsert)
+		assert.Equal(b, i, numObjectsToInsert)
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -413,7 +412,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	wtxn := db.WriteTxn(table)
 	for i := 0; i < numObjectsToInsert; i++ {
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: []string{"foo"}})
-		require.NoError(b, err)
+		assert.NoError(b, err)
 	}
 	wtxn.Commit()
 	b.ResetTimer()
@@ -428,7 +427,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 			}
 			i++
 		}
-		require.EqualValues(b, i, numObjectsToInsert)
+		assert.Equal(b, i, numObjectsToInsert)
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -467,7 +466,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		}),
 	)
 
-	require.NoError(b, h.Start(context.TODO()))
+	assert.NoError(b, h.Start(context.TODO()))
 	b.Cleanup(func() {
 		assert.NoError(b, h.Stop(context.TODO()))
 	})

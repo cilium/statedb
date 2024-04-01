@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
+	"github.com/alecthomas/assert/v2"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
@@ -60,9 +60,9 @@ var _ cell.Health = &nopHealth{}
 func TestDerive(t *testing.T) {
 	var db *DB
 	inTable, err := NewTable[testObject]("test", idIndex)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 	outTable, err := NewTable[derived]("derived", derivedIdIndex)
-	require.NoError(t, err)
+	assert.NoError(t, err)
 
 	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
 		t.Logf("transform(%v, %v)", obj, deleted)
@@ -100,7 +100,7 @@ func TestDerive(t *testing.T) {
 			cell.Invoke(Derive[testObject, derived]("testObject-to-derived", transform)),
 		),
 	)
-	require.NoError(t, h.Start(context.TODO()), "Start")
+	assert.NoError(t, h.Start(context.TODO()), "Start")
 
 	getDerived := func() []derived {
 		txn := db.ReadTxn()
@@ -118,7 +118,7 @@ func TestDerive(t *testing.T) {
 	inTable.Insert(wtxn, testObject{ID: 3, Tags: []string{"skip"}})
 	wtxn.Commit()
 
-	require.Eventually(t,
+	assertEventually(t,
 		func() bool {
 			objs := getDerived()
 			return len(objs) == 2 && // 3 is skipped
@@ -134,7 +134,7 @@ func TestDerive(t *testing.T) {
 	inTable.Delete(wtxn, testObject{ID: 2})
 	wtxn.Commit()
 
-	require.Eventually(t,
+	assertEventually(t,
 		func() bool {
 			objs := getDerived()
 			return len(objs) == 2 && // 3 is skipped
@@ -154,7 +154,7 @@ func TestDerive(t *testing.T) {
 	inTable.Delete(wtxn, testObject{ID: 1})
 	wtxn.Commit()
 
-	require.Eventually(t,
+	assertEventually(t,
 		func() bool {
 			objs := getDerived()
 			return len(objs) == 1 &&
@@ -165,5 +165,5 @@ func TestDerive(t *testing.T) {
 		"expected 1 to be gone, and 2 mark deleted",
 	)
 
-	require.NoError(t, h.Stop(context.TODO()), "Stop")
+	assert.NoError(t, h.Stop(context.TODO()), "Stop")
 }

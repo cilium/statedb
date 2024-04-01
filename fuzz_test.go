@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/stretchr/testify/require"
+	"github.com/alecthomas/assert/v2"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	"github.com/cilium/statedb"
@@ -141,7 +141,7 @@ func (a *realActionLog) validate(db *statedb.DB, t *testing.T) {
 		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 			actual.Insert(obj.id)
 		}
-		require.True(t, expected.Equal(actual), "validate failed, mismatching ids: %v",
+		assert.True(t, expected.Equal(actual), "validate failed, mismatching ids: %v",
 			actual.SymmetricDifference(expected))
 	}
 }
