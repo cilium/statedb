@@ -76,7 +76,7 @@ func (it *mapIterator[In, Out]) Next() (out Out, revision Revision, ok bool) {
 	return
 }
 
-// Filter skips objects for which the supplied predicate returns true
+// Filter includes objects for which the supplied predicate returns true
 func Filter[Obj any, It Iterator[Obj]](iter It, pred func(Obj) bool) Iterator[Obj] {
 	return &filterIterator[Obj]{
 		iter: iter,
