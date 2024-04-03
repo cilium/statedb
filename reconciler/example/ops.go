@@ -44,19 +44,19 @@ func (ops *MemoOps) Delete(ctx context.Context, txn statedb.ReadTxn, memo *Memo)
 
 // Prune unexpected memos.
 func (ops *MemoOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*Memo]) error {
-	expected := map[string]bool{}
+	expected := map[string]struct{}{}
 	for memo, _, ok := iter.Next(); ok; memo, _, ok = iter.Next() {
-		expected[memo.Name] = true
+		expected[memo.Name] = struct{}{}
 	}
 
 	// Find unexpected files
-	unexpected := map[string]bool{}
+	unexpected := map[string]struct{}{}
 	if entries, err := os.ReadDir(ops.directory); err != nil {
 		return err
 	} else {
 		for _, entry := range entries {
-			if !expected[entry.Name()] {
-				unexpected[entry.Name()] = true
+			if _, ok := expected[entry.Name()]; !ok {
+				unexpected[entry.Name()] = struct{}{}
 			}
 		}
 	}

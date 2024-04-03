@@ -72,13 +72,13 @@ func NewTable[Obj any](
 	}
 
 	// Validate that indexes have unique ids.
-	indexNames := map[string]bool{}
-	indexNames[primaryIndexer.indexName()] = true
+	indexNames := map[string]struct{}{}
+	indexNames[primaryIndexer.indexName()] = struct{}{}
 	for _, indexer := range secondaryIndexers {
-		if indexNames[indexer.indexName()] {
+		if _, ok := indexNames[indexer.indexName()]; ok {
 			return nil, tableError(tableName, fmt.Errorf("index %q: %w", indexer.indexName(), ErrDuplicateIndex))
 		}
-		indexNames[indexer.indexName()] = true
+		indexNames[indexer.indexName()] = struct{}{}
 	}
 	for name := range indexNames {
 		if strings.HasPrefix(name, reservedIndexPrefix) {

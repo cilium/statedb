@@ -116,16 +116,16 @@ func (a *realActionLog) validate(db *statedb.DB, t *testing.T) {
 	defer a.Unlock()
 
 	// Collapse the log down to objects that are alive at the end.
-	alive := map[statedb.Table[fuzzObj]]map[uint64]bool{}
+	alive := map[statedb.Table[fuzzObj]]map[uint64]struct{}{}
 	for _, e := range a.log {
 		aliveThis, ok := alive[e.table]
 		if !ok {
-			aliveThis = map[uint64]bool{}
+			aliveThis = map[uint64]struct{}{}
 			alive[e.table] = aliveThis
 		}
 		switch e.act {
 		case actInsert:
-			aliveThis[e.id] = true
+			aliveThis[e.id] = struct{}{}
 		case actDelete:
 			delete(aliveThis, e.id)
 		case actDeleteAll:
@@ -136,31 +136,27 @@ func (a *realActionLog) validate(db *statedb.DB, t *testing.T) {
 	for table, expected := range alive {
 		txn := db.ReadTxn()
 		iter, _ := table.All(txn)
-		actual := map[uint64]bool{}
+		actual := map[uint64]struct{}{}
 		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-			actual[obj.id] = true
+			actual[obj.id] = struct{}{}
 		}
 		require.Equal(t, expected, actual, "validate failed, mismatching ids: %v",
 			setSymmetricDifference(actual, expected))
 	}
 }
 
-func setSymmetricDifference[T comparable, M map[T]bool](s1, s2 M) M {
+func setSymmetricDifference[T comparable, M map[T]struct{}](s1, s2 M) M {
 	counts := make(map[T]int, len(s1)+len(s2))
-	for k1, v1 := range s1 {
-		if v1 {
-			counts[k1] = 1
-		}
+	for k1 := range s1 {
+		counts[k1] = 1
 	}
-	for k2, v2 := range s2 {
-		if v2 {
-			counts[k2]++
-		}
+	for k2 := range s2 {
+		counts[k2]++
 	}
 	result := M{}
 	for k, count := range counts {
 		if count == 1 {
-			result[k] = true
+			result[k] = struct{}{}
 		}
 	}
 	return result
