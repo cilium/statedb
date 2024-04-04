@@ -34,6 +34,10 @@ type testObject struct {
 	Tags []string
 }
 
+func (t testObject) getID() uint64 {
+	return t.ID
+}
+
 func (t testObject) String() string {
 	return fmt.Sprintf("testObject{ID: %d, Tags: %v}", t.ID, t.Tags)
 }
@@ -198,7 +202,59 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 	require.EqualValues(t, 71, obj.ID)
 	_, _, ok = iter.Next()
 	require.False(t, ok)
+}
 
+func TestDB_Prefix(t *testing.T) {
+	t.Parallel()
+
+	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+
+	{
+		txn := db.WriteTxn(table)
+		table.Insert(txn, testObject{ID: 42, Tags: []string{"a", "b"}})
+		table.Insert(txn, testObject{ID: 82, Tags: []string{"abc"}})
+		table.Insert(txn, testObject{ID: 71, Tags: []string{"ab"}})
+		txn.Commit()
+	}
+
+	txn := db.ReadTxn()
+
+	iter, watch := table.Prefix(txn, tagsIndex.Query("ab"))
+	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82})
+
+	select {
+	case <-watch:
+		t.Fatalf("expected Prefix watch to not be closed before any changes")
+	default:
+	}
+
+	{
+		txn := db.WriteTxn(table)
+		table.Insert(txn, testObject{ID: 12, Tags: []string{"bc"}})
+		txn.Commit()
+	}
+
+	select {
+	case <-watch:
+		t.Fatalf("expected Prefix watch to not be closed before relevant changes")
+	default:
+	}
+
+	{
+		txn := db.WriteTxn(table)
+		table.Insert(txn, testObject{ID: 99, Tags: []string{"abcd"}})
+		txn.Commit()
+	}
+
+	select {
+	case <-watch:
+	case <-time.After(time.Second):
+		t.Fatalf("expected Prefix watch to close after relevant changes")
+	}
+
+	txn = db.ReadTxn()
+	iter, _ = table.Prefix(txn, tagsIndex.Query("ab"))
+	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82, 99})
 }
 
 func TestDB_DeleteTracker(t *testing.T) {

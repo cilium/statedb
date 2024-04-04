@@ -68,6 +68,9 @@ type Table[Obj any] interface {
 	// are not possible with a lower bound search.
 	LowerBound(ReadTxn, Query[Obj]) (iter Iterator[Obj], watch <-chan struct{})
 
+	// Prefix searches the table by key prefix.
+	Prefix(ReadTxn, Query[Obj]) (iter Iterator[Obj], watch <-chan struct{})
+
 	// DeleteTracker creates a new delete tracker for the table.
 	//
 	// It starts tracking deletions performed against the table from the
