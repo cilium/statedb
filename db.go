@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"runtime"
 	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -251,6 +252,9 @@ func (h Handle) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 			table.sortableMutex().AcquireDuration(),
 		)
 	}
+
+	// Sort the table names so they always appear ordered in metrics.
+	sort.Strings(tableNames)
 
 	db.metrics.WriteTxnTotalAcquisition(
 		h.name,
