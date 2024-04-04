@@ -294,6 +294,14 @@ func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-
 	return &iterator[Obj]{iter}, watch
 }
 
+func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
+	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
+	root := indexTxn.Root()
+	iter := root.Iterator()
+	watch := iter.SeekPrefixWatch(q.key)
+	return &iterator[Obj]{iter}, watch
+}
+
 func (t *genTable[Obj]) All(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, PrimaryIndexPos)
 	root := indexTxn.Root()

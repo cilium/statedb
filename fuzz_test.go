@@ -269,6 +269,12 @@ func lowerboundAction(ctx actionContext) {
 	ctx.log.log("%s: LowerBound(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
+func prefixAction(ctx actionContext) {
+	id := mkID()
+	iter, _ := ctx.table.Prefix(ctx.txn, idIndex.Query(id))
+	ctx.log.log("%s: Prefix(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
+}
+
 var actions = []action{
 	insertAction, insertAction, insertAction, insertAction, insertAction,
 	insertAction, insertAction, insertAction, insertAction, insertAction,
@@ -282,6 +288,7 @@ var actions = []action{
 	allAction, lowerboundAction,
 	getAction, getAction, getAction,
 	lastAction, lastAction,
+	prefixAction,
 }
 
 func randomAction() action {
