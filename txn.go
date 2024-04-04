@@ -30,11 +30,6 @@ type txn struct {
 	tableNames     []string
 }
 
-type tableIndex struct {
-	tablePos int
-	index    IndexName
-}
-
 // rooter is implemented by both iradix.Txn and iradix.Tree.
 type rooter interface {
 	Root() *iradix.Node[object]
