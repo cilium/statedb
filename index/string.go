@@ -6,7 +6,7 @@ package index
 import "fmt"
 
 func String(s string) Key {
-	return append([]byte(s), 0 /* termination */)
+	return []byte(s)
 }
 
 func Stringer[T fmt.Stringer](s T) Key {
