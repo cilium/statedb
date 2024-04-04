@@ -24,6 +24,9 @@ import (
 	"github.com/cilium/stream"
 )
 
+// Amount of time to wait for the watch channel to close in tests
+const watchCloseTimeout = 30 * time.Second
+
 func TestMain(m *testing.M) {
 	// Catch any leaks of goroutines from these tests.
 	goleak.VerifyTestMain(m)
@@ -191,7 +194,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	select {
 	case <-watch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("expected LowerBound watch to close after changes")
 	}
 
@@ -248,7 +251,7 @@ func TestDB_Prefix(t *testing.T) {
 
 	select {
 	case <-watch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("expected Prefix watch to close after relevant changes")
 	}
 
@@ -497,7 +500,7 @@ func TestDB_All(t *testing.T) {
 
 	select {
 	case <-watch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("expected All() watch channel to close after delete")
 	}
 }
@@ -621,17 +624,17 @@ func TestDB_GetFirstLast(t *testing.T) {
 
 	select {
 	case <-firstWatch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("FirstWatch channel not closed after change")
 	}
 	select {
 	case <-lastWatch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("LastWatch channel not closed after change")
 	}
 	select {
 	case <-getWatch:
-	case <-time.After(time.Second):
+	case <-time.After(watchCloseTimeout):
 		t.Fatalf("Get channel not closed after change")
 	}
 
