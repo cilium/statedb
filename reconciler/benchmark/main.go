@@ -78,6 +78,9 @@ var idIndex = statedb.Index[*testObject, uint64]{
 }
 
 func main() {
+	var memBefore runtime.MemStats
+	runtime.ReadMemStats(&memBefore)
+
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
@@ -198,8 +201,15 @@ func main() {
 		panic(err)
 	}
 
+	var memAfter runtime.MemStats
+	runtime.ReadMemStats(&memAfter)
+
 	fmt.Printf("\n%d objects reconciled in %.2f seconds (batch size %d)\n",
 		*numObjects, float64(duration)/float64(time.Second), *batchSize)
 	fmt.Printf("Throughput %.2f objects per second\n", objsPerSecond)
+	fmt.Printf("Allocated %d objects, %dkB bytes, %dkB bytes still in use\n",
+		memAfter.HeapObjects-memBefore.HeapObjects,
+		(memAfter.HeapAlloc-memBefore.HeapAlloc)/1024,
+		(memAfter.HeapInuse-memBefore.HeapInuse)/1024)
 
 }
