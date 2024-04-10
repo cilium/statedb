@@ -6,10 +6,9 @@ package statedb
 import (
 	"io"
 
-	iradix "github.com/hashicorp/go-immutable-radix/v2"
-
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/internal"
+	"github.com/cilium/statedb/part"
 )
 
 type (
@@ -54,13 +53,6 @@ type Table[Obj any] interface {
 	// FirstWatch return the first matching object and a watch channel
 	// that is closed if the query is invalidated.
 	FirstWatch(ReadTxn, Query[Obj]) (obj Obj, rev Revision, watch <-chan struct{}, found bool)
-
-	// Last returns the last matching object.
-	Last(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
-
-	// LastWatch returns the last matching object and a watch channel
-	// that is closed if the query is invalidated.
-	LastWatch(ReadTxn, Query[Obj]) (obj Obj, rev Revision, watch <-chan struct{}, found bool)
 
 	// LowerBound returns an iterator for objects that have a key
 	// greater or equal to the query. The returned watch channel is closed
@@ -338,15 +330,15 @@ type deleteTracker interface {
 }
 
 type indexEntry struct {
-	tree   *iradix.Tree[object]
-	txn    *iradix.Txn[object]
+	tree   *part.Tree[object]
+	txn    *part.Txn[object]
 	unique bool
 }
 
 type tableEntry struct {
 	meta           TableMeta
 	indexes        []indexEntry
-	deleteTrackers *iradix.Tree[deleteTracker]
+	deleteTrackers *part.Tree[deleteTracker]
 	revision       uint64
 	initializers   int // Number of table initializers pending
 }

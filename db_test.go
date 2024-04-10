@@ -554,10 +554,6 @@ func TestDB_GetFirstLast(t *testing.T) {
 		require.True(t, ok, "expected First(1) to return result")
 		require.NotZero(t, rev, "expected non-zero revision")
 		require.EqualValues(t, obj.ID, 1, "expected first obj.ID to equal 1")
-		obj, rev, ok = table.Last(txn, idIndex.Query(1))
-		require.True(t, ok, "expected Last(1) to return result")
-		require.NotZero(t, rev, "expected non-zero revision")
-		require.EqualValues(t, obj.ID, 1, "expected last obj.ID to equal 1")
 		txn.Commit()
 	}
 
@@ -578,38 +574,23 @@ func TestDB_GetFirstLast(t *testing.T) {
 	require.Len(t, items, 1, "expected Get(2) to return result")
 	require.EqualValues(t, items[0].ID, 2, "expected items[0].ID to equal 2")
 
-	// Test First/FirstWatch and Last/LastWatch against the ID index.
+	// Test First/FirstWatch against the ID index.
 	_, _, ok := table.First(txn, idIndex.Query(0))
 	require.False(t, ok, "expected First(0) to not return result")
-
-	_, _, ok = table.Last(txn, idIndex.Query(0))
-	require.False(t, ok, "expected Last(0) to not return result")
 
 	obj, rev, ok := table.First(txn, idIndex.Query(1))
 	require.True(t, ok, "expected First(1) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 1, "expected first obj.ID to equal 1")
 
-	obj, rev, ok = table.Last(txn, idIndex.Query(1))
-	require.True(t, ok, "expected Last(1) to return result")
-	require.NotZero(t, rev, "expected non-zero revision")
-	require.EqualValues(t, obj.ID, 1, "expected last obj.ID to equal 1")
-
 	obj, rev, firstWatch, ok := table.FirstWatch(txn, idIndex.Query(2))
 	require.True(t, ok, "expected FirstWatch(2) to return result")
-	require.NotZero(t, rev, "expected non-zero revision")
-	require.EqualValues(t, obj.ID, 2, "expected obj.ID to equal 2")
-
-	obj, rev, lastWatch, ok := table.LastWatch(txn, idIndex.Query(2))
-	require.True(t, ok, "expected LastWatch(2) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 2, "expected obj.ID to equal 2")
 
 	select {
 	case <-firstWatch:
 		t.Fatalf("FirstWatch channel closed before changes")
-	case <-lastWatch:
-		t.Fatalf("LastWatch channel closed before changes")
 	case <-getWatch:
 		t.Fatalf("Get channel closed before changes")
 	default:
@@ -628,11 +609,6 @@ func TestDB_GetFirstLast(t *testing.T) {
 		t.Fatalf("FirstWatch channel not closed after change")
 	}
 	select {
-	case <-lastWatch:
-	case <-time.After(watchCloseTimeout):
-		t.Fatalf("LastWatch channel not closed after change")
-	}
-	select {
 	case <-getWatch:
 	case <-time.After(watchCloseTimeout):
 		t.Fatalf("Get channel not closed after change")
@@ -648,12 +624,6 @@ func TestDB_GetFirstLast(t *testing.T) {
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.ElementsMatch(t, obj.Tags, []string{"even", "modified"})
 	require.EqualValues(t, 2, obj.ID)
-
-	obj, rev, _, ok = table.LastWatch(txn, tagsIndex.Query("odd"))
-	require.True(t, ok, "expected First(even) to return result")
-	require.NotZero(t, rev, "expected non-zero revision")
-	require.ElementsMatch(t, obj.Tags, []string{"odd"})
-	require.EqualValues(t, 9, obj.ID)
 
 	iter, _ = table.Get(txn, tagsIndex.Query("odd"))
 	items = Collect(iter)
@@ -808,7 +778,8 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 	iter, _ = table.All(txn)
 	require.Len(t, Collect(iter), 1)
 
-	table.Delete(txn, testObject{ID: 1})
+	_, hadOld, _ := table.Delete(txn, testObject{ID: 1})
+	require.True(t, hadOld)
 	iter, _ = table.All(txn)
 	require.Len(t, Collect(iter), 0)
 

@@ -51,5 +51,5 @@ func TestFilter(t *testing.T) {
 		),
 	)
 	assert.Len(t, filtered, 2)
-	assert.Equal(t, filtered, []int{2, 4})
+	assert.Equal(t, []int{2, 4}, filtered)
 }
