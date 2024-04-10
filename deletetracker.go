@@ -37,8 +37,7 @@ func (dt *DeleteTracker[Obj]) getRevision() uint64 {
 // called!
 func (dt *DeleteTracker[Obj]) Deleted(txn ReadTxn, minRevision Revision) Iterator[Obj] {
 	indexTxn := txn.getTxn().mustIndexReadTxn(dt.table, GraveyardRevisionIndexPos)
-	iter := indexTxn.Root().Iterator()
-	iter.SeekLowerBound(index.Uint64(minRevision))
+	iter := indexTxn.LowerBound(index.Uint64(minRevision))
 	return &iterator[Obj]{iter}
 }
 
@@ -61,7 +60,7 @@ func (dt *DeleteTracker[Obj]) Close() {
 	if table == nil {
 		panic("BUG: Table missing from write transaction")
 	}
-	table.deleteTrackers, _, _ = table.deleteTrackers.Delete([]byte(dt.trackerName))
+	_, _, table.deleteTrackers = table.deleteTrackers.Delete([]byte(dt.trackerName))
 	txn.Commit()
 
 	db.metrics.DeleteTrackerCount(dt.table.Name(), table.deleteTrackers.Len())

@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/cilium/statedb/internal"
-	iradix "github.com/hashicorp/go-immutable-radix/v2"
+	"github.com/cilium/statedb/part"
 
 	"github.com/cilium/statedb/index"
 )
@@ -114,16 +114,17 @@ type genTable[Obj any] struct {
 func (t *genTable[Obj]) tableEntry() tableEntry {
 	var entry tableEntry
 	entry.meta = t
-	entry.deleteTrackers = iradix.New[deleteTracker]()
+	entry.deleteTrackers = part.New[deleteTracker]()
 	entry.indexes = make([]indexEntry, len(t.indexPositions))
-	entry.indexes[t.indexPositions[t.primaryIndexer.indexName()]] = indexEntry{iradix.New[object](), nil, true}
+	entry.indexes[t.indexPositions[t.primaryIndexer.indexName()]] = indexEntry{part.New[object](), nil, true}
 
 	for index, indexer := range t.secondaryAnyIndexers {
-		entry.indexes[t.indexPositions[index]] = indexEntry{iradix.New[object](), nil, indexer.unique}
+		entry.indexes[t.indexPositions[index]] = indexEntry{part.New[object](), nil, indexer.unique}
 	}
-	entry.indexes[t.indexPositions[RevisionIndex]] = indexEntry{iradix.New[object](), nil, true}
-	entry.indexes[t.indexPositions[GraveyardIndex]] = indexEntry{iradix.New[object](), nil, true}
-	entry.indexes[t.indexPositions[GraveyardRevisionIndex]] = indexEntry{iradix.New[object](), nil, true}
+	// For revision indexes we only need to watch the root.
+	entry.indexes[t.indexPositions[RevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
+	entry.indexes[t.indexPositions[GraveyardRevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
+	entry.indexes[t.indexPositions[GraveyardIndex]] = indexEntry{part.New[object](), nil, true}
 	return entry
 }
 
@@ -206,7 +207,7 @@ func (t *genTable[Obj]) FirstWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision
 	var iobj object
 	if indexTxn.unique {
 		// On a unique index we can do a direct get rather than a prefix search.
-		watch, iobj, ok = indexTxn.Root().GetWatch(q.key)
+		iobj, watch, ok = indexTxn.Get(q.key)
 		if !ok {
 			return
 		}
@@ -216,8 +217,7 @@ func (t *genTable[Obj]) FirstWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision
 	}
 
 	// For a non-unique index we need to do a prefix search.
-	iter := indexTxn.Root().Iterator()
-	watch = iter.SeekPrefixWatch(q.key)
+	iter, watch := indexTxn.Prefix(q.key)
 	for {
 		var key []byte
 		key, iobj, ok = iter.Next()
@@ -239,86 +239,35 @@ func (t *genTable[Obj]) FirstWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision
 	return
 }
 
-func (t *genTable[Obj]) Last(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
-	obj, revision, _, ok = t.LastWatch(txn, q)
-	return
-}
-
-func (t *genTable[Obj]) LastWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
-	var iobj object
-	if indexTxn.unique {
-		// On a unique index we can do a direct get rather than a prefix search.
-		watch, iobj, ok = indexTxn.Root().GetWatch(q.key)
-		if !ok {
-			return
-		}
-		obj = iobj.data.(Obj)
-		revision = iobj.revision
-		return
-	}
-
-	iter := indexTxn.Root().ReverseIterator()
-	watch = iter.SeekPrefixWatch(q.key)
-	for {
-		var key []byte
-		key, iobj, ok = iter.Previous()
-		if !ok {
-			break
-		}
-
-		// Check that we have a full match on the key
-		_, secondary := decodeNonUniqueKey(key)
-		if len(secondary) == len(q.key) {
-			break
-		}
-	}
-
-	if ok {
-		obj = iobj.data.(Obj)
-		revision = iobj.revision
-	}
-	return
-}
-
 func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
-	root := indexTxn.Root()
-
 	// Since LowerBound query may be invalidated by changes in another branch
 	// of the tree, we cannot just simply watch the node we seeked to. Instead
 	// we watch the whole table for changes.
-	watch, _, _ := root.GetWatch(nil)
-	iter := root.Iterator()
-	iter.SeekLowerBound(q.key)
+	watch := indexTxn.RootWatch()
+	iter := indexTxn.LowerBound(q.key)
 	return &iterator[Obj]{iter}, watch
 }
 
 func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
-	root := indexTxn.Root()
-	iter := root.Iterator()
-	watch := iter.SeekPrefixWatch(q.key)
+	iter, watch := indexTxn.Prefix(q.key)
 	return &iterator[Obj]{iter}, watch
 }
 
 func (t *genTable[Obj]) All(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, PrimaryIndexPos)
-	root := indexTxn.Root()
-	// Grab the watch channel for the root node
-	watchCh, _, _ := root.GetWatch(nil)
-	return &iterator[Obj]{root.Iterator()}, watchCh
+	watch := indexTxn.RootWatch()
+	return &iterator[Obj]{indexTxn.Iterator()}, watch
 }
 
 func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
-	iter := indexTxn.Root().Iterator()
-	watchCh := iter.SeekPrefixWatch(q.key)
-
+	iter, watch := indexTxn.Prefix(q.key)
 	if indexTxn.unique {
-		return &uniqueIterator[Obj]{iter, q.key}, watchCh
+		return &uniqueIterator[Obj]{iter, q.key}, watch
 	}
-	return &nonUniqueIterator[Obj]{iter, q.key}, watchCh
+	return &nonUniqueIterator[Obj]{iter, q.key}, watch
 }
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {

@@ -45,7 +45,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 
 			// Find the low watermark
 			lowWatermark := table.revision
-			dtIter := table.deleteTrackers.Root().Iterator()
+			dtIter := table.deleteTrackers.Iterator()
 			for _, dt, ok := dtIter.Next(); ok; _, dt, ok = dtIter.Next() {
 				rev := dt.getRevision()
 				// If the revision is higher than zero than the tracker has been observed
@@ -65,7 +65,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 			// to the low watermark.
 			indexTree := txn.mustIndexReadTxn(table.meta, GraveyardRevisionIndexPos)
 
-			objIter := indexTree.Root().Iterator()
+			objIter := indexTree.Iterator()
 			for key, obj, ok := objIter.Next(); ok; key, obj, ok = objIter.Next() {
 				if obj.revision > lowWatermark {
 					break
