@@ -14,10 +14,9 @@ import (
 	"slices"
 	"time"
 
-	iradix "github.com/hashicorp/go-immutable-radix/v2"
-
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/internal"
+	"github.com/cilium/statedb/part"
 )
 
 type txn struct {
@@ -30,18 +29,13 @@ type txn struct {
 	tableNames     []string
 }
 
-// rooter is implemented by both iradix.Txn and iradix.Tree.
-type rooter interface {
-	Root() *iradix.Node[object]
-}
-
 type indexReadTxn struct {
-	rooter
+	part.Ops[object]
 	unique bool
 }
 
 type indexTxn struct {
-	*iradix.Txn[object]
+	*part.Txn[object]
 	unique bool
 }
 
@@ -100,7 +94,6 @@ func (txn *txn) indexWriteTxn(meta TableMeta, indexPos int) (indexTxn, error) {
 	indexEntry := &table.indexes[indexPos]
 	if indexEntry.txn == nil {
 		indexEntry.txn = indexEntry.tree.Txn()
-		indexEntry.txn.TrackMutate(true)
 	}
 	return indexTxn{indexEntry.txn, indexEntry.unique}, nil
 }
@@ -249,7 +242,7 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt deleteTr
 		return ErrTransactionClosed
 	}
 	table := txn.modifiedTables[meta.tablePos()]
-	table.deleteTrackers, _, _ = table.deleteTrackers.Insert([]byte(trackerName), dt)
+	_, _, table.deleteTrackers = table.deleteTrackers.Insert([]byte(trackerName), dt)
 	txn.db.metrics.DeleteTrackerCount(meta.Name(), table.deleteTrackers.Len())
 	return nil
 
@@ -410,7 +403,7 @@ func (txn *txn) Commit() {
 	// Commit each individual changed index to each table.
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
-	txnToNotify := []*iradix.Txn[object]{}
+	txnToNotify := []*part.Txn[object]{}
 	for _, table := range txn.modifiedTables {
 		if table == nil {
 			continue
@@ -485,8 +478,7 @@ func (txn *txn) WriteJSON(w io.Writer) error {
 		}
 
 		indexTxn := txn.getTxn().mustIndexReadTxn(table.meta, PrimaryIndexPos)
-		root := indexTxn.Root()
-		iter := root.Iterator()
+		iter := indexTxn.Iterator()
 
 		buf.WriteString("  \"" + table.meta.Name() + "\": [\n")
 

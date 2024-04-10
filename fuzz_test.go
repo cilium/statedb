@@ -257,12 +257,6 @@ func firstAction(ctx actionContext) {
 	ctx.log.log("%s: First(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
-func lastAction(ctx actionContext) {
-	id := mkID()
-	_, rev, ok := ctx.table.Last(ctx.txn, idIndex.Query(id))
-	ctx.log.log("%s: Last(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
-}
-
 func lowerboundAction(ctx actionContext) {
 	id := mkID()
 	iter, _ := ctx.table.LowerBound(ctx.txn, idIndex.Query(id))
@@ -287,7 +281,6 @@ var actions = []action{
 	firstAction, firstAction, firstAction, firstAction, firstAction,
 	allAction, lowerboundAction,
 	getAction, getAction, getAction,
-	lastAction, lastAction,
 	prefixAction,
 }
 
