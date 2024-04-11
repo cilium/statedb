@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/part"
 )
 
 // Number of objects to insert in tests that do repeated inserts.
@@ -24,6 +25,7 @@ const numObjectsToInsert = 1000
 
 func BenchmarkDB_WriteTxn_1(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		txn := db.WriteTxn(table)
 		_, _, err := table.Insert(txn, testObject{ID: 123, Tags: nil})
@@ -36,43 +38,35 @@ func BenchmarkDB_WriteTxn_1(b *testing.B) {
 }
 
 func BenchmarkDB_WriteTxn_10(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
-	n := b.N
-	for n > 0 {
-		txn := db.WriteTxn(table)
-		for j := 0; j < 10; j++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: nil})
-			if err != nil {
-				b.Fatalf("Insert error: %s", err)
-			}
-		}
-		txn.Commit()
-		n -= 10
-	}
-	txn := db.WriteTxn(table)
-	for j := 0; j < n; j++ {
-		_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: nil})
-		if err != nil {
-			b.Fatalf("Insert error: %s", err)
-		}
-	}
-	txn.Commit()
-	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
+	benchmarkDB_WriteTxn_batch(b, 10)
 }
 
 func BenchmarkDB_WriteTxn_100(b *testing.B) {
+	benchmarkDB_WriteTxn_batch(b, 100)
+}
+
+func BenchmarkDB_WriteTxn_1000(b *testing.B) {
+	benchmarkDB_WriteTxn_batch(b, 1000)
+}
+
+func BenchmarkDB_WriteTxn_10000(b *testing.B) {
+	benchmarkDB_WriteTxn_batch(b, 10000)
+}
+
+func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	n := b.N
+	b.ResetTimer()
 	for n > 0 {
 		txn := db.WriteTxn(table)
-		for j := 0; j < 100; j++ {
+		for j := 0; j < batchSize; j++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: nil})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
 		}
 		txn.Commit()
-		n -= 100
+		n -= batchSize
 	}
 	txn := db.WriteTxn(table)
 	for j := 0; j < n; j++ {
@@ -86,7 +80,7 @@ func BenchmarkDB_WriteTxn_100(b *testing.B) {
 }
 
 func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	n := b.N
 	tags := []string{"test"}
 	for n > 0 {
@@ -187,7 +181,9 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 		txn := db.WriteTxn(table)
 		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
 			_, _, err := table.Insert(txn, testObject{ID: id, Tags: nil})
-			require.NoError(b, err)
+			if err != nil {
+				b.Fatalf("Insert error: %s", err)
+			}
 		}
 		txn.Commit()
 	}
@@ -223,6 +219,7 @@ func BenchmarkDB_Baseline_SingleRadix_TrackMutate_Insert(b *testing.B) {
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
+
 func BenchmarkDB_Baseline_SingleRadix_Lookup(b *testing.B) {
 	tree := iradix.New[uint64]()
 	for j := uint64(0); j < numObjectsToInsert; j++ {
@@ -233,6 +230,54 @@ func BenchmarkDB_Baseline_SingleRadix_Lookup(b *testing.B) {
 		for j := uint64(0); j < numObjectsToInsert; j++ {
 			v, ok := tree.Get(index.Uint64(j))
 			if v != j || !ok {
+				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
+			}
+		}
+
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_Baseline_Part_RootOnlyWatch_Insert(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		tree := part.New[uint64](part.RootOnlyWatch)
+		txn := tree.Txn()
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			txn.Insert(index.Uint64(j), j)
+		}
+		tree = txn.Commit()
+		if tree.Len() != numObjectsToInsert {
+			b.Fatalf("expected tree.Len() of %d, got %d", numObjectsToInsert, tree.Len())
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_Baseline_Part_Insert(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		tree := part.New[uint64]()
+		txn := tree.Txn()
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			txn.Insert(index.Uint64(j), j)
+		}
+		tree = txn.Commit()
+		if tree.Len() != numObjectsToInsert {
+			b.Fatalf("expected tree.Len() of %d, got %d", numObjectsToInsert, tree.Len())
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_Baseline_Part_Lookup(b *testing.B) {
+	tree := part.New[uint64](part.RootOnlyWatch)
+	for j := uint64(0); j < numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(index.Uint64(j), j)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			v, _, ok := tree.Get(index.Uint64(j))
+			if v != j {
 				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
 			}
 		}
@@ -299,7 +344,6 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 		txn := db.WriteTxn(table)
 		dt, err := table.DeleteTracker(txn, "test")
 		require.NoError(b, err)
-		defer dt.Close()
 		for i := 0; i < numObjectsToInsert; i++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
 			if err != nil {
@@ -318,9 +362,12 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 		dt.Iterate(
 			db.ReadTxn(),
 			func(obj testObject, deleted bool, _ Revision) {
+				if !deleted {
+					b.Fatalf("expected deleted for %v", obj)
+				}
 				nDeleted++
 			})
-		require.EqualValues(b, nDeleted, numObjectsToInsert)
+		require.EqualValues(b, numObjectsToInsert, nDeleted)
 		dt.Close()
 	}
 	b.StopTimer()
@@ -403,7 +450,9 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 			}
 			i++
 		}
-		require.EqualValues(b, i, numObjectsToInsert)
+		if numObjectsToInsert != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsToInsert, i)
+		}
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -428,7 +477,9 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 			}
 			i++
 		}
-		require.EqualValues(b, i, numObjectsToInsert)
+		if numObjectsToInsert != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsToInsert, i)
+		}
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
