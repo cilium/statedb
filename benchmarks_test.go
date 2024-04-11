@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	iradix "github.com/hashicorp/go-immutable-radix/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -190,51 +189,6 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 	b.StopTimer()
 
 	require.EqualValues(b, table.NumObjects(db.ReadTxn()), numObjectsToInsert)
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_SingleRadix_Insert(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		tree := iradix.New[uint64]()
-		txn := tree.Txn()
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			txn.Insert(index.Uint64(j), j)
-		}
-		tree = txn.Commit()
-		require.Equal(b, tree.Len(), numObjectsToInsert)
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_SingleRadix_TrackMutate_Insert(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		tree := iradix.New[uint64]()
-		txn := tree.Txn()
-		txn.TrackMutate(true) // Enable the watch channels
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			txn.Insert(index.Uint64(j), j)
-		}
-		tree = txn.Commit() // Commit and notify
-		require.Equal(b, tree.Len(), numObjectsToInsert)
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_SingleRadix_Lookup(b *testing.B) {
-	tree := iradix.New[uint64]()
-	for j := uint64(0); j < numObjectsToInsert; j++ {
-		tree, _, _ = tree.Insert(index.Uint64(j), j)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			v, ok := tree.Get(index.Uint64(j))
-			if v != j || !ok {
-				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
-			}
-		}
-
-	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
