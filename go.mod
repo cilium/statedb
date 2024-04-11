@@ -5,7 +5,6 @@ go 1.21.3
 require (
 	github.com/cilium/hive v0.0.0-20240209163124-bd6ebb4ec11d
 	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
-	github.com/hashicorp/go-immutable-radix/v2 v2.1.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
@@ -17,7 +16,6 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
-	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
