@@ -176,7 +176,7 @@ type ReadTxn interface {
 	getTxn() *txn
 
 	// WriteJSON writes the contents of the database as JSON.
-	WriteJSON(io.Writer) error
+	WriteJSON(w io.Writer, tables ...string) error
 }
 
 type WriteTxn interface {

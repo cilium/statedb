@@ -465,39 +465,53 @@ func (txn *txn) Commit() {
 	*txn = zeroTxn
 }
 
-// WriteJSON marshals out the whole database as JSON into the given writer.
-func (txn *txn) WriteJSON(w io.Writer) error {
+func writeTableAsJSON(buf *bufio.Writer, txn *txn, table *tableEntry) error {
+	indexTxn := txn.mustIndexReadTxn(table.meta, PrimaryIndexPos)
+	iter := indexTxn.Iterator()
+
+	buf.WriteString("  \"" + table.meta.Name() + "\": [\n")
+
+	_, obj, ok := iter.Next()
+	for ok {
+		buf.WriteString("    ")
+		bs, err := json.Marshal(obj.data)
+		if err != nil {
+			return err
+		}
+		buf.Write(bs)
+		_, obj, ok = iter.Next()
+		if ok {
+			buf.WriteString(",\n")
+		} else {
+			buf.WriteByte('\n')
+		}
+	}
+	buf.WriteString("  ]")
+	return nil
+}
+
+// WriteJSON marshals out the database as JSON into the given writer.
+// If tables are given then only these tables are written.
+func (txn *txn) WriteJSON(w io.Writer, tables ...string) error {
 	buf := bufio.NewWriter(w)
 	buf.WriteString("{\n")
 	first := true
+
 	for _, table := range txn.root {
+		if len(tables) > 0 && !slices.Contains(tables, table.meta.Name()) {
+			continue
+		}
+
 		if !first {
 			buf.WriteString(",\n")
 		} else {
 			first = false
 		}
 
-		indexTxn := txn.getTxn().mustIndexReadTxn(table.meta, PrimaryIndexPos)
-		iter := indexTxn.Iterator()
-
-		buf.WriteString("  \"" + table.meta.Name() + "\": [\n")
-
-		_, obj, ok := iter.Next()
-		for ok {
-			buf.WriteString("    ")
-			bs, err := json.Marshal(obj.data)
-			if err != nil {
-				return err
-			}
-			buf.Write(bs)
-			_, obj, ok = iter.Next()
-			if ok {
-				buf.WriteString(",\n")
-			} else {
-				buf.WriteByte('\n')
-			}
+		err := writeTableAsJSON(buf, txn, &table)
+		if err != nil {
+			return err
 		}
-		buf.WriteString("  ]")
 	}
 	buf.WriteString("\n}\n")
 	return buf.Flush()
