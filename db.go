@@ -95,7 +95,7 @@ type DB struct {
 	defaultHandle       Handle
 }
 
-type dbRoot []tableEntry
+type dbRoot = []tableEntry
 
 func NewDB(tables []TableMeta, metrics Metrics) (*DB, error) {
 	db := &DB{
