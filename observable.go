@@ -9,18 +9,12 @@ import (
 	"github.com/cilium/stream"
 )
 
-type Event[Obj any] struct {
-	Object   Obj
-	Revision Revision
-	Deleted  bool
-}
-
 // Observable creates an observable from the given table for observing the changes
 // to the table as a stream of events.
 //
 // For high-churn tables it's advisable to apply rate-limiting to the stream to
 // decrease overhead (stream.Throttle).
-func Observable[Obj any](db *DB, table Table[Obj]) stream.Observable[Event[Obj]] {
+func Observable[Obj any](db *DB, table Table[Obj]) stream.Observable[Change[Obj]] {
 	return &observable[Obj]{db, table}
 }
 
@@ -29,32 +23,25 @@ type observable[Obj any] struct {
 	table Table[Obj]
 }
 
-func (to *observable[Obj]) Observe(ctx context.Context, next func(Event[Obj]), complete func(error)) {
+func (to *observable[Obj]) Observe(ctx context.Context, next func(Change[Obj]), complete func(error)) {
 	go func() {
-		wtxn := to.db.WriteTxn(to.table)
-		dt, err := to.table.DeleteTracker(wtxn, "Observe")
-		wtxn.Commit()
+		iter, err := to.table.Changes(to.db.ReadTxn())
 		if err != nil {
 			complete(err)
 			return
 		}
-		defer dt.Close()
+		defer iter.Close()
 		defer complete(nil)
 
 		for {
-			watch := dt.Iterate(to.db.ReadTxn(),
-				func(obj Obj, deleted bool, rev uint64) {
-					next(Event[Obj]{
-						Object:   obj,
-						Revision: rev,
-						Deleted:  deleted,
-					})
-				})
+			for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+				next(ev)
+			}
 
 			select {
 			case <-ctx.Done():
 				return
-			case <-watch:
+			case <-iter.Watch(to.db.ReadTxn()):
 			}
 		}
 	}()

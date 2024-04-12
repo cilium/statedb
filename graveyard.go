@@ -48,10 +48,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 			dtIter := table.deleteTrackers.Iterator()
 			for _, dt, ok := dtIter.Next(); ok; _, dt, ok = dtIter.Next() {
 				rev := dt.getRevision()
-				// If the revision is higher than zero than the tracker has been observed
-				// at least once. If it is zero, then no objects have been seen and thus
-				// we don't need to hold onto deleted objects for it.
-				if rev > 0 && rev < lowWatermark {
+				if rev < lowWatermark {
 					lowWatermark = rev
 				}
 			}

@@ -70,45 +70,36 @@ type derive[In, Out any] struct {
 
 func (d derive[In, Out]) loop(ctx context.Context, health cell.Health) error {
 	out := d.OutTable
-	wtxn := d.DB.WriteTxn(d.InTable)
-	tracker, err := d.InTable.DeleteTracker(wtxn, d.jobName)
+	iter, err := d.InTable.Changes(d.DB.ReadTxn())
 	if err != nil {
-		wtxn.Abort()
 		return err
 	}
-	wtxn.Commit()
-	defer tracker.Close()
+	defer iter.Close()
 	for {
 		wtxn := d.DB.WriteTxn(out)
-
-		var watch <-chan struct{}
-		watch, err = tracker.IterateWithError(
-			wtxn,
-			func(obj In, deleted bool, rev Revision) (err error) {
-				outObj, result := d.transform(obj, deleted)
-				switch result {
-				case DeriveInsert:
+		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+			outObj, result := d.transform(ev.Object, ev.Deleted)
+			switch result {
+			case DeriveInsert:
+				_, _, err = out.Insert(wtxn, outObj)
+			case DeriveUpdate:
+				_, _, found := out.First(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
+				if found {
 					_, _, err = out.Insert(wtxn, outObj)
-				case DeriveUpdate:
-					_, _, found := out.First(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
-					if found {
-						_, _, err = out.Insert(wtxn, outObj)
-					}
-				case DeriveDelete:
-					_, _, err = out.Delete(wtxn, outObj)
-				case DeriveSkip:
 				}
+			case DeriveDelete:
+				_, _, err = out.Delete(wtxn, outObj)
+			case DeriveSkip:
+			}
+			if err != nil {
+				wtxn.Abort()
 				return err
-			},
-		)
+			}
+		}
 		wtxn.Commit()
 
-		if err != nil {
-			return err
-		}
-
 		select {
-		case <-watch:
+		case <-iter.Watch(d.DB.ReadTxn()):
 		case <-ctx.Done():
 			return nil
 		}
