@@ -271,6 +271,9 @@ func (round *incrementalRound[Obj]) commitStatus() <-chan struct{} {
 	wtxn := round.db.WriteTxn(round.table)
 	defer wtxn.Commit()
 
+	// The revision up to which we just now reconciled.
+	revReconciled := round.table.Revision(round.txn)
+
 	// The revision before committing the status updates.
 	revBeforeWrite := round.table.Revision(wtxn)
 
@@ -287,17 +290,16 @@ func (round *incrementalRound[Obj]) commitStatus() <-chan struct{} {
 		round.table.CompareAndSwap(wtxn, result.rev, round.config.WithObjectStatus(obj, result.status))
 
 		if result.status.Kind == StatusKindError {
-			// Reconciling the object failed, so add it to be retried now that it's
+			// Reconciling the object failed, so add it to be retried now that its
 			// status is updated.
 			round.retries.Add(obj)
 		}
 	}
 
 	watch := closedWatchChannel
-	if round.oldRevision == revBeforeWrite {
-		// No changes happened between the ReadTxn and this WriteTxn. Grab a new
-		// watch channel of the root to only watch for new changes after
-		// this write.
+	if revReconciled == revBeforeWrite {
+		// No outside changes happened between the ReadTxn and this WriteTxn. Grab a new
+		// watch channel of the root to only watch for new changes after this write.
 		//
 		// If changes did happen, we'll return a closed watch channel and
 		// immediately reconcile again.
