@@ -118,7 +118,7 @@ func (txn *txn) mustIndexWriteTxn(meta TableMeta, indexPos int) indexTxn {
 	return indexTxn
 }
 
-func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
+func (txn *txn) insert(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
 	if txn.db == nil {
 		return object{}, false, ErrTransactionClosed
 	}
@@ -179,22 +179,22 @@ func (txn *txn) Insert(meta TableMeta, guardRevision Revision, data any) (object
 	// Update revision index
 	revIndexTxn := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
 	if oldExists {
-		var revKey [8]byte
+		var revKey [8]byte // to avoid heap allocation
 		binary.BigEndian.PutUint64(revKey[:], oldObj.revision)
 		_, ok := revIndexTxn.Delete(revKey[:])
 		if !ok {
 			panic("BUG: Old revision index entry not found")
 		}
 	}
-	var revKey [8]byte
-	binary.BigEndian.PutUint64(revKey[:], obj.revision)
-	revIndexTxn.Insert(revKey[:], obj)
+	revIndexTxn.Insert(index.Uint64(obj.revision), obj)
 
 	// If it's new, possibly remove an older deleted object with the same
 	// primary key from the graveyard.
 	if !oldExists && txn.hasDeleteTrackers(meta) {
 		if old, existed := txn.mustIndexWriteTxn(meta, GraveyardIndexPos).Delete(idKey); existed {
-			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Delete([]byte(index.Uint64(old.revision)))
+			var revKey [8]byte // to avoid heap allocation
+			binary.BigEndian.PutUint64(revKey[:], old.revision)
+			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Delete(revKey[:])
 		}
 	}
 
@@ -237,7 +237,7 @@ func (txn *txn) hasDeleteTrackers(meta TableMeta) bool {
 	return txn.root[meta.tablePos()].deleteTrackers.Len() > 0
 }
 
-func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt deleteTracker) error {
+func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDeleteTracker) error {
 	if txn.db == nil {
 		return ErrTransactionClosed
 	}
@@ -248,7 +248,7 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt deleteTr
 
 }
 
-func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
+func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
 	if txn.db == nil {
 		return object{}, false, ErrTransactionClosed
 	}
@@ -283,11 +283,11 @@ func (txn *txn) Delete(meta TableMeta, guardRevision Revision, data any) (object
 		}
 	}
 
-	// Update revision index.
+	// Remove the object from the revision index.
 	indexTree := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
-	var revKey [8]byte
+	var revKey [8]byte // To avoid heap allocation
 	binary.BigEndian.PutUint64(revKey[:], obj.revision)
-	if _, ok := indexTree.Delete(index.Key(revKey[:])); !ok {
+	if _, ok := indexTree.Delete(revKey[:]); !ok {
 		panic("BUG: Object to be deleted not found from revision index")
 	}
 

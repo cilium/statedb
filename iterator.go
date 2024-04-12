@@ -206,3 +206,52 @@ func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool
 		panic(fmt.Sprintf("BUG: Unhandled case: %+v", it))
 	}
 }
+
+type changeIterator[Obj any] struct {
+	table    Table[Obj]
+	revision Revision
+	dt       *deleteTracker[Obj]
+	iter     *DualIterator[Obj]
+	watch    <-chan struct{}
+}
+
+func (it *changeIterator[Obj]) Next() (ev Change[Obj], revision uint64, ok bool) {
+	if it.iter == nil {
+		return
+	}
+	ev.Object, revision, ev.Deleted, ok = it.iter.Next()
+	if !ok {
+		it.iter = nil
+		return
+	}
+	ev.Revision = revision
+	it.revision = revision
+	if ev.Deleted {
+		it.dt.mark(revision)
+	}
+	return
+}
+
+func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
+	if it.iter == nil {
+		// Iterator has been exhausted, re-query.
+		updateIter, watch := it.table.LowerBound(txn, ByRevision[Obj](it.revision+1))
+		deleteIter := it.dt.deleted(txn, it.revision+1)
+		it.iter = NewDualIterator[Obj](deleteIter, updateIter)
+
+		// It is enough to watch the revision index and not the graveyard since
+		// any object that is inserted into the graveyard will be deleted from
+		// the revision index.
+		it.watch = watch
+
+		return closedWatchChannel
+	}
+	return it.watch
+}
+
+func (it *changeIterator[Obj]) Close() {
+	if it.dt != nil {
+		it.dt.close()
+	}
+	*it = changeIterator[Obj]{}
+}

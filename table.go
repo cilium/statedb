@@ -114,7 +114,7 @@ type genTable[Obj any] struct {
 func (t *genTable[Obj]) tableEntry() tableEntry {
 	var entry tableEntry
 	entry.meta = t
-	entry.deleteTrackers = part.New[deleteTracker]()
+	entry.deleteTrackers = part.New[anyDeleteTracker]()
 	entry.indexes = make([]indexEntry, len(t.indexPositions))
 	entry.indexes[t.indexPositions[t.primaryIndexer.indexName()]] = indexEntry{part.New[object](), nil, true}
 
@@ -272,7 +272,7 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan st
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	var old object
-	old, hadOld, err = txn.getTxn().Insert(t, Revision(0), obj)
+	old, hadOld, err = txn.getTxn().insert(t, Revision(0), obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
 	}
@@ -281,7 +281,7 @@ func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, 
 
 func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	var old object
-	old, hadOld, err = txn.getTxn().Insert(t, rev, obj)
+	old, hadOld, err = txn.getTxn().insert(t, rev, obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
 	}
@@ -290,7 +290,7 @@ func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (old
 
 func (t *genTable[Obj]) Delete(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	var old object
-	old, hadOld, err = txn.getTxn().Delete(t, Revision(0), obj)
+	old, hadOld, err = txn.getTxn().delete(t, Revision(0), obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
 	}
@@ -299,7 +299,7 @@ func (t *genTable[Obj]) Delete(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, 
 
 func (t *genTable[Obj]) CompareAndDelete(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	var old object
-	old, hadOld, err = txn.getTxn().Delete(t, rev, obj)
+	old, hadOld, err = txn.getTxn().delete(t, rev, obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
 	}
@@ -310,7 +310,7 @@ func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
 	iter, _ := t.All(txn)
 	itxn := txn.getTxn()
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-		_, _, err := itxn.Delete(t, Revision(0), obj)
+		_, _, err := itxn.delete(t, Revision(0), obj)
 		if err != nil {
 			return err
 		}
@@ -318,17 +318,50 @@ func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
 	return nil
 }
 
-func (t *genTable[Obj]) DeleteTracker(txn WriteTxn, trackerName string) (*DeleteTracker[Obj], error) {
-	dt := &DeleteTracker[Obj]{
-		db:          txn.getTxn().db,
-		trackerName: trackerName,
+func (t *genTable[Obj]) Changes(txn ReadTxn) (ChangeIterator[Obj], error) {
+	iter := &changeIterator[Obj]{
+		revision: 0,
+		table:    t,
+	}
+
+	// To add a delete tracker we need a write transaction against this table. Let's figure
+	// out first what the user gave us.
+	itxn := txn.getTxn()
+	ok := false
+	for _, e := range itxn.modifiedTables {
+		if e != nil && e.meta.Name() == t.table {
+			// Great, txn is a WriteTxn against this table, we can use it as is.
+			ok = true
+		}
+	}
+	if !ok {
+		// We can't use the provided txn to register the delete tracker.
+		// Construct a WriteTxn on behalf of the user. This is a potential deadlock
+		// danger if the caller has a WriteTxn against this table, but didn't give it.
+		// This however should not be an easy mistake to make.
+		itxn = itxn.db.WriteTxn(t).getTxn()
+		defer itxn.Commit()
+	}
+
+	name := fmt.Sprintf("iterator-%p", iter)
+	iter.dt = &deleteTracker[Obj]{
+		db:          itxn.db,
+		trackerName: name,
 		table:       t,
 	}
-	err := txn.getTxn().addDeleteTracker(t, trackerName, dt)
+	iter.dt.setRevision(t.Revision(txn) + 1)
+	err := itxn.addDeleteTracker(t, name, iter.dt)
 	if err != nil {
 		return nil, err
 	}
-	return dt, nil
+
+	// Prepare the iterator
+	updateIter, watch := t.LowerBound(txn, ByRevision[Obj](0)) // observe all current objects
+	deleteIter := iter.dt.deleted(txn, iter.dt.getRevision())  // only observe new deletions
+	iter.iter = NewDualIterator[Obj](deleteIter, updateIter)
+	iter.watch = watch
+
+	return iter, nil
 }
 
 func (t *genTable[Obj]) sortableMutex() internal.SortableMutex {

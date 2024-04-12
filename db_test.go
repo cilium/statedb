@@ -6,7 +6,6 @@ package statedb
 import (
 	"bytes"
 	"context"
-	"errors"
 	"expvar"
 	"fmt"
 	"log/slog"
@@ -260,7 +259,7 @@ func TestDB_Prefix(t *testing.T) {
 	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82, 99})
 }
 
-func TestDB_DeleteTracker(t *testing.T) {
+func TestDB_EventIterator(t *testing.T) {
 	t.Parallel()
 
 	db, table, metrics := newTestDB(t, tagsIndex)
@@ -277,13 +276,12 @@ func TestDB_DeleteTracker(t *testing.T) {
 	assert.EqualValues(t, 3, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	// Create two delete trackers
-	wtxn := db.WriteTxn(table)
-	deleteTracker, err := table.DeleteTracker(wtxn, "test")
-	require.NoError(t, err, "failed to create DeleteTracker")
-	deleteTracker2, err := table.DeleteTracker(wtxn, "test2")
-	require.NoError(t, err, "failed to create DeleteTracker")
-	wtxn.Commit()
+	// Create two change iterators
+	txn := db.ReadTxn()
+	iter, err := table.Changes(txn)
+	require.NoError(t, err, "failed to create ChangeIterator")
+	iter2, err := table.Changes(txn)
+	require.NoError(t, err, "failed to create ChangeIterator")
 
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
 
@@ -313,9 +311,9 @@ func TestDB_DeleteTracker(t *testing.T) {
 	}
 
 	// 1 object should exist.
-	txn := db.ReadTxn()
-	iter, _ := table.All(txn)
-	objs := Collect(iter)
+	txn = db.ReadTxn()
+	iterAll, _ := table.All(txn)
+	objs := Collect(iterAll)
 	require.Len(t, objs, 1)
 
 	assert.EqualValues(t, 1, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
@@ -324,57 +322,59 @@ func TestDB_DeleteTracker(t *testing.T) {
 	// Consume the deletions using the first delete tracker.
 	nExist := 0
 	nDeleted := 0
-	_, err = deleteTracker.IterateWithError(
-		txn,
-		func(obj testObject, deleted bool, _ Revision) error {
-			if deleted {
-				nDeleted++
-			} else {
-				nExist++
-			}
-			return nil
-		})
-	require.NoError(t, err)
-	require.Equal(t, nDeleted, 2)
-	require.Equal(t, nExist, 1)
 
-	// Since the second delete tracker has not processed the deletions,
+	// Observe the objects that existed when the tracker was created.
+	for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+		if ev.Deleted {
+			nDeleted++
+		} else {
+			nExist++
+		}
+	}
+	assert.Equal(t, 0, nDeleted)
+	assert.Equal(t, 3, nExist)
+
+	// Wait for the new changes.
+	<-iter.Watch(txn)
+	for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+		if ev.Deleted {
+			nDeleted++
+			nExist--
+		} else {
+			nExist++
+		}
+	}
+	assert.Equal(t, 2, nDeleted)
+	assert.Equal(t, 1, nExist)
+
+	// Since the second iterator has not processed the deletions,
 	// the graveyard index should still hold them.
 	require.False(t, db.graveyardIsEmpty())
 
-	// Consume the deletions using the second delete tracker, but
-	// with a failure first.
-	nExist = 0
-	nDeleted = 0
-	failErr := errors.New("fail")
-	_, err = deleteTracker2.IterateWithError(
-		txn,
-		func(obj testObject, deleted bool, _ Revision) error {
-			if deleted {
-				nDeleted++
-				return failErr
-			}
-			nExist++
-			return nil
-		})
-	require.ErrorIs(t, err, failErr)
-	require.Equal(t, nExist, 1) // Existing objects are iterated first.
-	require.Equal(t, nDeleted, 1)
+	// Consume the deletions using the second iterator.
 	nExist = 0
 	nDeleted = 0
 
-	// Process again, but this time using Iterate (retrying the failed revision)
-	_ = deleteTracker2.Iterate(
-		txn,
-		func(obj testObject, deleted bool, _ Revision) {
-			if deleted {
-				nDeleted++
-			} else {
-				nExist++
-			}
-		})
-	require.Equal(t, nDeleted, 2)
-	require.Equal(t, nExist, 0) // This was already processed.
+	for ev, _, ok := iter2.Next(); ok; ev, _, ok = iter2.Next() {
+		if ev.Deleted {
+			nDeleted++
+		} else {
+			nExist++
+		}
+	}
+	<-iter2.Watch(txn)
+
+	for ev, _, ok := iter2.Next(); ok; ev, _, ok = iter2.Next() {
+		if ev.Deleted {
+			nDeleted++
+			nExist--
+		} else {
+			nExist++
+		}
+	}
+
+	assert.Equal(t, 1, nExist)
+	assert.Equal(t, 2, nDeleted)
 
 	// Graveyard will now be GCd.
 	eventuallyGraveyardIsEmpty(t, db)
@@ -383,9 +383,37 @@ func TestDB_DeleteTracker(t *testing.T) {
 	assert.EqualValues(t, 1, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	// After closing the first delete tracker, deletes are still tracked for second one.
-	// Delete the last remaining object.
-	deleteTracker.Close()
+	// Insert a new object and consume the event
+	{
+		wtxn := db.WriteTxn(table)
+		table.Insert(wtxn, testObject{ID: 88, Tags: []string{"foo"}})
+		wtxn.Commit()
+	}
+
+	txn = db.ReadTxn()
+	<-iter.Watch(txn)
+	<-iter2.Watch(txn)
+
+	ev, _, ok := iter.Next()
+	assert.True(t, ok)
+	assert.EqualValues(t, 88, ev.Object.ID)
+	assert.False(t, ev.Deleted)
+
+	ev, _, ok = iter2.Next()
+	assert.True(t, ok)
+	assert.EqualValues(t, 88, ev.Object.ID)
+	assert.False(t, ev.Deleted)
+
+	ev, _, ok = iter.Next()
+	assert.False(t, ok)
+
+	ev, _, ok = iter2.Next()
+	assert.False(t, ok)
+
+	// After closing the first iterator, deletes are still tracked for second one.
+	// Delete the remaining objects.
+	iter.Close()
+
 	{
 		txn := db.WriteTxn(table)
 		table.DeleteAll(txn)
@@ -394,16 +422,30 @@ func TestDB_DeleteTracker(t *testing.T) {
 	require.False(t, db.graveyardIsEmpty())
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
-	assert.EqualValues(t, 1, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
+	assert.EqualValues(t, 2, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	// And finally after closing the second tracker deletions are no longer tracked.
-	deleteTracker2.Mark(table.Revision(db.ReadTxn()))
+	// Consume the deletions using the second iterator.
+	txn = db.ReadTxn()
+	<-iter2.Watch(txn)
+
+	ev, _, ok = iter2.Next()
+	assert.True(t, ok)
+	assert.True(t, ev.Deleted)
+
+	ev, _, ok = iter2.Next()
+	assert.True(t, ok)
+	assert.True(t, ev.Deleted)
+
+	ev, _, ok = iter2.Next()
+	assert.False(t, ok)
+
 	eventuallyGraveyardIsEmpty(t, db)
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	deleteTracker2.Close()
+	// After closing the second iterator the deletions no longer go into graveyard.
+	iter2.Close()
 	{
 		txn := db.WriteTxn(table)
 		table.Insert(txn, testObject{ID: 78, Tags: []string{"world"}})

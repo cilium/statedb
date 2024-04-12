@@ -14,6 +14,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
@@ -46,7 +47,7 @@ const (
 	numUniqueIDs    = 2000
 	numUniqueValues = 3000
 	numWorkers      = 20
-	numIterations   = 1000
+	numIterations   = 5000
 )
 
 type fuzzObj struct {
@@ -55,11 +56,11 @@ type fuzzObj struct {
 }
 
 func mkID() uint64 {
-	return uint64(rand.Int63n(numUniqueIDs))
+	return 1 + uint64(rand.Int63n(numUniqueIDs))
 }
 
 func mkValue() uint64 {
-	return uint64(rand.Int63n(numUniqueValues))
+	return 1 + uint64(rand.Int63n(numUniqueValues))
 }
 
 var idIndex = statedb.Index[fuzzObj, uint64]{
@@ -367,24 +368,75 @@ func randomAction() action {
 	return actions[rand.Intn(len(actions))]
 }
 
-func trackerWorker(stop <-chan struct{}) {
-	txn := fuzzDB.WriteTxn(tableFuzz1)
-	dt, err := tableFuzz1.DeleteTracker(txn, "tracker")
+func trackerWorker(i int, stop <-chan struct{}) {
+	log := newDebugLogger(900 + i)
+	txn := fuzzDB.ReadTxn()
+	iter, err := tableFuzz1.Changes(txn)
 	if err != nil {
 		panic(err)
 	}
-	txn.Commit()
-	defer dt.Close()
+	defer iter.Close()
 
+	// Keep track of what state the changes lead us to in order to validate it.
+	state := map[uint64]*statedb.Change[fuzzObj]{}
+
+	var prevRev statedb.Revision
 	for {
-		watch := dt.Iterate(
-			fuzzDB.ReadTxn(),
-			func(obj fuzzObj, deleted bool, rev uint64) {
-			},
-		)
+		for change, rev, ok := iter.Next(); ok; change, rev, ok = iter.Next() {
+			log.log("%d: %v", rev, change)
+
+			if rev != change.Revision {
+				panic(fmt.Sprintf("trackerWorker: event.Revision mismatch with actual revision: %d vs %d", change.Revision, rev))
+			}
+
+			if rev <= prevRev {
+				panic(fmt.Sprintf("trackerWorker: revisions went backwards %d <= %d: %v", rev, prevRev, change))
+			}
+			prevRev = rev
+
+			if change.Object.id == 0 || change.Object.value == 0 {
+				panic("trackerWorker: object with zero id/value")
+			}
+
+			if change.Deleted {
+				delete(state, change.Object.id)
+			} else {
+				change := change
+				state[change.Object.id] = &change
+			}
+		}
+		// Validate that the observed changes match with the database state at this
+		// snapshot.
+		state2 := maps.Clone(state)
+		iterAll, _ := tableFuzz1.All(txn)
+		for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
+			change, found := state[obj.id]
+			if !found {
+				panic(fmt.Sprintf("trackerWorker: object %d not found from state", obj.id))
+			}
+
+			if change.Revision != rev {
+				panic(fmt.Sprintf("trackerWorker: last observed revision %d does not match real revision %d", change.Revision, rev))
+			}
+
+			if change.Object.value != obj.value {
+				panic(fmt.Sprintf("trackerWorker: observed value %d does not match real value %d", change.Object.value, obj.value))
+			}
+			delete(state2, obj.id)
+		}
+
+		if len(state) != tableFuzz1.NumObjects(txn) {
+			for id := range state2 {
+				fmt.Printf("%d should not exist\n", id)
+			}
+			panic(fmt.Sprintf("trackerWorker: state size mismatch: %d vs %d", len(state), tableFuzz1.NumObjects(txn)))
+		}
+
+		txn = fuzzDB.ReadTxn()
 		select {
-		case <-watch:
+		case <-iter.Watch(txn):
 		case <-stop:
+			log.log("final object count %d", len(state))
 			return
 		}
 	}
@@ -448,6 +500,7 @@ func TestDB_Fuzz(t *testing.T) {
 		log: map[string][]actionLogEntry{},
 	}
 
+	// Start workers to mutate the tables.
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
 	for i := 0; i < numWorkers; i++ {
@@ -457,13 +510,24 @@ func TestDB_Fuzz(t *testing.T) {
 			wg.Done()
 		}()
 	}
+
+	// Start change trackers to observe changes.
 	stop := make(chan struct{})
 	var wg2 sync.WaitGroup
-	wg2.Add(1)
-	go func() {
-		trackerWorker(stop)
-		wg2.Done()
-	}()
+	wg2.Add(3)
+	for i := 0; i < 3; i++ {
+		i := i
+		go func() {
+			trackerWorker(i, stop)
+			wg2.Done()
+		}()
+		// Delay a bit to start the trackers at different points in time
+		// so they will observe a different starting state.
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Wait until the mutation workers stop and then stop
+	// the change observers.
 	wg.Wait()
 	close(stop)
 	wg2.Wait()

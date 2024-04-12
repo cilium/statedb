@@ -269,7 +269,7 @@ func BenchmarkDB_Baseline_Hashmap_Lookup(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func BenchmarkDB_DeleteTracker_Baseline(b *testing.B) {
+func BenchmarkDB_Changes_Baseline(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
@@ -290,13 +290,13 @@ func BenchmarkDB_DeleteTracker_Baseline(b *testing.B) {
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func BenchmarkDB_DeleteTracker(b *testing.B) {
+func BenchmarkDB_Changes(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		// Create objects
 		txn := db.WriteTxn(table)
-		dt, err := table.DeleteTracker(txn, "test")
+		iter, err := table.Changes(txn)
 		require.NoError(b, err)
 		for i := 0; i < numObjectsToInsert; i++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
@@ -313,16 +313,16 @@ func BenchmarkDB_DeleteTracker(b *testing.B) {
 
 		// Iterate over the deleted objects
 		nDeleted := 0
-		dt.Iterate(
-			db.ReadTxn(),
-			func(obj testObject, deleted bool, _ Revision) {
-				if !deleted {
-					b.Fatalf("expected deleted for %v", obj)
-				}
+		<-iter.Watch(db.ReadTxn())
+		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+			if ev.Deleted {
 				nDeleted++
-			})
-		require.EqualValues(b, numObjectsToInsert, nDeleted)
-		dt.Close()
+			} else {
+				b.Fatalf("expected deleted for %v", ev)
+			}
+		}
+		require.EqualValues(b, nDeleted, numObjectsToInsert)
+		iter.Close()
 	}
 	b.StopTimer()
 	eventuallyGraveyardIsEmpty(b, db)

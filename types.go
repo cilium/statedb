@@ -63,12 +63,37 @@ type Table[Obj any] interface {
 	// Prefix searches the table by key prefix.
 	Prefix(ReadTxn, Query[Obj]) (iter Iterator[Obj], watch <-chan struct{})
 
-	// DeleteTracker creates a new delete tracker for the table.
+	// Changes returns an iterator for changes happening to the table.
+	// This uses the revision index to iterate over the objects in the order
+	// they have changed. Deleted objects are placed onto a temporary index
+	// (graveyard) where they live until all change iterators have observed
+	// the deletion.
 	//
-	// It starts tracking deletions performed against the table from the
-	// current revision. A WriteTxn against the target table is required to
-	// add the tracker to the table.
-	DeleteTracker(txn WriteTxn, trackerName string) (*DeleteTracker[Obj], error)
+	// If an object is created and deleted before the observer has iterated
+	// over the creation then only the deletion is seen.
+	Changes(txn ReadTxn) (ChangeIterator[Obj], error)
+}
+
+// Change is either an update or a delete of an object. Used by Changes() and
+// the Observable().
+type Change[Obj any] struct {
+	Object   Obj
+	Revision Revision
+	Deleted  bool
+}
+
+type ChangeIterator[Obj any] interface {
+	Iterator[Change[Obj]]
+
+	// Watch refreshes the iteration with a new query and returns a watch channel to wait
+	// for new changes after Next() has returned false.
+	Watch(ReadTxn) <-chan struct{}
+
+	// Close closes the iterator. This must be called when one is done using
+	// the iterator as a tracker is created for deleted objects and the
+	// deleted objects are held onto until all event iterators have observed
+	// the deletion.
+	Close()
 }
 
 // RWTable provides methods for modifying the table under a write transaction
@@ -121,11 +146,11 @@ type RWTable[Obj any] interface {
 	// Delete an object from the table. Returns the object that was
 	// deleted if there was one.
 	//
-	// If the table is being tracked for deletions via DeleteTracker()
+	// If the table is being tracked for deletions via EventIterator()
 	// the deleted object is inserted into a graveyard index and garbage
 	// collected when all delete trackers have consumed it. Each deleted
 	// object in the graveyard has unique revision allowing interleaved
-	// iteration of updates and deletions (see (*DeleteTracker[Obj]).Process).
+	// iteration of updates and deletions.
 	//
 	// Possible errors:
 	// - ErrTableNotLockedForWriting: table was not locked for writing
@@ -324,7 +349,7 @@ type anyIndexer struct {
 	pos int
 }
 
-type deleteTracker interface {
+type anyDeleteTracker interface {
 	setRevision(uint64)
 	getRevision() uint64
 }
@@ -338,7 +363,7 @@ type indexEntry struct {
 type tableEntry struct {
 	meta           TableMeta
 	indexes        []indexEntry
-	deleteTrackers *part.Tree[deleteTracker]
+	deleteTrackers *part.Tree[anyDeleteTracker]
 	revision       uint64
 	initializers   int // Number of table initializers pending
 }
