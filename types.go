@@ -352,6 +352,7 @@ type anyIndexer struct {
 type anyDeleteTracker interface {
 	setRevision(uint64)
 	getRevision() uint64
+	close()
 }
 
 type indexEntry struct {
