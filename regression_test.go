@@ -50,26 +50,26 @@ func Test_Regression_29324(t *testing.T) {
 
 	// Exact match should only return "foo"
 	txn := db.ReadTxn()
-	iter, _ := table.Get(txn, idIndex.Query("foo"))
+	iter := table.Select(txn, idIndex.Query("foo"))
 	items := Collect(iter)
 	if assert.Len(t, items, 1, "Get(\"foo\") should return one match") {
 		assert.EqualValues(t, "foo", items[0].ID)
 	}
 
 	// Partial match on prefix should not return anything
-	iter, _ = table.Get(txn, idIndex.Query("foob"))
+	iter = table.Select(txn, idIndex.Query("foob"))
 	items = Collect(iter)
 	assert.Len(t, items, 0, "Get(\"foob\") should return nothing")
 
 	// Query on non-unique index should only return exact match
-	iter, _ = table.Get(txn, tagIndex.Query("aa"))
+	iter = table.Select(txn, tagIndex.Query("aa"))
 	items = Collect(iter)
 	if assert.Len(t, items, 1, "Get(\"aa\") on tags should return one match") {
 		assert.EqualValues(t, "foo", items[0].ID)
 	}
 
 	// Partial match on prefix should not return anything on non-unique index
-	iter, _ = table.Get(txn, idIndex.Query("a"))
+	iter = table.Select(txn, idIndex.Query("a"))
 	items = Collect(iter)
 	assert.Len(t, items, 0, "Get(\"a\") should return nothing")
 

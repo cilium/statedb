@@ -90,7 +90,7 @@ func (d derive[In, Out]) loop(ctx context.Context, health cell.Health) error {
 				case DeriveInsert:
 					_, _, err = out.Insert(wtxn, outObj)
 				case DeriveUpdate:
-					_, _, found := out.First(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
+					_, _, found := out.Get(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
 					if found {
 						_, _, err = out.Insert(wtxn, outObj)
 					}

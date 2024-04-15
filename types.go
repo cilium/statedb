@@ -43,17 +43,26 @@ type Table[Obj any] interface {
 	// channel that is closed when the table changes.
 	All(ReadTxn) (Iterator[Obj], <-chan struct{})
 
-	// Get returns an iterator for all objects matching the given query
+	// Select returns an iterator for all objects matching the given query.
+	//
+	// If one or more optional filter function is given, then only objects for
+	// which all filters return true are emitted.
+	Select(txn ReadTxn, query Query[Obj], filters ...func(Obj) bool) Iterator[Obj]
+
+	// Select returns an iterator for all objects matching the given query
 	// and a watch channel that is closed if the query results are
 	// invalidated by a write to the table.
-	Get(ReadTxn, Query[Obj]) (Iterator[Obj], <-chan struct{})
+	//
+	// If one or more optional filter function is given, then only objects for
+	// which all filters return true are emitted.
+	SelectWatch(txn ReadTxn, query Query[Obj], filters ...func(Obj) bool) (Iterator[Obj], <-chan struct{})
 
-	// First returns the first matching object for the query.
-	First(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
+	// Get returns the first matching object for the query.
+	Get(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
 
-	// FirstWatch return the first matching object and a watch channel
+	// GetWatch return the first matching object and a watch channel
 	// that is closed if the query is invalidated.
-	FirstWatch(ReadTxn, Query[Obj]) (obj Obj, rev Revision, watch <-chan struct{}, found bool)
+	GetWatch(ReadTxn, Query[Obj]) (obj Obj, rev Revision, watch <-chan struct{}, found bool)
 
 	// Last returns the last matching object.
 	Last(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)

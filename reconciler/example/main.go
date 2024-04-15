@@ -192,7 +192,7 @@ func registerHTTPServer(
 			w.WriteHeader(http.StatusOK)
 
 		case "DELETE":
-			memo, _, ok := memos.First(txn, MemoNameIndex.Query(name))
+			memo, _, ok := memos.Get(txn, MemoNameIndex.Query(name))
 			if !ok {
 				w.WriteHeader(http.StatusNotFound)
 				return

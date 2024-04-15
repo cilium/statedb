@@ -45,7 +45,7 @@ func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 
 // Map applies a function to transform every object returned by the iterator
 func Map[In, Out any, It Iterator[In]](iter It, transform func(In) Out) Iterator[Out] {
-	return &mapIterator[In, Out]{
+	return mapIterator[In, Out]{
 		iter:      iter,
 		transform: transform,
 	}
@@ -56,7 +56,7 @@ type mapIterator[In, Out any] struct {
 	transform func(In) Out
 }
 
-func (it *mapIterator[In, Out]) Next() (out Out, revision Revision, ok bool) {
+func (it mapIterator[In, Out]) Next() (out Out, revision Revision, ok bool) {
 	obj, rev, ok := it.iter.Next()
 	if ok {
 		return it.transform(obj), rev, true
@@ -66,26 +66,31 @@ func (it *mapIterator[In, Out]) Next() (out Out, revision Revision, ok bool) {
 
 // Filter includes objects for which the supplied predicate returns true
 func Filter[Obj any, It Iterator[Obj]](iter It, pred func(Obj) bool) Iterator[Obj] {
-	return &filterIterator[Obj]{
-		iter: iter,
-		pred: pred,
+	return filterIterator[Obj]{
+		iter:  iter,
+		preds: []func(Obj) bool{pred},
 	}
 }
 
 type filterIterator[Obj any] struct {
-	iter Iterator[Obj]
-	pred func(Obj) bool
+	iter  Iterator[Obj]
+	preds []func(Obj) bool
 }
 
-func (it *filterIterator[Obj]) Next() (out Obj, revision Revision, ok bool) {
+func (it filterIterator[Obj]) Next() (out Obj, revision Revision, ok bool) {
+outer:
 	for {
 		out, revision, ok = it.iter.Next()
 		if !ok {
 			break
 		}
-		if it.pred(out) {
-			return out, revision, true
+
+		for _, pred := range it.preds {
+			if !pred(out) {
+				continue outer
+			}
 		}
+		return out, revision, true
 	}
 	return
 }
@@ -98,7 +103,7 @@ type uniqueIterator[Obj any] struct {
 	key  []byte
 }
 
-func (it *uniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
+func (it uniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 	var iobj object
 	for {
 		var key []byte
@@ -122,7 +127,7 @@ type nonUniqueIterator[Obj any] struct {
 	key  []byte
 }
 
-func (it *nonUniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
+func (it nonUniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 	var iobj object
 	for {
 		var key []byte

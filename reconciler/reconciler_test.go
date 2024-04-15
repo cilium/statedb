@@ -499,12 +499,12 @@ func (h testHelper) markForDelete(id uint64) {
 
 func (h testHelper) expectStatus(id uint64, kind reconciler.StatusKind, err string) {
 	cond := func() bool {
-		obj, _, ok := h.tbl.First(h.db.ReadTxn(), idIndex.Query(id))
+		obj, _, ok := h.tbl.Get(h.db.ReadTxn(), idIndex.Query(id))
 		return ok && obj.status.Kind == kind && obj.status.Error == err
 	}
 	if !assert.Eventually(h.t, cond, time.Second, time.Millisecond) {
 		actual := "<not found>"
-		obj, _, ok := h.tbl.First(h.db.ReadTxn(), idIndex.Query(id))
+		obj, _, ok := h.tbl.Get(h.db.ReadTxn(), idIndex.Query(id))
 		if ok {
 			actual = string(obj.status.Kind)
 		}
@@ -517,7 +517,7 @@ func (h testHelper) expectStatus(id uint64, kind reconciler.StatusKind, err stri
 func (h testHelper) expectNotFound(id uint64) {
 	h.t.Helper()
 	cond := func() bool {
-		_, _, ok := h.tbl.First(h.db.ReadTxn(), idIndex.Query(id))
+		_, _, ok := h.tbl.Get(h.db.ReadTxn(), idIndex.Query(id))
 		return !ok
 	}
 	require.Eventually(h.t, cond, time.Second, time.Millisecond, "expected object %d to not be found", id)

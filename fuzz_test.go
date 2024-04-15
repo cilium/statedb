@@ -230,15 +230,15 @@ func allAction(ctx actionContext) {
 	ctx.log.log("%s: All => %d found", ctx.table.Name(), len(statedb.Collect(iter)))
 }
 
-func getAction(ctx actionContext) {
+func selectAction(ctx actionContext) {
 	id := mkID()
-	iter, _ := ctx.table.Get(ctx.txn, idIndex.Query(mkID()))
-	ctx.log.log("%s: Get(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
+	iter := ctx.table.Select(ctx.txn, idIndex.Query(mkID()))
+	ctx.log.log("%s: Select(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
-func firstAction(ctx actionContext) {
+func getAction(ctx actionContext) {
 	id := mkID()
-	obj, rev, ok := ctx.table.First(ctx.txn, idIndex.Query(id))
+	obj, rev, ok := ctx.table.Get(ctx.txn, idIndex.Query(id))
 
 	if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}]; ok2 {
 		if e.act == actInsert {
@@ -254,7 +254,7 @@ func firstAction(ctx actionContext) {
 			}
 		}
 	}
-	ctx.log.log("%s: First(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
+	ctx.log.log("%s: Get(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
 func lastAction(ctx actionContext) {
@@ -284,9 +284,9 @@ var actions = []action{
 
 	deleteAllAction,
 
-	firstAction, firstAction, firstAction, firstAction, firstAction,
+	getAction, getAction, getAction, getAction, getAction,
 	allAction, lowerboundAction,
-	getAction, getAction, getAction,
+	selectAction, selectAction, selectAction,
 	lastAction, lastAction,
 	prefixAction,
 }

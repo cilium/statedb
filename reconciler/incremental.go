@@ -204,7 +204,7 @@ func (round *incrementalRound[Obj]) processRetries() {
 		}
 		round.retries.Pop()
 
-		obj, rev, ok := round.table.First(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
+		obj, rev, ok := round.table.Get(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
 		if !ok {
 			// Object has been deleted unexpectedly (e.g. from outside
 			// the reconciler). Assume that it can be forgotten about.
