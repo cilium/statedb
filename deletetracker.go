@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"runtime"
 	"sync/atomic"
 
 	"github.com/cilium/statedb/index"
@@ -53,8 +54,14 @@ func (dt *deleteTracker[Obj]) mark(upTo Revision) {
 }
 
 func (dt *deleteTracker[Obj]) close() {
+	if dt.db == nil {
+		return
+	}
+	runtime.SetFinalizer(dt, nil)
+
 	// Remove the delete tracker from the table.
 	txn := dt.db.WriteTxn(dt.table).getTxn()
+	dt.db = nil
 	db := txn.db
 	table := txn.modifiedTables[dt.table.tablePos()]
 	if table == nil {
@@ -71,6 +78,7 @@ func (dt *deleteTracker[Obj]) close() {
 	case db.gcTrigger <- struct{}{}:
 	default:
 	}
+
 }
 
 var closedWatchChannel = func() <-chan struct{} {

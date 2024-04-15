@@ -244,8 +244,11 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDelet
 	table := txn.modifiedTables[meta.tablePos()]
 	_, _, table.deleteTrackers = table.deleteTrackers.Insert([]byte(trackerName), dt)
 	txn.db.metrics.DeleteTrackerCount(meta.Name(), table.deleteTrackers.Len())
-	return nil
 
+	// Add a finalizer to make sure delete trackers are always closed.
+	runtime.SetFinalizer(dt, func(dt anyDeleteTracker) { dt.close() })
+
+	return nil
 }
 
 func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
