@@ -153,7 +153,7 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 					hadOld = true
 				} else {
 					// This is a non-leaf node, create/replace the existing leaf.
-					this.leaf = newLeaf(txn.opts, key, fullKey, value)
+					this.setLeaf(newLeaf(txn.opts, key, fullKey, value))
 				}
 				return
 			}
@@ -267,7 +267,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			newRoot = newNode4[T]()
 		} else {
 			newRoot = txn.cloneNode(root)
-			newRoot.leaf = nil
+			newRoot.setLeaf(nil)
 		}
 		return
 	}
@@ -288,11 +288,11 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			// This is the node that we want to delete, but it has
 			// children. Clone and clear the leaf.
 			target.node = txn.cloneNode(target.node)
-			target.node.leaf = nil
+			target.node.setLeaf(nil)
 			children[target.index] = target.node
 		}
 
-		if target.node.size() == 0 && (target.node == this || target.node.leaf == nil) {
+		if target.node.size() == 0 && (target.node == this || target.node.getLeaf() == nil) {
 			// The node is empty, remove it from the parent.
 			parent.node.remove(target.index)
 		} else {

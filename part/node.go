@@ -25,7 +25,6 @@ const (
 type header[T any] struct {
 	flags  uint16        // kind(4b) | unused(3b) | size(9b)
 	prefix []byte        // the compressed prefix, [0] is the key
-	leaf   *leaf[T]      // non-nil if this node contains a value
 	watch  chan struct{} // watch channel that is closed when this node mutates
 }
 
@@ -63,10 +62,37 @@ func (n *header[T]) isLeaf() bool {
 }
 
 func (n *header[T]) getLeaf() *leaf[T] {
-	if n.isLeaf() {
+	switch n.kind() {
+	case nodeKindLeaf:
 		return (*leaf[T])(unsafe.Pointer(n))
+	case nodeKind4:
+		return n.node4().leaf
+	case nodeKind16:
+		return n.node16().leaf
+	case nodeKind48:
+		return n.node48().leaf
+	case nodeKind256:
+		return n.node256().leaf
+	default:
+		panic("unknown node kind")
 	}
-	return n.leaf
+}
+
+func (n *header[T]) setLeaf(l *leaf[T]) {
+	switch n.kind() {
+	case nodeKindLeaf:
+		panic("cannot setLeaf on a leaf[T]")
+	case nodeKind4:
+		n.node4().leaf = l
+	case nodeKind16:
+		n.node16().leaf = l
+	case nodeKind48:
+		n.node48().leaf = l
+	case nodeKind256:
+		n.node256().leaf = l
+	default:
+		panic("unknown node kind")
+	}
 }
 
 func (n *header[T]) size() int {
@@ -296,21 +322,25 @@ func newLeaf[T any](o *options, prefix, key []byte, value T) *leaf[T] {
 
 type node4[T any] struct {
 	header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 	children [4]*header[T]
 }
 
 type node16[T any] struct {
 	header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 	children [16]*header[T]
 }
 
 type node48[T any] struct {
 	header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 	children [48]*header[T]
 }
 
 type node256[T any] struct {
 	header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 	children [256]*header[T]
 }
 
