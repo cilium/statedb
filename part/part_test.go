@@ -274,6 +274,86 @@ func Test_insert(t *testing.T) {
 	}
 }
 
+func Test_replaceRoot(t *testing.T) {
+	tree := New[int]()
+	keyA := []byte{'a'}
+	keyB := []byte{'a', 'b'}
+	_, _, tree = tree.Insert(keyA, 1)
+	_, _, tree = tree.Insert(keyB, 3)
+	_, _, tree = tree.Delete(keyA)
+	_, _, tree = tree.Insert(keyA, 2)
+	val, _, ok := tree.Get(keyA)
+	if !ok || val != 2 {
+		t.Fatalf("%v not found", keyA)
+	}
+	val, _, ok = tree.Get(keyB)
+	if !ok || val != 3 {
+		t.Fatalf("%v not found", keyB)
+	}
+}
+
+func Test_deleteRoot(t *testing.T) {
+	tree := New[int]()
+	keyA := []byte{'a'}
+	_, _, tree = tree.Insert(keyA, 1)
+	_, _, tree = tree.Delete(keyA)
+	_, _, ok := tree.Get(keyA)
+	if ok {
+		t.Fatal("Root exists")
+	}
+}
+
+func Test_deleteIntermediate(t *testing.T) {
+	tree := New[int]()
+	keyA := []byte{'a'}
+	keyAB := []byte{'a', 'b'}
+	keyABC := []byte{'a', 'b', 'c'}
+	_, _, tree = tree.Insert(keyA, 1)
+	_, _, tree = tree.Insert(keyAB, 2)
+	_, _, tree = tree.Insert(keyABC, 3)
+	_, _, tree = tree.Delete(keyAB)
+	_, _, ok := tree.Get(keyA)
+	if !ok {
+		t.Fatal("A doesn't exist")
+	}
+	_, _, ok = tree.Get(keyAB)
+	if ok {
+		t.Fatal("AB exists")
+	}
+	_, _, ok = tree.Get(keyABC)
+	if !ok {
+		t.Fatal("ABC doesn't exist")
+	}
+}
+
+func Test_deleteNonExistantIntermediate(t *testing.T) {
+	tree := New[int]()
+	keyAB := []byte{'a', 'b'}
+	keyAC := []byte{'a', 'c'}
+	_, _, tree = tree.Insert(keyAB, 1)
+	_, _, tree = tree.Insert(keyAC, 2)
+	_, _, tree = tree.Delete([]byte{'a'})
+	_, _, ok := tree.Get(keyAB)
+	if !ok {
+		t.Fatal("AB doesn't exist")
+	}
+	_, _, ok = tree.Get(keyAC)
+	if !ok {
+		t.Fatal("AC doesn't exist")
+	}
+}
+
+func Test_deleteNonExistantCommonPrefix(t *testing.T) {
+	tree := New[int]()
+	keyAB := []byte{'a', 'b', 'c'}
+	_, _, tree = tree.Insert(keyAB, 1)
+	_, _, tree = tree.Delete([]byte{'a', 'b', 'e'})
+	_, _, ok := tree.Get(keyAB)
+	if !ok {
+		t.Fatal("AB doesn't exist")
+	}
+}
+
 func Test_prefix(t *testing.T) {
 	tree := New[[]byte]()
 	ins := func(s string) { _, _, tree = tree.Insert([]byte(s), []byte(s)) }
@@ -402,6 +482,20 @@ func Test_iterate(t *testing.T) {
 		require.EqualValues(t, i, size)
 	}
 
+}
+
+func Test_lowerbound_bigger(t *testing.T) {
+	tree := New[uint64]()
+	ins := func(n int) { _, _, tree = tree.Insert(intKey(uint64(n)), uint64(n)) }
+
+	// Insert 5..10
+	for i := 5; i <= 10; i++ {
+		ins(i)
+	}
+
+	iter := tree.LowerBound([]byte{4})
+	_, _, ok := iter.Next()
+	require.False(t, ok)
 }
 
 func Benchmark_Insert_RootOnlyWatch(b *testing.B) {
