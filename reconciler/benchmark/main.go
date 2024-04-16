@@ -196,13 +196,14 @@ func main() {
 		}
 	}
 
+	runtime.GC()
+	var memAfter runtime.MemStats
+	runtime.ReadMemStats(&memAfter)
+
 	err = hive.Stop(context.TODO())
 	if err != nil {
 		panic(err)
 	}
-
-	var memAfter runtime.MemStats
-	runtime.ReadMemStats(&memAfter)
 
 	fmt.Printf("\n%d objects reconciled in %.2f seconds (batch size %d)\n",
 		*numObjects, float64(duration)/float64(time.Second), *batchSize)
