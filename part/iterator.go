@@ -80,34 +80,32 @@ func prefixSearch[T any](root *header[T], key []byte) (*Iterator[T], <-chan stru
 	}
 }
 
+func traverseToMin[T any](n *header[T], edges [][]*header[T]) [][]*header[T] {
+	if leaf := n.getLeaf(); leaf != nil {
+		return append(edges, []*header[T]{n})
+	}
+	children := n.children()
+
+	// Find the first non-nil child
+	for len(children) > 0 && children[0] == nil {
+		children = children[1:]
+	}
+
+	if len(children) > 0 {
+		// Add the larger children.
+		if len(children) > 1 {
+			edges = append(edges, children[1:])
+		}
+		// Recurse into the smallest child
+		return traverseToMin(children[0], edges)
+	}
+	return edges
+}
+
 func lowerbound[T any](start *header[T], key []byte) *Iterator[T] {
 	// The starting edges to explore. This contains all larger nodes encountered
 	// on the path to the node larger or equal to the key.
 	edges := [][]*header[T]{}
-
-	var traverseToMin func(n *header[T])
-	traverseToMin = func(n *header[T]) {
-		if leaf := n.getLeaf(); leaf != nil {
-			edges = append(edges, []*header[T]{n})
-			return
-		}
-		children := n.children()
-
-		// Find the first non-nil child
-		for len(children) > 0 && children[0] == nil {
-			children = children[1:]
-		}
-
-		if len(children) > 0 {
-			// Add the larger children.
-			if len(children) > 1 {
-				edges = append(edges, children[1:])
-			}
-			// Recurse into the smallest child
-			traverseToMin(children[0])
-		}
-	}
-
 	this := start
 loop:
 	for {
@@ -124,7 +122,7 @@ loop:
 				break loop
 			} else if len(key) == 0 {
 				// Search key exhausted, find the minimum node.
-				traverseToMin(this)
+				edges = traverseToMin(this, edges)
 				break loop
 			}
 
@@ -165,7 +163,7 @@ loop:
 
 		case 1:
 			// Prefix bigger than lowerbound, go to smallest node and stop.
-			traverseToMin(this)
+			edges = traverseToMin(this, edges)
 			break loop
 		}
 	}
