@@ -8,6 +8,53 @@ import (
 	"sort"
 )
 
+// Iterator for key and value pairs where value is of type T
+type Iterator[T any] struct {
+	next [][]*header[T] // sets of edges to explore
+}
+
+// Next returns the next key, value and true if the value exists,
+// otherwise it returns false.
+func (it *Iterator[T]) Next() (key []byte, value T, ok bool) {
+	for len(it.next) > 0 {
+		// Pop the next set of edges to explore
+		edges := it.next[len(it.next)-1]
+		for len(edges) > 0 && edges[0] == nil {
+			// Node256 may have nil children, so jump over them.
+			edges = edges[1:]
+		}
+		it.next = it.next[:len(it.next)-1]
+
+		if len(edges) == 0 {
+			continue
+		} else if len(edges) > 1 {
+			// More edges remain to be explored, add them back.
+			it.next = append(it.next, edges[1:])
+		}
+
+		// Follow the smallest edge and add its children to the queue.
+		node := edges[0]
+
+		if node.size() > 0 {
+			it.next = append(it.next, node.children())
+		}
+		if leaf := node.getLeaf(); leaf != nil {
+			key = leaf.key
+			value = leaf.value
+			ok = true
+			return
+		}
+	}
+	return
+}
+
+func newIterator[T any](start *header[T]) *Iterator[T] {
+	if start == nil {
+		return &Iterator[T]{nil}
+	}
+	return &Iterator[T]{[][]*header[T]{{start}}}
+}
+
 func prefixSearch[T any](root *header[T], key []byte) (*Iterator[T], <-chan struct{}) {
 	this := root
 
@@ -31,17 +78,6 @@ func prefixSearch[T any](root *header[T], key []byte) (*Iterator[T], <-chan stru
 			return newIterator[T](nil), root.watch
 		}
 	}
-}
-
-type Iterator[T any] struct {
-	next [][]*header[T] // sets of edges to explore
-}
-
-func newIterator[T any](start *header[T]) *Iterator[T] {
-	if start == nil {
-		return &Iterator[T]{nil}
-	}
-	return &Iterator[T]{[][]*header[T]{{start}}}
 }
 
 func lowerbound[T any](start *header[T], key []byte) *Iterator[T] {
@@ -138,37 +174,4 @@ loop:
 		return &Iterator[T]{edges}
 	}
 	return &Iterator[T]{nil}
-}
-
-func (it *Iterator[T]) Next() (key []byte, value T, ok bool) {
-	for len(it.next) > 0 {
-		// Pop the next set of edges to explore
-		edges := it.next[len(it.next)-1]
-		for len(edges) > 0 && edges[0] == nil {
-			// Node256 may have nil children, so jump over them.
-			edges = edges[1:]
-		}
-		it.next = it.next[:len(it.next)-1]
-
-		if len(edges) == 0 {
-			continue
-		} else if len(edges) > 1 {
-			// More edges remain to be explored, add them back.
-			it.next = append(it.next, edges[1:])
-		}
-
-		// Follow the smallest edge and add its children to the queue.
-		node := edges[0]
-
-		if node.size() > 0 {
-			it.next = append(it.next, node.children())
-		}
-		if leaf := node.getLeaf(); leaf != nil {
-			key = leaf.key
-			value = leaf.value
-			ok = true
-			return
-		}
-	}
-	return
 }

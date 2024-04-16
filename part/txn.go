@@ -7,38 +7,48 @@ import (
 	"bytes"
 )
 
+// Txn is a transaction against a tree. It allows doing efficient
+// modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
-	opts *options
-	root *header[T]
-	size int
+	// tree is the tree being modified
+	Tree[T]
 
-	// The set of nodes mutated in this transaction that we can keep
-	// mutating without cloning them again.
+	// mutated is the set of nodes mutated in this transaction
+	// that we can keep mutating without cloning them again.
+	// It is cleared if the transaction is cloned or iterated
+	// upon.
 	mutated map[*header[T]]struct{}
 
+	// watches contains the channels of cloned nodes that should be closed
+	// when transaction is committed.
 	watches map[chan struct{}]struct{}
 
-	deleteParents []deleteParent[T]
+	// deleteParentsCache keeps the last allocated slice to avoid
+	// reallocating it on every deletion.
+	deleteParentsCache []deleteParent[T]
 }
 
+// Len returns the number of objects in the tree.
 func (txn *Txn[T]) Len() int {
 	return txn.size
 }
 
+// Clone returns a clone of the transaction. The clone is unaffected
+// by any future changes done with the original transaction.
 func (txn *Txn[T]) Clone() *Txn[T] {
 	// Clear the mutated nodes so that the returned clone won't be changed by
 	// further modifications in this transaction.
 	clear(txn.mutated)
 	return &Txn[T]{
-		opts:          txn.opts,
-		root:          txn.root,
-		size:          txn.size,
-		mutated:       map[*header[T]]struct{}{},
-		watches:       map[chan struct{}]struct{}{},
-		deleteParents: nil,
+		Tree:               txn.Tree,
+		mutated:            map[*header[T]]struct{}{},
+		watches:            map[chan struct{}]struct{}{},
+		deleteParentsCache: nil,
 	}
 }
 
+// Insert or update the tree with the given key and value.
+// Returns the old value if it exists.
 func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
 	old, hadOld, txn.root = txn.insert(txn.root, key, value)
 	if !hadOld {
@@ -47,6 +57,8 @@ func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
 	return
 }
 
+// Delete the given key from the tree.
+// Returns the old value if it exists.
 func (txn *Txn[T]) Delete(key []byte) (old T, hadOld bool) {
 	old, hadOld, txn.root = txn.delete(txn.root, key)
 	if hadOld {
@@ -55,10 +67,17 @@ func (txn *Txn[T]) Delete(key []byte) (old T, hadOld bool) {
 	return
 }
 
+// RootWatch returns a watch channel for the root of the tree.
+// Since this is the channel associated with the root, this closes
+// when there are any changes to the tree.
 func (txn *Txn[T]) RootWatch() <-chan struct{} {
 	return txn.root.watch
 }
 
+// Get fetches the value associated with the given key.
+// Returns the value, a watch channel (which is closed on
+// modification to the key) and boolean which is true if
+// value was found.
 func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	value, watch, ok := search(txn.root, key)
 	if txn.opts.rootOnlyWatch {
@@ -67,6 +86,9 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	return value, watch, ok
 }
 
+// Prefix returns an iterator for all objects that starts with the
+// given prefix, and a channel that closes when any objects matching
+// the given prefix are upserted or deleted.
 func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 	txn.mutated = nil
 	iter, watch := prefixSearch(txn.root, key)
@@ -76,16 +98,20 @@ func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 	return iter, watch
 }
 
+// LowerBound returns an iterator for all objects that have a
+// key equal or higher than the given 'key'.
 func (txn *Txn[T]) LowerBound(key []byte) *Iterator[T] {
 	txn.mutated = nil
 	return lowerbound(txn.root, key)
 }
 
+// Iterator returns an iterator for all objects.
 func (txn *Txn[T]) Iterator() *Iterator[T] {
 	txn.mutated = nil
 	return newIterator[T](txn.root)
 }
 
+// Commit the transaction and produce the new tree.
 func (txn *Txn[T]) Commit() *Tree[T] {
 	txn.mutated = nil
 	for ch := range txn.watches {
@@ -95,11 +121,16 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 	return &Tree[T]{txn.opts, txn.root, txn.size}
 }
 
+// CommitOnly the transaction, but do not close the
+// watch channels. Returns the new tree.
+// To close the watch channels call Notify().
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
 	txn.mutated = nil
 	return &Tree[T]{txn.opts, txn.root, txn.size}
 }
 
+// Notify closes the watch channels of nodes that were
+// mutated as part of this transaction.
 func (txn *Txn[T]) Notify() {
 	for ch := range txn.watches {
 		close(ch)
@@ -107,6 +138,7 @@ func (txn *Txn[T]) Notify() {
 	txn.watches = nil
 }
 
+// PrintTree to the standard output. For debugging.
 func (txn *Txn[T]) PrintTree() {
 	txn.root.printTree(0)
 }
@@ -215,22 +247,25 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 	}
 }
 
+// deleteParent tracks a node on the path to the target node that is being
+// deleted.
 type deleteParent[T any] struct {
 	node  *header[T]
-	index int
+	index int // the index of this node at its parent
 }
 
 func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool, newRoot *header[T]) {
-	newRoot = root
-	this := root
 
 	// Reuse the same slice in the transaction to hold the parents in order to avoid
 	// allocations. Pre-allocate 32 levels to cover most of the use-cases without
 	// reallocation.
-	if txn.deleteParents == nil {
-		txn.deleteParents = make([]deleteParent[T], 0, 32)
+	if txn.deleteParentsCache == nil {
+		txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
 	}
-	parents := txn.deleteParents[:1] // Placeholder for root
+	parents := txn.deleteParentsCache[:1] // Placeholder for root
+
+	newRoot = root
+	this := root
 
 	// Find the target node and record the path to it.
 	var leaf *leaf[T]
