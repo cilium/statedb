@@ -485,6 +485,7 @@ func Test_lowerbound(t *testing.T) {
 func Test_iterate(t *testing.T) {
 	sizes := []int{0, 1, 10, 100, 1000, rand.Intn(1000)}
 	for _, size := range sizes {
+		t.Logf("size=%d", size)
 		tree := New[uint64]()
 		for i := 0; i < size; i++ {
 			_, _, tree = tree.Insert(intKey(uint64(i)), uint64(i))
@@ -499,6 +500,9 @@ func Test_iterate(t *testing.T) {
 			i++
 		}
 		require.EqualValues(t, i, size)
+
+		_, _, ok := iter.Next()
+		require.False(t, ok, "expected exhausted iterator to keep returning false")
 	}
 
 }

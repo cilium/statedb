@@ -22,6 +22,7 @@ const (
 	nodeKind256
 )
 
+// header is the common header shared by all node kinds.
 type header[T any] struct {
 	flags  uint16        // kind(4b) | unused(3b) | size(9b)
 	prefix []byte        // the compressed prefix, [0] is the key
