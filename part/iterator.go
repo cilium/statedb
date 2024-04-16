@@ -51,7 +51,7 @@ func lowerbound[T any](start *header[T], key []byte) *Iterator[T] {
 
 	var traverseToMin func(n *header[T])
 	traverseToMin = func(n *header[T]) {
-		if n.leaf != nil {
+		if leaf := n.getLeaf(); leaf != nil {
 			edges = append(edges, []*header[T]{n})
 			return
 		}
@@ -163,9 +163,9 @@ func (it *Iterator[T]) Next() (key []byte, value T, ok bool) {
 		if node.size() > 0 {
 			it.next = append(it.next, node.children())
 		}
-		if node.leaf != nil {
-			key = node.leaf.key
-			value = node.leaf.value
+		if leaf := node.getLeaf(); leaf != nil {
+			key = leaf.key
+			value = leaf.value
 			ok = true
 			return
 		}
