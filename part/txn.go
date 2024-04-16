@@ -255,7 +255,6 @@ type deleteParent[T any] struct {
 }
 
 func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool, newRoot *header[T]) {
-
 	// Reuse the same slice in the transaction to hold the parents in order to avoid
 	// allocations. Pre-allocate 32 levels to cover most of the use-cases without
 	// reallocation.
@@ -294,6 +293,11 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 
 	oldValue = leaf.value
 	hadOld = true
+
+	// Mark the watch channel of the target node for closing.
+	if this.watch != nil {
+		txn.watches[this.watch] = struct{}{}
+	}
 
 	if this == root {
 		// Target is the root, clear it.

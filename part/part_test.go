@@ -124,6 +124,7 @@ func Test_delete(t *testing.T) {
 			assert.False(t, ok)
 		}
 		tree = txn.Commit()
+
 		assert.Equal(t, 0, tree.Len())
 		for _, i := range keys {
 			_, _, ok := tree.Get(intKey(i))
@@ -136,11 +137,14 @@ func Test_delete(t *testing.T) {
 			keys[i], keys[j] = keys[j], keys[i]
 		})
 
+		watches := map[uint64]<-chan struct{}{}
+
 		txn = tree.Txn()
 		for _, i := range keys {
 			_, hadOld = txn.Insert(intKey(i), i)
 			assert.False(t, hadOld)
-			v, _, ok := txn.Get(intKey(i))
+			v, watch, ok := txn.Get(intKey(i))
+			watches[i] = watch
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
 		}
@@ -222,6 +226,11 @@ func Test_delete(t *testing.T) {
 		assert.False(t, ok)
 
 		tree = txn.Commit()
+
+		// Check that all the watch channels closed
+		for _, watch := range watches {
+			<-watch
+		}
 
 		// Check that everything is gone after commit.
 		for _, i := range keys {
