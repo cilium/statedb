@@ -84,7 +84,7 @@ func New[T any](opts ...Option) *Tree[T] {
 		opt(&o)
 	}
 	return &Tree[T]{
-		root: newRoot[T](),
+		root: newNode4[T](),
 		size: 0,
 		opts: &o,
 	}

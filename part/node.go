@@ -15,16 +15,12 @@ type nodeKind uint8
 
 const (
 	nodeKindUnknown = iota
+	nodeKindLeaf
 	nodeKind4
 	nodeKind16
 	nodeKind48
 	nodeKind256
 )
-
-type leaf[T any] struct {
-	key   []byte
-	value T
-}
 
 type header[T any] struct {
 	flags  uint16        // kind(4b) | unused(3b) | size(9b)
@@ -47,6 +43,8 @@ const sizeMask = uint16(0b0000_000_1111_1111_1)
 
 func (n *header[T]) cap() int {
 	switch n.kind() {
+	case nodeKindLeaf:
+		return 0
 	case nodeKind4:
 		return 4
 	case nodeKind16:
@@ -58,6 +56,17 @@ func (n *header[T]) cap() int {
 	default:
 		panic("unknown node kind")
 	}
+}
+
+func (n *header[T]) isLeaf() bool {
+	return n.kind() == nodeKindLeaf
+}
+
+func (n *header[T]) getLeaf() *leaf[T] {
+	if n.isLeaf() {
+		return (*leaf[T])(unsafe.Pointer(n))
+	}
+	return n.leaf
 }
 
 func (n *header[T]) size() int {
@@ -94,6 +103,9 @@ func (n *header[T]) node256() *node256[T] {
 func (n *header[T]) clone(watch bool) *header[T] {
 	var nCopy *header[T]
 	switch n.kind() {
+	case nodeKindLeaf:
+		l := *n.getLeaf()
+		nCopy = (&l).self()
 	case nodeKind4:
 		n4 := *n.node4()
 		nCopy = (&n4).self()
@@ -114,17 +126,20 @@ func (n *header[T]) clone(watch bool) *header[T] {
 	} else {
 		nCopy.watch = nil
 	}
-	if n.leaf != nil {
-		nCopy.leaf = &leaf[T]{
-			key:   n.leaf.key,
-			value: n.leaf.value,
-		}
-	}
 	return nCopy
 }
 
 func (n *header[T]) promote(watch bool) *header[T] {
 	switch n.kind() {
+	case nodeKindLeaf:
+		node4 := &node4[T]{}
+		node4.prefix = n.prefix
+		node4.leaf = n.getLeaf()
+		node4.setKind(nodeKind4)
+		if watch {
+			node4.watch = make(chan struct{})
+		}
+		return node4.self()
 	case nodeKind4:
 		node4 := n.node4()
 		node16 := &node16[T]{header: *n}
@@ -169,6 +184,8 @@ func (n *header[T]) printTree(level int) {
 
 	var children []*header[T]
 	switch n.kind() {
+	case nodeKindLeaf:
+		fmt.Printf("leaf[%v]:", n.prefix)
 	case nodeKind4:
 		fmt.Printf("node4[%v]:", n.prefix)
 		children = n.node4().children[:n.size()]
@@ -184,8 +201,8 @@ func (n *header[T]) printTree(level int) {
 	default:
 		panic("unknown node kind")
 	}
-	if n.leaf != nil {
-		fmt.Printf(" %v -> %v", n.leaf.key, n.leaf.value)
+	if leaf := n.getLeaf(); leaf != nil {
+		fmt.Printf(" %v -> %v", leaf.key, leaf.value)
 	}
 	fmt.Printf("(%p)\n", n)
 
@@ -198,6 +215,8 @@ func (n *header[T]) printTree(level int) {
 
 func (n *header[T]) children() []*header[T] {
 	switch n.kind() {
+	case nodeKindLeaf:
+		return nil
 	case nodeKind4:
 		return n.node4().children[0:n.size():4]
 	case nodeKind16:
@@ -257,6 +276,24 @@ func (n *header[T]) remove(idx int) {
 	n.setSize(n.size() - 1)
 }
 
+type leaf[T any] struct {
+	header[T]
+	key   []byte
+	value T
+}
+
+func newLeaf[T any](o *options, prefix, key []byte, value T) *leaf[T] {
+	leaf := &leaf[T]{key: key, value: value}
+	leaf.prefix = prefix
+	leaf.setKind(nodeKindLeaf)
+
+	if !o.rootOnlyWatch {
+		leaf.watch = make(chan struct{})
+	}
+
+	return leaf
+}
+
 type node4[T any] struct {
 	header[T]
 	children [4]*header[T]
@@ -277,7 +314,7 @@ type node256[T any] struct {
 	children [256]*header[T]
 }
 
-func newRoot[T any]() *header[T] {
+func newNode4[T any]() *header[T] {
 	n := &node4[T]{header: header[T]{watch: make(chan struct{})}}
 	n.setKind(nodeKind4)
 	return n.self()
@@ -293,8 +330,8 @@ func search[T any](root *header[T], key []byte) (value T, watch <-chan struct{},
 		key = key[len(this.prefix):]
 
 		if len(key) == 0 {
-			if this.leaf != nil {
-				value = this.leaf.value
+			if leaf := this.getLeaf(); leaf != nil {
+				value = leaf.value
 				watch = this.watch
 				ok = true
 			}

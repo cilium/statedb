@@ -128,20 +128,10 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 
 func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, hadOld bool, newRoot *header[T]) {
 	fullKey := key
-	mkLeafNode := func(prefix []byte) *header[T] {
-		newLeaf := &node4[T]{}
-		newLeaf.leaf = &leaf[T]{key: fullKey, value: value}
-		newLeaf.setKind(nodeKind4)
-		if !txn.opts.rootOnlyWatch {
-			newLeaf.header.watch = make(chan struct{})
-		}
-		newLeaf.prefix = prefix
-		return newLeaf.self()
-	}
 
-	if root.size() == 0 && root.leaf == nil {
+	if root.size() == 0 && root.getLeaf() == nil {
 		txn.watches[root.watch] = struct{}{}
-		newRoot = mkLeafNode(key)
+		newRoot = newLeaf(txn.opts, key, key, value).self()
 		if newRoot.watch == nil {
 			newRoot.watch = make(chan struct{})
 		}
@@ -155,14 +145,15 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 		if bytes.HasPrefix(key, this.prefix) {
 			key = key[len(this.prefix):]
 			if len(key) == 0 {
-				if this.leaf != nil {
-					oldValue = this.leaf.value
+				if this.isLeaf() {
+					// This is a leaf node and we just cloned it. Update the value.
+					leaf := this.getLeaf()
+					oldValue = leaf.value
+					leaf.value = value
 					hadOld = true
-
-					this.leaf.key = fullKey
-					this.leaf.value = value
 				} else {
-					this.leaf = &leaf[T]{key: fullKey, value: value}
+					// This is a non-leaf node, create/replace the existing leaf.
+					this.leaf = newLeaf(txn.opts, key, fullKey, value)
 				}
 				return
 			}
@@ -181,7 +172,7 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 					// it fits, just need a clone.
 					this = txn.cloneNode(this)
 				}
-				this.insert(idx, mkLeafNode(key).self())
+				this.insert(idx, newLeaf(txn.opts, key, fullKey, value).self())
 				*thisp = this
 				return
 			}
@@ -202,7 +193,7 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 			this.prefix = this.prefix[len(newPrefix):]
 			key = key[len(newPrefix):]
 
-			newLeaf := mkLeafNode(key)
+			newLeaf := newLeaf(txn.opts, key, fullKey, value).self()
 			newNode := &node4[T]{
 				header: header[T]{prefix: newPrefix},
 			}
@@ -242,12 +233,13 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	parents := txn.deleteParents[:1] // Placeholder for root
 
 	// Find the target node and record the path to it.
+	var leaf *leaf[T]
 	for {
 		if bytes.HasPrefix(key, this.prefix) {
 			key = key[len(this.prefix):]
 			if len(key) == 0 {
-				if this.leaf == nil {
-					// Not found.
+				leaf = this.getLeaf()
+				if leaf == nil {
 					return
 				}
 				// Target node found!
@@ -265,22 +257,24 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 		}
 	}
 
-	oldValue = this.leaf.value
+	oldValue = leaf.value
 	hadOld = true
+
+	if this == root {
+		// Target is the root, clear it.
+		if root.isLeaf() || newRoot.size() == 0 {
+			// Replace leaf or empty root with a node4
+			newRoot = newNode4[T]()
+		} else {
+			newRoot = txn.cloneNode(root)
+			newRoot.leaf = nil
+		}
+		return
+	}
 
 	// The target was found, rebuild the tree from the root upwards.
 	newRoot = txn.cloneNode(root)
 	parents[0].node = newRoot
-
-	if this == root {
-		// Target is the root, clear it.
-		newRoot.leaf = nil
-		if newRoot.size() == 0 {
-			// No children so we can clear the prefix.
-			newRoot.prefix = nil
-		}
-		return
-	}
 
 	for i := len(parents) - 1; i > 0; i-- {
 		parent := &parents[i-1]

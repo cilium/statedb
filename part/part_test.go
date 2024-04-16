@@ -114,10 +114,12 @@ func Test_delete(t *testing.T) {
 
 		txn = tree.Txn()
 		for _, i := range keys {
-			_, _, ok := txn.Get(intKey(i))
+			v, _, ok := txn.Get(intKey(i))
 			assert.True(t, ok)
-			_, hadOld = txn.Delete(intKey(i))
+			assert.EqualValues(t, v, i)
+			v, hadOld = txn.Delete(intKey(i))
 			assert.True(t, hadOld)
+			assert.EqualValues(t, v, i)
 			_, _, ok = txn.Get(intKey(i))
 			assert.False(t, ok)
 		}
@@ -258,7 +260,7 @@ func Test_watch(t *testing.T) {
 		t.Fatal("expected to find 'a'")
 	}
 	if string(v) != "b" {
-		t.Fatal("expected value 'b'")
+		t.Fatalf("expected value 'b', got '%s'", v)
 	}
 }
 
@@ -355,6 +357,20 @@ func Test_deleteNonExistantCommonPrefix(t *testing.T) {
 	if !ok {
 		t.Fatal("AB doesn't exist")
 	}
+}
+
+func Test_replace(t *testing.T) {
+	tree := New[int]()
+	key := binary.BigEndian.AppendUint32(nil, uint32(0))
+
+	var v int
+	var hadOld bool
+	_, hadOld, tree = tree.Insert(key, 1)
+	require.False(t, hadOld)
+
+	v, hadOld, tree = tree.Insert(key, 2)
+	require.True(t, hadOld)
+	require.EqualValues(t, 1, v)
 }
 
 func Test_prefix(t *testing.T) {
