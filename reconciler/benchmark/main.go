@@ -31,6 +31,7 @@ var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
 var numObjects = flag.Int("objects", 100000, "number of objects to create")
 var batchSize = flag.Int("batchsize", 1000, "batch size for writes")
 var incrBatchSize = flag.Int("incrbatchsize", 1000, "maximum batch size for incremental reconciliation")
+var quiet = flag.Bool("quiet", false, "quiet output for CI")
 
 type testObject struct {
 	id     uint64
@@ -154,7 +155,9 @@ func main() {
 	id := uint64(0)
 	batches := int(*numObjects / *batchSize)
 	for b := 0; b < batches; b++ {
-		fmt.Printf("\rInserting batch %d/%d ...", b+1, batches)
+		if !*quiet {
+			fmt.Printf("\rInserting batch %d/%d ...", b+1, batches)
+		}
 		wtxn := db.WriteTxn(testObjects)
 		for j := 0; j < *batchSize; j++ {
 			testObjects.Insert(wtxn, &testObject{
@@ -166,7 +169,9 @@ func main() {
 		wtxn.Commit()
 	}
 
-	fmt.Printf("\nWaiting for reconciliation to finish ...\n")
+	if !*quiet {
+		fmt.Printf("\nWaiting for reconciliation to finish ...\n\n")
+	}
 
 	// Wait for all to be reconciled by waiting for the last added objects to be marked
 	// reconciled. This only works here since none of the operations fail.
@@ -205,7 +210,7 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("\n%d objects reconciled in %.2f seconds (batch size %d)\n",
+	fmt.Printf("%d objects reconciled in %.2f seconds (batch size %d)\n",
 		*numObjects, float64(duration)/float64(time.Second), *batchSize)
 	fmt.Printf("Throughput %.2f objects per second\n", objsPerSecond)
 	fmt.Printf("Allocated %d objects, %dkB bytes, %dkB bytes still in use\n",

@@ -22,11 +22,25 @@ jobs:
           fetch-depth: 0
       - name: test
         run: |
-          make test
+          echo '```' > results.comment
+          echo "$ make test" >> results.comment
+          make test 2>&1 | tee test.out
+          cat test.out | tail -20 >> results.comment
+          echo "-----" >> results.comment
+
       - name: test-race
         run: |
           make test-race
       - name: bench
         run: |
-          make bench
+          echo "$ make bench" >> results.comment
+          make bench 2>&1 | tee bench.out
+          cat bench.out >> results.comment
+          echo '```' >> results.comment
+          
+      - name: results
+        uses: thollander/actions-comment-pull-request@v2
+        with:
+          comment_tag: results
+          filePath: results.comment
 
