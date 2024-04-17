@@ -212,24 +212,24 @@ func (n *header[T]) printTree(level int) {
 	var children []*header[T]
 	switch n.kind() {
 	case nodeKindLeaf:
-		fmt.Printf("leaf[%v]:", n.prefix)
+		fmt.Printf("leaf[%x]:", n.prefix)
 	case nodeKind4:
-		fmt.Printf("node4[%v]:", n.prefix)
+		fmt.Printf("node4[%x]:", n.prefix)
 		children = n.node4().children[:n.size()]
 	case nodeKind16:
-		fmt.Printf("node16[%v]:", n.prefix)
+		fmt.Printf("node16[%x]:", n.prefix)
 		children = n.node16().children[:n.size()]
 	case nodeKind48:
-		fmt.Printf("node48[%v]:", n.prefix)
+		fmt.Printf("node48[%x]:", n.prefix)
 		children = n.node48().children[:n.size()]
 	case nodeKind256:
-		fmt.Printf("node256[%v]:", n.prefix)
+		fmt.Printf("node256[%x]:", n.prefix)
 		children = n.node256().children[:]
 	default:
 		panic("unknown node kind")
 	}
 	if leaf := n.getLeaf(); leaf != nil {
-		fmt.Printf(" %v -> %v", leaf.key, leaf.value)
+		fmt.Printf(" %x -> %v", leaf.key, leaf.value)
 	}
 	fmt.Printf("(%p)\n", n)
 
