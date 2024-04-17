@@ -190,7 +190,7 @@ func (txn *txn) insert(meta TableMeta, guardRevision Revision, data any) (object
 
 	// If it's new, possibly remove an older deleted object with the same
 	// primary key from the graveyard.
-	if !oldExists && txn.hasDeleteTrackers(meta) {
+	if !oldExists {
 		if old, existed := txn.mustIndexWriteTxn(meta, GraveyardIndexPos).Delete(idKey); existed {
 			var revKey [8]byte // to avoid heap allocation
 			binary.BigEndian.PutUint64(revKey[:], old.revision)
@@ -291,6 +291,7 @@ func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object
 	var revKey [8]byte // To avoid heap allocation
 	binary.BigEndian.PutUint64(revKey[:], obj.revision)
 	if _, ok := indexTree.Delete(revKey[:]); !ok {
+		txn.Abort()
 		panic("BUG: Object to be deleted not found from revision index")
 	}
 
@@ -309,6 +310,7 @@ func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object
 		graveyardIndex := txn.mustIndexWriteTxn(meta, GraveyardIndexPos)
 		obj.revision = revision
 		if _, existed := graveyardIndex.Insert(idKey, obj); existed {
+			txn.Abort()
 			panic("BUG: Double deletion! Deleted object already existed in graveyard")
 		}
 		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Insert(index.Uint64(revision), obj)
