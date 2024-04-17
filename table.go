@@ -324,24 +324,23 @@ func (t *genTable[Obj]) Changes(txn ReadTxn) (ChangeIterator[Obj], error) {
 		table:    t,
 	}
 
-	// To add a delete tracker we need a write transaction against this table. Let's figure
-	// out first what the user gave us.
-	itxn := txn.getTxn()
-	ok := false
-	for _, e := range itxn.modifiedTables {
+	// Check that 'txn' is not a 'WriteTxn' against this table.
+	for _, e := range txn.getTxn().modifiedTables {
 		if e != nil && e.meta.Name() == t.table {
-			// Great, txn is a WriteTxn against this table, we can use it as is.
-			ok = true
+			// 'txn' is a WriteTxn against the same table. Refuse this as the snapshot
+			// to seed the initial iterator from.
+			//
+			// The user might use the same transaction to insert or delete objects
+			// and it might be confusing as these changes may or may not be observed
+			// depending on whether Changes() was called before Insert() or Delete(),
+			// and since this is an unexpected use-case it's better to just reject this.
+			return nil, fmt.Errorf("Changes() cannot be called with a write transaction against table %q", t.table)
 		}
 	}
-	if !ok {
-		// We can't use the provided txn to register the delete tracker.
-		// Construct a WriteTxn on behalf of the user. This is a potential deadlock
-		// danger if the caller has a WriteTxn against this table, but didn't give it.
-		// This however should not be an easy mistake to make.
-		itxn = itxn.db.WriteTxn(t).getTxn()
-		defer itxn.Commit()
-	}
+
+	// Create a WriteTxn to add the delete tracker.
+	itxn := txn.getTxn().db.WriteTxn(t).getTxn()
+	defer itxn.Commit()
 
 	name := fmt.Sprintf("iterator-%p", iter)
 	iter.dt = &deleteTracker[Obj]{

@@ -294,10 +294,12 @@ func BenchmarkDB_Changes(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
+		// Create the change iterator.
+		iter, err := table.Changes(db.ReadTxn())
+		require.NoError(b, err)
+
 		// Create objects
 		txn := db.WriteTxn(table)
-		iter, err := table.Changes(txn)
-		require.NoError(b, err)
 		for i := 0; i < numObjectsToInsert; i++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
 			if err != nil {
@@ -306,22 +308,40 @@ func BenchmarkDB_Changes(b *testing.B) {
 		}
 		txn.Commit()
 
+		// Iterator created before insertions should be empty.
+		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+			b.Fatalf("did not expect change: %v", ev)
+		}
+
+		// Refresh to observe the insertions.
+		<-iter.Watch(db.ReadTxn())
+		nDeleted := 0
+		nExists := 0
+		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
+			if ev.Deleted {
+				b.Fatalf("expected create for %v", ev)
+			}
+			nExists++
+		}
+		require.EqualValues(b, numObjectsToInsert, nExists)
+
 		// Delete all objects to time the cost for deletion tracking.
 		txn = db.WriteTxn(table)
 		table.DeleteAll(txn)
 		txn.Commit()
 
-		// Iterate over the deleted objects
-		nDeleted := 0
+		// Refresh to observe the deletions.
 		<-iter.Watch(db.ReadTxn())
 		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
 			if ev.Deleted {
 				nDeleted++
+				nExists--
 			} else {
 				b.Fatalf("expected deleted for %v", ev)
 			}
 		}
-		require.EqualValues(b, nDeleted, numObjectsToInsert)
+		require.EqualValues(b, numObjectsToInsert, nDeleted)
+		require.EqualValues(b, 0, nExists)
 		iter.Close()
 	}
 	b.StopTimer()
