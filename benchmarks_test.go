@@ -295,11 +295,13 @@ func BenchmarkDB_Changes(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		// Create the change iterator.
-		iter, err := table.Changes(db.ReadTxn())
+		txn := db.WriteTxn(table)
+		iter, err := table.Changes(txn)
+		txn.Commit()
 		require.NoError(b, err)
 
 		// Create objects
-		txn := db.WriteTxn(table)
+		txn = db.WriteTxn(table)
 		for i := 0; i < numObjectsToInsert; i++ {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: nil})
 			if err != nil {

@@ -251,6 +251,10 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDelet
 		return ErrTransactionClosed
 	}
 	table := txn.modifiedTables[meta.tablePos()]
+	if table == nil {
+		return tableError(meta.Name(), ErrTableNotLockedForWriting)
+	}
+
 	_, _, table.deleteTrackers = table.deleteTrackers.Insert([]byte(trackerName), dt)
 	txn.db.metrics.DeleteTrackerCount(meta.Name(), table.deleteTrackers.Len())
 

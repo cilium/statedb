@@ -277,11 +277,12 @@ func TestDB_EventIterator(t *testing.T) {
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
 	// Create two change iterators
-	txn := db.ReadTxn()
-	iter, err := table.Changes(txn)
+	wtxn := db.WriteTxn(table)
+	iter, err := table.Changes(wtxn)
 	require.NoError(t, err, "failed to create ChangeIterator")
-	iter2, err := table.Changes(txn)
+	iter2, err := table.Changes(wtxn)
 	require.NoError(t, err, "failed to create ChangeIterator")
+	wtxn.Commit()
 
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
 
@@ -311,7 +312,7 @@ func TestDB_EventIterator(t *testing.T) {
 	}
 
 	// 1 object should exist.
-	txn = db.ReadTxn()
+	txn := db.ReadTxn()
 	iterAll, _ := table.All(txn)
 	objs := Collect(iterAll)
 	require.Len(t, objs, 1)

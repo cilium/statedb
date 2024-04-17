@@ -71,7 +71,7 @@ type Table[Obj any] interface {
 	//
 	// If an object is created and deleted before the observer has iterated
 	// over the creation then only the deletion is seen.
-	Changes(txn ReadTxn) (ChangeIterator[Obj], error)
+	Changes(WriteTxn) (ChangeIterator[Obj], error)
 }
 
 // Change is either an update or a delete of an object. Used by Changes() and
