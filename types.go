@@ -198,6 +198,8 @@ type Iterator[Obj any] interface {
 }
 
 type ReadTxn interface {
+	PrintRevisionTrees(TableMeta)
+
 	getTxn() *txn
 
 	// WriteJSON writes the contents of the database as JSON.
@@ -233,6 +235,13 @@ type Query[Obj any] struct {
 func ByRevision[Obj any](rev uint64) Query[Obj] {
 	return Query[Obj]{
 		index: RevisionIndex,
+		key:   index.Uint64(rev),
+	}
+}
+
+func ByGraveyardRevision[Obj any](rev uint64) Query[Obj] {
+	return Query[Obj]{
+		index: GraveyardRevisionIndex,
 		key:   index.Uint64(rev),
 	}
 }

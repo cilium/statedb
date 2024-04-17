@@ -41,6 +41,15 @@ type indexTxn struct {
 
 var zeroTxn = txn{}
 
+func (txn *txn) PrintRevisionTrees(meta TableMeta) {
+	fmt.Printf("Primary index:\n")
+	txn.mustIndexReadTxn(meta, PrimaryIndexPos).PrintTree()
+	fmt.Printf("Revision index:\n")
+	txn.mustIndexReadTxn(meta, RevisionIndexPos).PrintTree()
+	fmt.Printf("Graveyard revision index:\n")
+	txn.mustIndexReadTxn(meta, GraveyardRevisionIndexPos).PrintTree()
+}
+
 // txn fulfills the ReadTxn/WriteTxn interface.
 func (txn *txn) getTxn() *txn {
 	return txn

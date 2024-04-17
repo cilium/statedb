@@ -44,11 +44,11 @@ func newDebugLogger(worker int) *debugLogger {
 }
 
 const (
-	numUniqueIDs    = 3000
-	numUniqueValues = 2000
+	numUniqueIDs    = 100
+	numUniqueValues = 200
 	numWorkers      = 20
 	numTrackers     = 5
-	numIterations   = 1000
+	numIterations   = 10000
 )
 
 type fuzzObj struct {
@@ -383,6 +383,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 
 	var prevRev statedb.Revision
 	for {
+		prevPrevRev := prevRev
 		for change, rev, ok := iter.Next(); ok; change, rev, ok = iter.Next() {
 			log.log("%d: %v", rev, change)
 
@@ -413,6 +414,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 		for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
 			change, found := state[obj.id]
 			if !found {
+				txn.PrintRevisionTrees(tableFuzz1)
 				panic(fmt.Sprintf("trackerWorker: object %d not found from state", obj.id))
 			}
 
@@ -430,6 +432,19 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			for id := range state2 {
 				fmt.Printf("%d should not exist\n", id)
 			}
+			fmt.Printf("LowerBound %d:\n", prevPrevRev+1)
+			iterLow, _ := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](prevPrevRev+1))
+			for obj, rev, ok := iterLow.Next(); ok; obj, rev, ok = iterLow.Next() {
+				fmt.Printf("- %v (%d)\n", obj, rev)
+			}
+
+			fmt.Printf("LowerBound Graveyard %d:\n", prevPrevRev+1)
+			iterLow, _ = tableFuzz1.LowerBound(txn, statedb.ByGraveyardRevision[fuzzObj](prevPrevRev+1))
+			for obj, rev, ok := iterLow.Next(); ok; obj, rev, ok = iterLow.Next() {
+				fmt.Printf("- %v (%d)\n", obj, rev)
+			}
+
+			txn.PrintRevisionTrees(tableFuzz1)
 			panic(fmt.Sprintf("trackerWorker: state size mismatch: %d vs %d", len(state), tableFuzz1.NumObjects(txn)))
 		}
 
