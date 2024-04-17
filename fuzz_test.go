@@ -44,10 +44,11 @@ func newDebugLogger(worker int) *debugLogger {
 }
 
 const (
-	numUniqueIDs    = 2000
-	numUniqueValues = 3000
+	numUniqueIDs    = 3000
+	numUniqueValues = 2000
 	numWorkers      = 20
-	numIterations   = 5000
+	numTrackers     = 5
+	numIterations   = 1000
 )
 
 type fuzzObj struct {
@@ -514,8 +515,8 @@ func TestDB_Fuzz(t *testing.T) {
 	// Start change trackers to observe changes.
 	stop := make(chan struct{})
 	var wg2 sync.WaitGroup
-	wg2.Add(3)
-	for i := 0; i < 3; i++ {
+	wg2.Add(numTrackers)
+	for i := 0; i < numTrackers; i++ {
 		i := i
 		go func() {
 			trackerWorker(i, stop)

@@ -111,22 +111,20 @@ loop:
 	for {
 		switch bytes.Compare(this.prefix, key[:min(len(key), len(this.prefix))]) {
 		case -1:
-			// Prefix is smaller, which means there is no node smaller than
-			// the given lowerbound.
-			return &Iterator[T]{nil}
+			// Prefix is smaller, stop here and return an iterator for
+			// the larger nodes in the parent's.
+			break loop
 
 		case 0:
 			if len(this.prefix) == len(key) {
 				// Exact match.
 				edges = append(edges, []*header[T]{this})
 				break loop
-			} else if len(key) == 0 {
-				// Search key exhausted, find the minimum node.
-				edges = traverseToMin(this, edges)
-				break loop
 			}
 
-			// Prefix matches, keep going.
+			// Prefix matches the beginning of the key, but more
+			// remains of the key. Drop the matching part and keep
+			// going further.
 			key = key[len(this.prefix):]
 
 			if this.kind() == nodeKind256 {
