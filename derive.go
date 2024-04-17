@@ -70,7 +70,9 @@ type derive[In, Out any] struct {
 
 func (d derive[In, Out]) loop(ctx context.Context, health cell.Health) error {
 	out := d.OutTable
-	iter, err := d.InTable.Changes(d.DB.ReadTxn())
+	txn := d.DB.WriteTxn(d.InTable)
+	iter, err := d.InTable.Changes(txn)
+	txn.Commit()
 	if err != nil {
 		return err
 	}

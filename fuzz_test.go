@@ -371,8 +371,9 @@ func randomAction() action {
 
 func trackerWorker(i int, stop <-chan struct{}) {
 	log := newDebugLogger(900 + i)
-	txn := fuzzDB.ReadTxn()
-	iter, err := tableFuzz1.Changes(txn)
+	wtxn := fuzzDB.WriteTxn(tableFuzz1)
+	iter, err := tableFuzz1.Changes(wtxn)
+	wtxn.Commit()
 	if err != nil {
 		panic(err)
 	}
@@ -381,6 +382,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	// Keep track of what state the changes lead us to in order to validate it.
 	state := map[uint64]*statedb.Change[fuzzObj]{}
 
+	var txn statedb.ReadTxn
 	var prevRev statedb.Revision
 	for {
 		for change, rev, ok := iter.Next(); ok; change, rev, ok = iter.Next() {
@@ -406,31 +408,34 @@ func trackerWorker(i int, stop <-chan struct{}) {
 				state[change.Object.id] = &change
 			}
 		}
-		// Validate that the observed changes match with the database state at this
-		// snapshot.
-		state2 := maps.Clone(state)
-		iterAll, _ := tableFuzz1.All(txn)
-		for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
-			change, found := state[obj.id]
-			if !found {
-				panic(fmt.Sprintf("trackerWorker: object %d not found from state", obj.id))
+
+		if txn != nil {
+			// Validate that the observed changes match with the database state at this
+			// snapshot.
+			state2 := maps.Clone(state)
+			iterAll, _ := tableFuzz1.All(txn)
+			for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
+				change, found := state[obj.id]
+				if !found {
+					panic(fmt.Sprintf("trackerWorker: object %d not found from state", obj.id))
+				}
+
+				if change.Revision != rev {
+					panic(fmt.Sprintf("trackerWorker: last observed revision %d does not match real revision %d", change.Revision, rev))
+				}
+
+				if change.Object.value != obj.value {
+					panic(fmt.Sprintf("trackerWorker: observed value %d does not match real value %d", change.Object.value, obj.value))
+				}
+				delete(state2, obj.id)
 			}
 
-			if change.Revision != rev {
-				panic(fmt.Sprintf("trackerWorker: last observed revision %d does not match real revision %d", change.Revision, rev))
+			if len(state) != tableFuzz1.NumObjects(txn) {
+				for id := range state2 {
+					fmt.Printf("%d should not exist\n", id)
+				}
+				panic(fmt.Sprintf("trackerWorker: state size mismatch: %d vs %d", len(state), tableFuzz1.NumObjects(txn)))
 			}
-
-			if change.Object.value != obj.value {
-				panic(fmt.Sprintf("trackerWorker: observed value %d does not match real value %d", change.Object.value, obj.value))
-			}
-			delete(state2, obj.id)
-		}
-
-		if len(state) != tableFuzz1.NumObjects(txn) {
-			for id := range state2 {
-				fmt.Printf("%d should not exist\n", id)
-			}
-			panic(fmt.Sprintf("trackerWorker: state size mismatch: %d vs %d", len(state), tableFuzz1.NumObjects(txn)))
 		}
 
 		txn = fuzzDB.ReadTxn()
@@ -524,7 +529,7 @@ func TestDB_Fuzz(t *testing.T) {
 		}()
 		// Delay a bit to start the trackers at different points in time
 		// so they will observe a different starting state.
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	// Wait until the mutation workers stop and then stop

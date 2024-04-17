@@ -25,7 +25,9 @@ type observable[Obj any] struct {
 
 func (to *observable[Obj]) Observe(ctx context.Context, next func(Change[Obj]), complete func(error)) {
 	go func() {
-		iter, err := to.table.Changes(to.db.ReadTxn())
+		txn := to.db.WriteTxn(to.table)
+		iter, err := to.table.Changes(txn)
+		txn.Commit()
 		if err != nil {
 			complete(err)
 			return

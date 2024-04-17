@@ -318,30 +318,13 @@ func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
 	return nil
 }
 
-func (t *genTable[Obj]) Changes(txn ReadTxn) (ChangeIterator[Obj], error) {
+func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	iter := &changeIterator[Obj]{
 		revision: 0,
 		table:    t,
 	}
 
-	// Check that 'txn' is not a 'WriteTxn' against this table.
-	for _, e := range txn.getTxn().modifiedTables {
-		if e != nil && e.meta.Name() == t.table {
-			// 'txn' is a WriteTxn against the same table. Refuse this as the snapshot
-			// to seed the initial iterator from.
-			//
-			// The user might use the same transaction to insert or delete objects
-			// and it might be confusing as these changes may or may not be observed
-			// depending on whether Changes() was called before Insert() or Delete(),
-			// and since this is an unexpected use-case it's better to just reject this.
-			return nil, fmt.Errorf("Changes() cannot be called with a write transaction against table %q", t.table)
-		}
-	}
-
-	// Create a WriteTxn to add the delete tracker.
-	itxn := txn.getTxn().db.WriteTxn(t).getTxn()
-	defer itxn.Commit()
-
+	itxn := txn.getTxn()
 	name := fmt.Sprintf("iterator-%p", iter)
 	iter.dt = &deleteTracker[Obj]{
 		db:          itxn.db,
