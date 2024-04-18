@@ -34,8 +34,13 @@ func NewRemoteTable[Obj any](base *url.URL, table TableName) *RemoteTable[Obj] {
 }
 
 type RemoteTable[Obj any] struct {
+	client    http.Client
 	base      *url.URL
 	tableName TableName
+}
+
+func (t *RemoteTable[Obj]) SetTransport(tr *http.Transport) {
+	t.client.Transport = tr
 }
 
 func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[Obj]) (iter Iterator[Obj], errChan <-chan error) {
@@ -65,7 +70,7 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	req.Header.Add("Content-Type", "application/json")
 	req.Header.Add("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := t.client.Do(req)
 	if err != nil {
 		errChanSend <- err
 		return
@@ -105,7 +110,7 @@ func (it *remoteGetIterator[Obj]) Next() (obj Obj, revision Revision, ok bool) {
 			close(it.errChan)
 			return
 		}
-		errString = err.Error()
+		errString = "Decode error: " + err.Error()
 	} else {
 		errString = resp.Err
 	}
