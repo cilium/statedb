@@ -5,7 +5,7 @@ package statedb
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,7 +35,7 @@ func httpFixture(t *testing.T) (*DB, Table[testObject], *httptest.Server) {
 }
 
 func Test_http_dump(t *testing.T) {
-	_, _, ts := httpFixture(t)
+	db, tbl, ts := httpFixture(t)
 
 	resp, err := http.Get(ts.URL + "/dump")
 	require.NoError(t, err, "Get(/dump)")
@@ -44,7 +44,12 @@ func Test_http_dump(t *testing.T) {
 	dump, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	require.NoError(t, err, "ReadAll")
-	fmt.Printf("%s", dump)
+
+	var data map[string]any
+	require.NoError(t, json.Unmarshal(dump, &data), "Unmarshal")
+	test, ok := data["test"]
+	require.True(t, ok)
+	require.Len(t, test, tbl.NumObjects(db.ReadTxn()))
 
 	resp, err = http.Get(ts.URL + "/dump/test")
 	require.NoError(t, err, "Get(/dump/test)")
@@ -55,8 +60,11 @@ func Test_http_dump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("%s", dump)
 
+	require.NoError(t, json.Unmarshal(dump, &data), "Unmarshal")
+	test, ok = data["test"]
+	require.True(t, ok)
+	require.Len(t, test, tbl.NumObjects(db.ReadTxn()))
 }
 
 func Test_runQuery(t *testing.T) {
