@@ -17,7 +17,7 @@ func (db *DB) HTTPHandler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /dump", h.dumpAll)
 	mux.HandleFunc("GET /dump/{table}", h.dumpTable)
-	mux.HandleFunc("/query", h.query)
+	mux.HandleFunc("GET /query", h.query)
 	return mux
 }
 

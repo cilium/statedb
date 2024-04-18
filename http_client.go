@@ -62,7 +62,7 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	}
 
 	url := t.base.JoinPath("/query")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url.String(), bytes.NewBuffer(bs))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), bytes.NewBuffer(bs))
 	if err != nil {
 		errChanSend <- err
 		return

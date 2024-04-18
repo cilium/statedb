@@ -67,7 +67,7 @@ func Test_http_dump(t *testing.T) {
 	require.Len(t, test, tbl.NumObjects(db.ReadTxn()))
 }
 
-func Test_runQuery(t *testing.T) {
+func Test_http_runQuery(t *testing.T) {
 	db, table, _ := httpFixture(t)
 	txn := db.ReadTxn()
 
@@ -109,7 +109,7 @@ func Test_runQuery(t *testing.T) {
 	}
 }
 
-func Test_RemoteTable(t *testing.T) {
+func Test_http_RemoteTable(t *testing.T) {
 	ctx := context.TODO()
 	_, table, ts := httpFixture(t)
 
