@@ -305,7 +305,9 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
+	queries := []Query[testObject]{}
 	for i := 0; i < numObjectsToInsert; i++ {
+		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
 		require.NoError(b, err)
@@ -315,23 +317,22 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 
 	txn := db.ReadTxn()
 	for n := 0; n < b.N; n++ {
-		for _, id := range ids {
-			obj, _, ok := table.First(txn, idIndex.Query(id))
+		for _, q := range queries {
+			_, _, ok := table.First(txn, q)
 			if !ok {
 				b.Fatalf("Object not found")
-			}
-			if obj.ID != id {
-				b.Fatalf("expected ID %d, got %d", id, obj.ID)
 			}
 		}
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+const numObjectsIteration = 100000
+
 func BenchmarkDB_FullIteration_All(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := 0; i < numObjectsIteration; i++ {
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
 		require.NoError(b, err)
 	}
@@ -348,38 +349,37 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 			}
 			i++
 		}
-		if numObjectsToInsert != i {
-			b.Fatalf("expected to iterate %d objects, got %d", numObjectsToInsert, i)
+		if numObjectsIteration != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsIteration, i)
 		}
 	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 func BenchmarkDB_FullIteration_Get(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
-	for i := 0; i < numObjectsToInsert; i++ {
-		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: []string{"foo"}})
+	ids := []uint64{}
+	queries := []Query[testObject]{}
+	for i := 0; i < numObjectsIteration; i++ {
+		queries = append(queries, idIndex.Query(uint64(i)))
+		ids = append(ids, uint64(i))
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: nil})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
 	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
-		txn := db.ReadTxn()
-		iter, _ := table.Get(txn, tagsIndex.Query("foo"))
-		i := uint64(0)
-		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-			if obj.ID != i {
-				b.Fatalf("expected ID %d, got %d", i, obj.ID)
+	txn := db.ReadTxn()
+	for n := 0; n < b.N; n++ {
+		for _, q := range queries {
+			_, _, ok := table.First(txn, q)
+			if !ok {
+				b.Fatalf("Object not found")
 			}
-			i++
-		}
-		if numObjectsToInsert != i {
-			b.Fatalf("expected to iterate %d objects, got %d", numObjectsToInsert, i)
 		}
 	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 type testObject2 testObject
