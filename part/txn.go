@@ -17,7 +17,7 @@ type Txn[T any] struct {
 	// that we can keep mutating without cloning them again.
 	// It is cleared if the transaction is cloned or iterated
 	// upon.
-	mutated map[*header[T]]struct{}
+	mutated nodeMutated[T]
 
 	// watches contains the channels of cloned nodes that should be closed
 	// when transaction is committed.
@@ -38,10 +38,9 @@ func (txn *Txn[T]) Len() int {
 func (txn *Txn[T]) Clone() *Txn[T] {
 	// Clear the mutated nodes so that the returned clone won't be changed by
 	// further modifications in this transaction.
-	clear(txn.mutated)
+	txn.mutated.clear()
 	return &Txn[T]{
 		Tree:               txn.Tree,
-		mutated:            map[*header[T]]struct{}{},
 		watches:            map[chan struct{}]struct{}{},
 		deleteParentsCache: nil,
 	}
@@ -90,7 +89,7 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // given prefix, and a channel that closes when any objects matching
 // the given prefix are upserted or deleted.
 func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
-	txn.mutated = nil
+	txn.mutated.clear()
 	iter, watch := prefixSearch(txn.root, key)
 	if txn.opts.rootOnlyWatch {
 		watch = txn.root.watch
@@ -101,19 +100,19 @@ func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 // LowerBound returns an iterator for all objects that have a
 // key equal or higher than the given 'key'.
 func (txn *Txn[T]) LowerBound(key []byte) *Iterator[T] {
-	txn.mutated = nil
+	txn.mutated.clear()
 	return lowerbound(txn.root, key)
 }
 
 // Iterator returns an iterator for all objects.
 func (txn *Txn[T]) Iterator() *Iterator[T] {
-	txn.mutated = nil
+	txn.mutated.clear()
 	return newIterator[T](txn.root)
 }
 
 // Commit the transaction and produce the new tree.
 func (txn *Txn[T]) Commit() *Tree[T] {
-	txn.mutated = nil
+	txn.mutated.clear()
 	for ch := range txn.watches {
 		close(ch)
 	}
@@ -125,7 +124,7 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 // watch channels. Returns the new tree.
 // To close the watch channels call Notify().
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
-	txn.mutated = nil
+	txn.mutated.clear()
 	return &Tree[T]{txn.opts, txn.root, txn.size}
 }
 
@@ -144,17 +143,14 @@ func (txn *Txn[T]) PrintTree() {
 }
 
 func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
-	if _, ok := txn.mutated[n]; ok {
+	if txn.mutated.exists(n) {
 		return n
 	}
 	if n.watch != nil {
 		txn.watches[n.watch] = struct{}{}
 	}
 	n = n.clone(!txn.opts.rootOnlyWatch || n == txn.root)
-	if txn.mutated == nil {
-		txn.mutated = make(map[*header[T]]struct{})
-	}
-	txn.mutated[n] = struct{}{}
+	txn.mutated.put(n)
 	return n
 }
 
@@ -316,8 +312,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	}
 
 	// The target was found, rebuild the tree from the root upwards.
-	newRoot = txn.cloneNode(root)
-	parents[0].node = newRoot
+	parents[0].node = root
 
 	for i := len(parents) - 1; i > 0; i-- {
 		parent := &parents[i-1]
@@ -333,13 +328,11 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			target.node = txn.cloneNode(target.node)
 			target.node.setLeaf(nil)
 			children[target.index] = target.node
-		}
-
-		if target.node.size() == 0 && (target.node == this || target.node.getLeaf() == nil) {
+		} else if target.node.size() == 0 && (target.node == this || target.node.getLeaf() == nil) {
 			// The node is empty, remove it from the parent.
 			parent.node.remove(target.index)
 		} else {
-			// Update target to point to the cloned node
+			// Update the target (as it may have been cloned)
 			children[target.index] = target.node
 		}
 
@@ -384,6 +377,6 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			}
 		}
 	}
-
+	newRoot = parents[0].node
 	return
 }
