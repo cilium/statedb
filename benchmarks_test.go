@@ -16,7 +16,6 @@ import (
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb/index"
-	"github.com/cilium/statedb/part"
 )
 
 // Number of objects to insert in tests that do repeated inserts.
@@ -189,83 +188,6 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 	b.StopTimer()
 
 	require.EqualValues(b, table.NumObjects(db.ReadTxn()), numObjectsToInsert)
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_Part_RootOnlyWatch_Insert(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		tree := part.New[uint64](part.RootOnlyWatch)
-		txn := tree.Txn()
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			txn.Insert(index.Uint64(j), j)
-		}
-		tree = txn.Commit()
-		if tree.Len() != numObjectsToInsert {
-			b.Fatalf("expected tree.Len() of %d, got %d", numObjectsToInsert, tree.Len())
-		}
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_Part_Insert(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		tree := part.New[uint64]()
-		txn := tree.Txn()
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			txn.Insert(index.Uint64(j), j)
-		}
-		tree = txn.Commit()
-		if tree.Len() != numObjectsToInsert {
-			b.Fatalf("expected tree.Len() of %d, got %d", numObjectsToInsert, tree.Len())
-		}
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_Part_Lookup(b *testing.B) {
-	tree := part.New[uint64](part.RootOnlyWatch)
-	for j := uint64(0); j < numObjectsToInsert; j++ {
-		_, _, tree = tree.Insert(index.Uint64(j), j)
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			v, _, ok := tree.Get(index.Uint64(j))
-			if v != j {
-				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
-			}
-		}
-
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_Hashmap_Insert(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		m := map[uint64]uint64{}
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			m[j] = j
-		}
-		if len(m) != numObjectsToInsert {
-			b.Fatalf("%d != %d", len(m), numObjectsToInsert)
-		}
-	}
-	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
-}
-
-func BenchmarkDB_Baseline_Hashmap_Lookup(b *testing.B) {
-	m := map[uint64]uint64{}
-	for j := uint64(0); j < numObjectsToInsert; j++ {
-		m[j] = j
-	}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
-			if m[j] != j {
-				b.Fatalf("impossible: %d != %d", m[j], j)
-			}
-		}
-	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
