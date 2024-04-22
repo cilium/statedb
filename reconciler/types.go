@@ -27,6 +27,14 @@ type Reconciler[Obj any] interface {
 }
 
 type Config[Obj any] struct {
+	// Metrics to use with this reconciler. The metrics capture the duration
+	// of operations during incremental and full reconcilation and the errors
+	// that occur during either.
+	//
+	// If nil, then the default metrics are used via Params.
+	// A simple implementation of metrics based on the expvar package come
+	// with the reconciler and a custom one can be used by implementing the
+	// Metrics interface.
 	Metrics Metrics
 
 	// FullReconcilationInterval is the amount of time to wait between full
