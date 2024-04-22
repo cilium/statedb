@@ -71,14 +71,16 @@ func testReconciler(t *testing.T, batchOps bool) {
 			"test",
 			"Test",
 
+			cell.Provide(func() reconciler.Metrics {
+				return expVarMetrics
+			}),
+
 			cell.Provide(func(db_ *statedb.DB) (statedb.RWTable[*testObject], error) {
 				db = db_
 				return testObjects, db.RegisterTable(testObjects)
 			}),
 			cell.Provide(func() reconciler.Config[*testObject] {
 				cfg := reconciler.Config[*testObject]{
-					Metrics: expVarMetrics,
-
 					// Don't run the full reconciliation via timer, but rather explicitly so that the full
 					// reconciliation operations don't mix with incremental when not expected.
 					FullReconcilationInterval: time.Hour,

@@ -30,8 +30,13 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 		return nil, err
 	}
 
-	if p.Config.Metrics == nil {
-		p.Config.Metrics = NewUnpublishedExpVarMetrics()
+	metrics := p.Config.Metrics
+	if metrics == nil {
+		if p.DefaultMetrics == nil {
+			metrics = NewUnpublishedExpVarMetrics()
+		} else {
+			metrics = p.DefaultMetrics
+		}
 	}
 
 	idx := p.Table.PrimaryIndexer()
@@ -40,7 +45,7 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 	}
 	r := &reconciler[Obj]{
 		Params:              p,
-		metrics:             p.Config.Metrics,
+		metrics:             metrics,
 		retries:             newRetries(p.Config.RetryBackoffMinDuration, p.Config.RetryBackoffMaxDuration, objectToKey),
 		externalFullTrigger: make(chan struct{}, 1),
 		primaryIndexer:      idx,
@@ -57,14 +62,15 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 type Params[Obj comparable] struct {
 	cell.In
 
-	Config    Config[Obj]
-	Lifecycle cell.Lifecycle
-	Log       *slog.Logger
-	DB        *statedb.DB
-	Table     statedb.RWTable[Obj]
-	Jobs      job.Registry
-	ModuleID  cell.FullModuleID
-	Health    cell.Health
+	Config         Config[Obj]
+	Lifecycle      cell.Lifecycle
+	Log            *slog.Logger
+	DB             *statedb.DB
+	Table          statedb.RWTable[Obj]
+	Jobs           job.Registry
+	ModuleID       cell.FullModuleID
+	Health         cell.Health
+	DefaultMetrics Metrics `optional:"true"`
 }
 
 type reconciler[Obj comparable] struct {
