@@ -54,7 +54,7 @@ func (n *header[T]) cap() int {
 	case nodeKind256:
 		return 256
 	default:
-		panic("unknown node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 }
 
@@ -75,7 +75,7 @@ func (n *header[T]) getLeaf() *leaf[T] {
 	case nodeKind256:
 		return n.node256().leaf
 	default:
-		panic("unknown node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 }
 
@@ -92,7 +92,7 @@ func (n *header[T]) setLeaf(l *leaf[T]) {
 	case nodeKind256:
 		n.node256().leaf = l
 	default:
-		panic("unknown node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 }
 
@@ -146,7 +146,7 @@ func (n *header[T]) clone(watch bool) *header[T] {
 		nCopy256 := *n.node256()
 		nCopy = (&nCopy256).self()
 	default:
-		panic("unknown node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 	if watch {
 		nCopy.watch = make(chan struct{})
@@ -171,7 +171,9 @@ func (n *header[T]) promote(watch bool) *header[T] {
 		node4 := n.node4()
 		node16 := &node16[T]{header: *n}
 		node16.setKind(nodeKind16)
-		copy(node16.children[:], node4.children[:node4.size()])
+		size := node4.size()
+		copy(node16.children[:], node4.children[:size])
+		copy(node16.keys[:], node4.keys[:size])
 		if watch {
 			node16.watch = make(chan struct{})
 		}
@@ -181,6 +183,9 @@ func (n *header[T]) promote(watch bool) *header[T] {
 		node48 := &node48[T]{header: *n}
 		node48.setKind(nodeKind48)
 		copy(node48.children[:], node16.children[:node16.size()])
+		for i, k := range node16.keys[:node16.size()] {
+			node48.index[k] = int8(i)
+		}
 		if watch {
 			node48.watch = make(chan struct{})
 		}
@@ -202,7 +207,7 @@ func (n *header[T]) promote(watch bool) *header[T] {
 	case nodeKind256:
 		panic("BUG: should not need to promote node256")
 	default:
-		panic("unknown node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 }
 
@@ -253,54 +258,164 @@ func (n *header[T]) children() []*header[T] {
 	case nodeKind256:
 		return n.node256().children[:]
 	default:
-		panic("unexpected node kind")
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 }
 
 func (n *header[T]) findIndex(key byte) (*header[T], int) {
-	if n.kind() == nodeKind256 {
+	switch n.kind() {
+	case nodeKindLeaf:
+		return nil, 0
+	case nodeKind4:
+		n4 := n.node4()
+		size := n4.size()
+		for i := 0; i < int(size); i++ {
+			if n4.keys[i] == key {
+				return n4.children[i], i
+			} else if n4.keys[i] > key {
+				return nil, i
+			}
+		}
+		return nil, size
+	case nodeKind16:
+		n16 := n.node16()
+		size := n16.size()
+		for i := 0; i < int(size); i++ {
+			if n16.keys[i] == key {
+				return n16.children[i], i
+			} else if n16.keys[i] > key {
+				return nil, i
+			}
+		}
+		return nil, size
+	case nodeKind48:
+		children := n.children()
+		idx := sort.Search(len(children), func(i int) bool {
+			return children[i].prefix[0] >= key
+		})
+		if idx >= n.size() || children[idx].prefix[0] != key {
+			// No node found, return nil and the index into
+			// which it should go.
+			return nil, idx
+		}
+		return children[idx], idx
+	case nodeKind256:
 		return n.node256().children[key], int(key)
+	default:
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
-
-	children := n.children()
-	idx := sort.Search(len(children), func(i int) bool {
-		return children[i].prefix[0] >= key
-	})
-	if idx >= n.size() || children[idx].prefix[0] != key {
-		// No node found, return nil and the index into
-		// which it should go.
-		return nil, idx
-	}
-	return children[idx], idx
 }
 
 func (n *header[T]) find(key byte) *header[T] {
-	child, _ := n.findIndex(key)
-	return child
+	switch n.kind() {
+	case nodeKindLeaf:
+		return nil
+	case nodeKind4:
+		n4 := n.node4()
+		size := n4.size()
+		for i := 0; i < int(size); i++ {
+			if n4.keys[i] == key {
+				return n4.children[i]
+			} else if n4.keys[i] > key {
+				return nil
+			}
+		}
+		return nil
+	case nodeKind16:
+		n16 := n.node16()
+		size := n16.size()
+		for i := 0; i < int(size); i++ {
+			if n16.keys[i] == key {
+				return n16.children[i]
+			} else if n16.keys[i] > key {
+				return nil
+			}
+		}
+		return nil
+	case nodeKind48:
+		n48 := n.node48()
+		idx := n48.index[key]
+		if idx < 0 {
+			return nil
+		}
+		return n48.children[idx]
+	case nodeKind256:
+		return n.node256().children[key]
+	default:
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
+	}
 }
 
 func (n *header[T]) insert(idx int, child *header[T]) {
-	n.setSize(n.size() + 1)
+	size := n.size()
+	newSize := size + 1
 	switch n.kind() {
+	case nodeKind4:
+		n4 := n.node4()
+		// Shift to make room
+		copy(n4.children[idx+1:newSize], n4.children[idx:newSize])
+		copy(n4.keys[idx+1:newSize], n4.keys[idx:newSize])
+		n4.children[idx] = child
+		n4.keys[idx] = child.prefix[0]
+	case nodeKind16:
+		n16 := n.node16()
+		// Shift to make room
+		copy(n16.children[idx+1:newSize], n16.children[idx:newSize])
+		copy(n16.keys[idx+1:newSize], n16.keys[idx:newSize])
+		n16.children[idx] = child
+		n16.keys[idx] = child.prefix[0]
+	case nodeKind48:
+		// Shift to make room
+		n48 := n.node48()
+		for i := size - 1; i >= idx; i-- {
+			c := n48.children[i]
+			n48.index[c.prefix[0]] = int8(i + 1)
+			n48.children[i+1] = c
+		}
+		n48.children[idx] = child
+		n48.index[child.prefix[0]] = int8(idx)
 	case nodeKind256:
 		n.node256().children[child.prefix[0]] = child
 	default:
-		children := n.children()
-		// Shift to make room
-		copy(children[idx+1:], children[idx:])
-		children[idx] = child
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
+	n.setSize(size + 1)
 }
 
 func (n *header[T]) remove(idx int) {
-	if n.kind() == nodeKind256 {
-		n.node256().children[idx] = nil
-	} else {
+	newSize := n.size() - 1
+	switch n.kind() {
+	case nodeKind4:
+		size := n.size()
+		n4 := n.node4()
+		copy(n4.keys[idx:size], n4.keys[idx+1:size])
+		copy(n4.children[idx:size], n4.children[idx+1:size])
+		n4.children[newSize] = nil
+		n4.keys[newSize] = 255
+	case nodeKind16:
+		size := n.size()
+		n16 := n.node16()
+		copy(n16.keys[idx:size], n16.keys[idx+1:size])
+		copy(n16.children[idx:size], n16.children[idx+1:size])
+		n16.children[newSize] = nil
+		n16.keys[newSize] = 255
+	case nodeKind48:
 		children := n.children()
-		copy(children[idx:], children[idx+1:])
-		children[n.size()-1] = nil
+		key := children[idx].prefix[0]
+		n48 := n.node48()
+		for i := idx; i < newSize; i++ {
+			child := children[i+1]
+			children[i] = child
+			n48.index[child.prefix[0]] = int8(i)
+		}
+		n48.index[key] = -1
+		children[newSize] = nil
+	case nodeKind256:
+		n.node256().children[idx] = nil
+	default:
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
-	n.setSize(n.size() - 1)
+	n.setSize(newSize)
 }
 
 type leaf[T any] struct {
@@ -323,26 +438,29 @@ func newLeaf[T any](o *options, prefix, key []byte, value T) *leaf[T] {
 
 type node4[T any] struct {
 	header[T]
-	leaf     *leaf[T] // non-nil if this node contains a value
+	keys     [4]byte
 	children [4]*header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 }
 
 type node16[T any] struct {
 	header[T]
-	leaf     *leaf[T] // non-nil if this node contains a value
+	keys     [16]byte
 	children [16]*header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 }
 
 type node48[T any] struct {
 	header[T]
-	leaf     *leaf[T] // non-nil if this node contains a value
+	index    [256]int8
 	children [48]*header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 }
 
 type node256[T any] struct {
 	header[T]
-	leaf     *leaf[T] // non-nil if this node contains a value
 	children [256]*header[T]
+	leaf     *leaf[T] // non-nil if this node contains a value
 }
 
 func newNode4[T any]() *header[T] {
@@ -369,22 +487,9 @@ func search[T any](root *header[T], key []byte) (value T, watch <-chan struct{},
 			return
 		}
 
-		if this.kind() == nodeKind256 {
-			n256 := this.node256()
-			this = n256.children[key[0]]
-			if this == nil {
-				return
-			}
-		} else {
-			children := this.children()
-			idx := sort.Search(len(children), func(i int) bool {
-				return children[i].prefix[0] >= key[0]
-			})
-			if idx < len(children) && children[idx].prefix[0] == key[0] {
-				this = children[idx]
-			} else {
-				return
-			}
+		this = this.find(key[0])
+		if this == nil {
+			return
 		}
 	}
 }

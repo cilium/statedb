@@ -231,10 +231,14 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 			}
 			if this.prefix[0] < key[0] {
 				newNode.children[0] = this
+				newNode.keys[0] = this.prefix[0]
 				newNode.children[1] = newLeaf
+				newNode.keys[1] = newLeaf.prefix[0]
 			} else {
 				newNode.children[0] = newLeaf
+				newNode.keys[0] = newLeaf.prefix[0]
 				newNode.children[1] = this
+				newNode.keys[1] = this.prefix[0]
 			}
 			newNode.setKind(nodeKind4)
 			newNode.setSize(2)
@@ -349,9 +353,11 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			case parent.node.kind() == nodeKind256 && parent.node.size() <= 37:
 				newNode = (&node48[T]{header: *parent.node}).self()
 				newNode.setKind(nodeKind48)
-				children := newNode.node48().children[:0]
-				for _, n := range parent.node.node256().children[:] {
+				n48 := newNode.node48()
+				children := n48.children[:0]
+				for k, n := range parent.node.node256().children[:] {
 					if n != nil {
+						n48.index[k] = int8(len(children))
 						children = append(children, n)
 					}
 				}
@@ -359,10 +365,19 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 				newNode = (&node16[T]{header: *parent.node}).self()
 				newNode.setKind(nodeKind16)
 				copy(newNode.children()[:], parent.node.children())
+				n16 := newNode.node16()
+				size := n16.size()
+				for i := 0; i < size; i++ {
+					n16.keys[i] = n16.children[i].prefix[0]
+				}
 			case parent.node.kind() == nodeKind16 && parent.node.size() <= 3:
 				newNode = (&node4[T]{header: *parent.node}).self()
 				newNode.setKind(nodeKind4)
-				copy(newNode.children()[:], parent.node.children())
+				n16 := parent.node.node16()
+				size := n16.size()
+				n4 := newNode.node4()
+				copy(n4.children[:], n16.children[:size])
+				copy(n4.keys[:], n16.keys[:size])
 			}
 			if newNode != nil {
 				parent.node = newNode
