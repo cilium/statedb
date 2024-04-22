@@ -40,7 +40,6 @@ func RootOnlyWatch(o *options) { o.rootOnlyWatch = true }
 func (t *Tree[T]) Txn() *Txn[T] {
 	txn := &Txn[T]{
 		Tree:    *t,
-		mutated: make(map[*header[T]]struct{}),
 		watches: make(map[chan struct{}]struct{}),
 	}
 	return txn
