@@ -14,6 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const numObjectsToInsert = 1000
+
 func Test_commonPrefix(t *testing.T) {
 	check := func(a, b, common string) {
 		actual := string(commonPrefix([]byte(a), []byte(b)))
@@ -520,8 +522,6 @@ func Test_lowerbound_edge_cases(t *testing.T) {
 	ins := func(n uint32) {
 		_, _, tree = tree.Insert(uint32Key(n), n)
 		keys = append(keys, n)
-		fmt.Printf("%x:\n", keys)
-		tree.root.printTree(2)
 	}
 
 	var iter *Iterator[uint32]
@@ -598,7 +598,6 @@ func Test_lowerbound_edge_cases(t *testing.T) {
 		_, _, tree = tree.Insert(uint32Key(n), n)
 		keys = append(keys, n)
 	}
-	tree.PrintTree()
 
 	iter = tree.LowerBound(uint32Key(0x20000))
 	for i := 1; i < 50; i += 2 {
@@ -632,8 +631,6 @@ func Test_lowerbound_regression(t *testing.T) {
 	for _, v := range values {
 		ins(v)
 	}
-
-	tree.PrintTree()
 
 	iter := tree.LowerBound(uint64Key(70399))
 	i := 1
@@ -692,18 +689,17 @@ func Benchmark_Insert(b *testing.B) {
 }
 
 func benchmark_Insert(b *testing.B, opts ...Option) {
-	numObjs := 1000
 	for n := 0; n < b.N; n++ {
 		tree := New[int](opts...)
 		txn := tree.Txn()
-		for i := 0; i < numObjs; i++ {
-			key := binary.BigEndian.AppendUint32(nil, uint32(numObjs+i))
-			txn.Insert(key, numObjs+i)
+		for i := 0; i < numObjectsToInsert; i++ {
+			key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
+			txn.Insert(key, numObjectsToInsert+i)
 		}
 		txn.Commit()
 	}
 	b.StopTimer()
-	b.ReportMetric(float64(b.N*numObjs)/b.Elapsed().Seconds(), "objects/sec")
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 func Benchmark_Replace(b *testing.B) {
@@ -715,13 +711,11 @@ func Benchmark_Replace_RootOnlyWatch(b *testing.B) {
 }
 
 func benchmark_Replace(b *testing.B, watching bool) {
-	numObjs := 1000
-
 	tree := New[int](RootOnlyWatch)
 	txn := tree.Txn()
-	for i := 0; i < numObjs; i++ {
-		key := binary.BigEndian.AppendUint32(nil, uint32(numObjs+i))
-		txn.Insert(key, numObjs+i)
+	for i := 0; i < numObjectsToInsert; i++ {
+		key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
+		txn.Insert(key, numObjectsToInsert+i)
 	}
 
 	b.ResetTimer()
@@ -820,4 +814,89 @@ func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
 		txn.Delete(uint64Key(uint64(j)))
 	}
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Get(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(0); j < numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
+	var key [8]byte // to avoid the allocation
+	for i := 0; i < b.N; i++ {
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			binary.BigEndian.PutUint64(key[:], j)
+			v, _, ok := tree.Get(key[:])
+			if v != j {
+				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
+			}
+		}
+
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Iterate(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		iter := tree.Iterator()
+		for _, j, ok := iter.Next(); ok; _, j, ok = iter.Next() {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Hashmap_Insert(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		m := map[uint64]uint64{}
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			m[j] = j
+		}
+		if len(m) != numObjectsToInsert {
+			b.Fatalf("%d != %d", len(m), numObjectsToInsert)
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Hashmap_Get_Uint64(b *testing.B) {
+	m := map[uint64]uint64{}
+	for j := uint64(0); j < numObjectsToInsert; j++ {
+		m[j] = j
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			if m[j] != j {
+				b.Fatalf("impossible: %d != %d", m[j], j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Hashmap_Get_Bytes(b *testing.B) {
+	var k [8]byte
+	m := map[[8]byte]uint64{}
+	for j := uint64(0); j < numObjectsToInsert; j++ {
+		binary.BigEndian.PutUint64(k[:], j)
+		m[k] = j
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for j := uint64(0); j < numObjectsToInsert; j++ {
+			binary.BigEndian.PutUint64(k[:], j)
+			if m[k] != j {
+				b.Fatalf("impossible: %d != %d", m[k], j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
