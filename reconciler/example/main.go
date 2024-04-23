@@ -139,7 +139,8 @@ func NewReconcilerConfig(ops reconciler.Operations[*Memo], m *reconciler.ExpVarM
 		RetryBackoffMaxDuration:   5 * time.Second,
 		IncrementalRoundSize:      100,
 		GetObjectStatus:           (*Memo).GetStatus,
-		WithObjectStatus:          (*Memo).WithStatus,
+		SetObjectStatus:           (*Memo).SetStatus,
+		CloneObject:               (*Memo).Clone,
 		Operations:                ops,
 	}
 }
@@ -197,9 +198,8 @@ func registerHTTPServer(
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			memos.Insert(
-				txn,
-				memo.WithStatus(reconciler.StatusPendingDelete()))
+			memo = memo.Clone().SetStatus(reconciler.StatusPendingDelete())
+			memos.Insert(txn, memo)
 			log.Info("Deleted memo", "name", name)
 			w.WriteHeader(http.StatusOK)
 		}

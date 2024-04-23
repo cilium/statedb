@@ -103,7 +103,7 @@ func (round *incrementalRound[Obj]) single() statedb.Revision {
 		// Clear retries as the object has changed.
 		round.retries.Clear(obj)
 
-		err := round.processSingle(obj, rev, status)
+		err := round.processSingle(obj, rev, status.Delete)
 		if err != nil {
 			round.errs = append(round.errs, err)
 		}
@@ -137,6 +137,9 @@ func (round *incrementalRound[Obj]) batch() statedb.Revision {
 
 		// Clear an existing retry as the object has changed.
 		round.retries.Clear(obj)
+
+		// Clone the object so we or the operations can mutate it.
+		obj = round.config.CloneObject(obj)
 
 		if status.Delete {
 			deleteBatch = append(deleteBatch, BatchEntry[Obj]{Object: obj, Revision: rev})
@@ -217,7 +220,7 @@ func (round *incrementalRound[Obj]) processRetries() {
 			continue
 		}
 
-		err := round.processSingle(obj, rev, status)
+		err := round.processSingle(obj, rev, status.Delete)
 		if err != nil {
 			round.errs = append(round.errs, err)
 		}
@@ -226,14 +229,18 @@ func (round *incrementalRound[Obj]) processRetries() {
 	}
 }
 
-func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision, status Status) error {
+func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision, delete bool) error {
 	start := time.Now()
+
+	// Clone the object so it can be mutated by the operations and to be able to set the
+	// status.
+	obj = round.config.CloneObject(obj)
 
 	var (
 		err error
 		op  string
 	)
-	if status.Delete {
+	if delete {
 		op = OpDelete
 		err = round.config.Operations.Delete(round.ctx, round.txn, obj)
 		if err == nil {
@@ -287,7 +294,7 @@ func (round *incrementalRound[Obj]) commitStatus() <-chan struct{} {
 		// Update the object if it is unchanged. It may happen that the object has
 		// been updated in the meanwhile, in which case we ignore the status as the
 		// update will be picked up by next reconciliation round.
-		round.table.CompareAndSwap(wtxn, result.rev, round.config.WithObjectStatus(obj, result.status))
+		round.table.CompareAndSwap(wtxn, result.rev, round.config.SetObjectStatus(obj, result.status))
 
 		if result.status.Kind == StatusKindError {
 			// Reconciling the object failed, so add it to be retried now that its

@@ -35,14 +35,17 @@ func (memo *Memo) GetStatus() reconciler.Status {
 	return memo.Status
 }
 
-// WithStatus returns a copy of the memo with a new reconciliation status.
+// SetStatus sets the reconciliation status.
 // Used by the reconciler to update the reconciliation status of the memo.
-func (memo *Memo) WithStatus(newStatus reconciler.Status) *Memo {
-	return &Memo{
-		Name:    memo.Name,
-		Content: memo.Content,
-		Status:  newStatus,
-	}
+func (memo *Memo) SetStatus(newStatus reconciler.Status) *Memo {
+	memo.Status = newStatus
+	return memo
+}
+
+// Clone returns a shallow copy of the memo.
+func (memo *Memo) Clone() *Memo {
+	m := *memo
+	return &m
 }
 
 // MemoNameIndex allows looking up the memo by its name, e.g.

@@ -87,7 +87,8 @@ func testReconciler(t *testing.T, batchOps bool) {
 					RetryBackoffMaxDuration: 10 * time.Millisecond,
 					IncrementalRoundSize:    1000,
 					GetObjectStatus:         (*testObject).GetStatus,
-					WithObjectStatus:        (*testObject).WithStatus,
+					SetObjectStatus:         (*testObject).SetStatus,
+					CloneObject:             (*testObject).Clone,
 					Operations:              ops,
 				}
 				if batchOps {
@@ -211,6 +212,9 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
+			h.expectNumUpdates(ID_1, 1)
+			h.expectNumUpdates(ID_2, 1)
+			h.expectNumUpdates(ID_3, 1)
 			h.expectHealthLevel(cell.StatusOK)
 
 			// Full reconciliation with functioning ops.
@@ -220,6 +224,9 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
+			h.expectNumUpdates(ID_1, 2)
+			h.expectNumUpdates(ID_2, 2)
+			h.expectNumUpdates(ID_3, 2)
 			h.expectHealthLevel(cell.StatusOK)
 
 			// Make the ops faulty and trigger the full reconciliation.
@@ -297,9 +304,10 @@ func testReconciler(t *testing.T, batchOps bool) {
 }
 
 type testObject struct {
-	id     uint64
-	faulty bool
-	status reconciler.Status
+	id      uint64
+	faulty  bool
+	updates int
+	status  reconciler.Status
 }
 
 var idIndex = statedb.Index[*testObject, uint64]{
@@ -313,15 +321,17 @@ var idIndex = statedb.Index[*testObject, uint64]{
 
 var statusIndex = reconciler.NewStatusIndex[*testObject]((*testObject).GetStatus)
 
-// GetStatus implements reconciler.Reconcilable.
 func (t *testObject) GetStatus() reconciler.Status {
 	return t.status
 }
 
-// WithStatus implements reconciler.Reconcilable.
-func (t *testObject) WithStatus(status reconciler.Status) *testObject {
+func (t *testObject) SetStatus(status reconciler.Status) *testObject {
+	t.status = status
+	return t
+}
+
+func (t *testObject) Clone() *testObject {
 	t2 := *t
-	t2.status = status
 	return &t2
 }
 
@@ -443,6 +453,9 @@ func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObj
 		return errors.New("update fail")
 	}
 	mt.history.add(opUpdate(obj.id))
+
+	obj.updates += 1
+
 	return nil
 }
 
@@ -511,6 +524,22 @@ func (h testHelper) expectStatus(id uint64, kind reconciler.StatusKind, err stri
 		require.Failf(h.t, "status mismatch", "expected object %d to be marked with status %q, but it was %q",
 			id, kind, actual)
 
+	}
+}
+
+func (h testHelper) expectNumUpdates(id uint64, n int) {
+	cond := func() bool {
+		obj, _, ok := h.tbl.First(h.db.ReadTxn(), idIndex.Query(id))
+		return ok && obj.updates == n
+	}
+	if !assert.Eventually(h.t, cond, time.Second, time.Millisecond) {
+		actual := "<not found>"
+		obj, _, ok := h.tbl.First(h.db.ReadTxn(), idIndex.Query(id))
+		if ok {
+			actual = fmt.Sprintf("%d", obj.updates)
+		}
+		require.Failf(h.t, "updates mismatch", "expected object %d to be have %d updates but it had %q",
+			id, n, actual)
 	}
 }
 
