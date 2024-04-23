@@ -33,6 +33,7 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev
 	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
 		start := time.Now()
 		var changed bool
+		obj = r.Config.CloneObject(obj)
 		err := ops.Update(ctx, txn, obj, &changed)
 		r.metrics.FullReconciliationDuration(r.ModuleID, OpUpdate, time.Since(start))
 
@@ -58,7 +59,7 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev
 	if len(updateResults) > 0 {
 		wtxn := r.DB.WriteTxn(r.Table)
 		for obj, result := range updateResults {
-			obj = r.Config.WithObjectStatus(obj, result.status)
+			obj = r.Config.SetObjectStatus(obj, result.status)
 			_, _, err := r.Table.CompareAndSwap(wtxn, result.rev, obj)
 			if err == nil && result.status.Kind != StatusKindDone {
 				// Object had not changed in the meantime, queue the retry.

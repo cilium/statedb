@@ -64,9 +64,16 @@ type Config[Obj any] struct {
 	// GetObjectStatus returns the reconciliation status for the object.
 	GetObjectStatus func(Obj) Status
 
-	// WithObjectStatus returns a COPY of the object with the status set to
-	// the given value.
-	WithObjectStatus func(Obj, Status) Obj
+	// SetObjectStatus sets the reconciliation status for the object.
+	// This is called with a copy of the object returned by CloneObject.
+	SetObjectStatus func(Obj, Status) Obj
+
+	// CloneObject returns a shallow copy of the object. This is used to
+	// make it possible for the reconciliation operations to mutate
+	// the object (to for example provide additional information that the
+	// reconciliation produces) and to be able to set the reconciliation
+	// status after the reconciliation.
+	CloneObject func(Obj) Obj
 
 	// RateLimiter is optional and if set will use the limiter to wait between
 	// reconciliation rounds. This allows trading latency with throughput by
@@ -84,8 +91,11 @@ func (cfg Config[Obj]) validate() error {
 	if cfg.GetObjectStatus == nil {
 		return fmt.Errorf("%T.GetObjectStatus cannot be nil", cfg)
 	}
-	if cfg.WithObjectStatus == nil {
-		return fmt.Errorf("%T.WithObjectStatus cannot be nil", cfg)
+	if cfg.SetObjectStatus == nil {
+		return fmt.Errorf("%T.SetObjectStatus cannot be nil", cfg)
+	}
+	if cfg.CloneObject == nil {
+		return fmt.Errorf("%T.CloneObject cannot be nil", cfg)
 	}
 	if cfg.IncrementalRoundSize <= 0 {
 		return fmt.Errorf("%T.IncrementalBatchSize needs to be >0", cfg)
@@ -127,6 +137,9 @@ type Operations[Obj any] interface {
 	// during full reconciliation to catch cases where the realized state has
 	// gone out of sync due to outside influence. This is tracked in the
 	// "full_out_of_sync_total" metric.
+	//
+	// The object handed to Update is a clone produced by Config.CloneObject
+	// and thus Update can mutate the object.
 	Update(ctx context.Context, txn statedb.ReadTxn, obj Obj, changed *bool) error
 
 	// Delete the object in the target. Same semantics as with Update.

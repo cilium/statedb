@@ -42,8 +42,14 @@ func (t *testObject) GetStatus() reconciler.Status {
 	return t.status
 }
 
-func (t *testObject) WithStatus(status reconciler.Status) *testObject {
-	return &testObject{id: t.id, status: status}
+func (t *testObject) SetStatus(status reconciler.Status) *testObject {
+	t.status = status
+	return t
+}
+
+func (t *testObject) Clone() *testObject {
+	t2 := *t
+	return &t2
 }
 
 type mockOps struct {
@@ -135,7 +141,8 @@ func main() {
 					RetryBackoffMaxDuration: 10 * time.Millisecond,
 					IncrementalRoundSize:    *incrBatchSize,
 					GetObjectStatus:         (*testObject).GetStatus,
-					WithObjectStatus:        (*testObject).WithStatus,
+					SetObjectStatus:         (*testObject).SetStatus,
+					CloneObject:             (*testObject).Clone,
 					Operations:              mt,
 				}
 			}),
