@@ -385,7 +385,9 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	var txn statedb.ReadTxn
 	var prevRev statedb.Revision
 	for {
+		newChanges := false
 		for change, rev, ok := iter.Next(); ok; change, rev, ok = iter.Next() {
+			newChanges = true
 			log.log("%d: %v", rev, change)
 
 			if rev != change.Revision {
@@ -409,11 +411,11 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			}
 		}
 
-		if txn != nil {
+		if txn != nil && newChanges {
 			// Validate that the observed changes match with the database state at this
 			// snapshot.
 			state2 := maps.Clone(state)
-			iterAll, _ := tableFuzz1.All(txn)
+			iterAll, _ := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](0))
 			for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
 				change, found := state[obj.id]
 				if !found {
@@ -430,11 +432,11 @@ func trackerWorker(i int, stop <-chan struct{}) {
 				delete(state2, obj.id)
 			}
 
-			if len(state) != tableFuzz1.NumObjects(txn) {
+			if len(state2) > 0 {
 				for id := range state2 {
-					fmt.Printf("%d should not exist\n", id)
+					log.log("%d should not exist\n", id)
 				}
-				panic(fmt.Sprintf("trackerWorker: state size mismatch: %d vs %d", len(state), tableFuzz1.NumObjects(txn)))
+				panic(fmt.Sprintf("trackerWorker: %d orphan object(s)", len(state2)))
 			}
 		}
 

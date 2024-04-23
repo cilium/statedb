@@ -234,7 +234,16 @@ func (it *changeIterator[Obj]) Next() (ev Change[Obj], revision uint64, ok bool)
 
 func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
 	if it.iter == nil {
-		// Iterator has been exhausted, re-query.
+		// Iterator has been exhausted, check if we need to requery
+		// or whether we need to wait for changes first.
+		select {
+		case <-it.watch:
+		default:
+			// Watch channel not closed yet, so return the same watch
+			// channel.
+			return it.watch
+		}
+
 		updateIter, watch := it.table.LowerBound(txn, ByRevision[Obj](it.revision+1))
 		deleteIter := it.dt.deleted(txn, it.revision+1)
 		it.iter = NewDualIterator[Obj](deleteIter, updateIter)
@@ -244,6 +253,7 @@ func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
 		// the revision index.
 		it.watch = watch
 
+		// Return a closed watch channel to immediately trigger iteration.
 		return closedWatchChannel
 	}
 	return it.watch
