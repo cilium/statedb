@@ -19,18 +19,18 @@ import (
 // Register creates a new reconciler and registers to the application
 // lifecycle. To be used with cell.Invoke when the API of the reconciler
 // is not needed.
-func Register[Obj comparable](p Params[Obj]) error {
-	_, err := New(p)
+func Register[Obj comparable](cfg Config[Obj], params Params) error {
+	_, err := New(cfg, params)
 	return err
 }
 
 // New creates and registers a new reconciler.
-func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
-	if err := p.Config.validate(); err != nil {
+func New[Obj comparable](cfg Config[Obj], p Params) (Reconciler[Obj], error) {
+	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
 
-	metrics := p.Config.Metrics
+	metrics := cfg.Metrics
 	if metrics == nil {
 		if p.DefaultMetrics == nil {
 			metrics = NewUnpublishedExpVarMetrics()
@@ -39,14 +39,15 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 		}
 	}
 
-	idx := p.Table.PrimaryIndexer()
+	idx := cfg.Table.PrimaryIndexer()
 	objectToKey := func(o any) index.Key {
 		return idx.ObjectToKey(o.(Obj))
 	}
 	r := &reconciler[Obj]{
 		Params:              p,
+		Config:              cfg,
 		metrics:             metrics,
-		retries:             newRetries(p.Config.RetryBackoffMinDuration, p.Config.RetryBackoffMaxDuration, objectToKey),
+		retries:             newRetries(cfg.RetryBackoffMinDuration, cfg.RetryBackoffMaxDuration, objectToKey),
 		externalFullTrigger: make(chan struct{}, 1),
 		primaryIndexer:      idx,
 	}
@@ -59,14 +60,12 @@ func New[Obj comparable](p Params[Obj]) (Reconciler[Obj], error) {
 	return r, nil
 }
 
-type Params[Obj comparable] struct {
+type Params struct {
 	cell.In
 
-	Config         Config[Obj]
 	Lifecycle      cell.Lifecycle
 	Log            *slog.Logger
 	DB             *statedb.DB
-	Table          statedb.RWTable[Obj]
 	Jobs           job.Registry
 	ModuleID       cell.FullModuleID
 	Health         cell.Health
@@ -74,7 +73,8 @@ type Params[Obj comparable] struct {
 }
 
 type reconciler[Obj comparable] struct {
-	Params[Obj]
+	Params
+	Config              Config[Obj]
 	metrics             Metrics
 	retries             *retries
 	externalFullTrigger chan struct{}
@@ -158,7 +158,7 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 			errs = append(errs, err)
 		}
 
-		if fullReconciliation && r.Table.Initialized(txn) {
+		if fullReconciliation && r.Config.Table.Initialized(txn) {
 			// Time to perform a full reconciliation. An incremental reconciliation
 			// has been performed prior to this, so the assumption is that everything
 			// is up to date (provided incremental reconciliation did not fail). We
@@ -170,14 +170,14 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 			fullReconciliation = false
 
 			var err error
-			revision, err = r.full(ctx, txn, revision)
+			revision, err = r.full(ctx, txn)
 			if err != nil {
 				errs = append(errs, err)
 			}
 		}
 
 		if len(errs) == 0 {
-			health.OK(fmt.Sprintf("OK, %d objects", r.Table.NumObjects(txn)))
+			health.OK(fmt.Sprintf("OK, %d objects", r.Config.Table.NumObjects(txn)))
 		} else {
 			health.Degraded("Reconciliation failed", errors.Join(errs...))
 		}

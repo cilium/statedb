@@ -13,13 +13,13 @@ import (
 
 // full performs full reconciliation of all objects. First the Prune() operations is performed to clean up and then
 // Update() is called for each object. Full reconciliation is used to recover from unexpected outside modifications.
-func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev statedb.Revision) (statedb.Revision, error) {
+func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) (statedb.Revision, error) {
 	var errs []error
 	outOfSync := false
 	ops := r.Config.Operations
 
 	// First perform pruning to make room in the target.
-	iter, _ := r.Table.All(txn)
+	iter, _ := r.Config.Table.All(txn)
 	start := time.Now()
 	if err := ops.Prune(ctx, txn, iter); err != nil {
 		outOfSync = true
@@ -29,7 +29,7 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev
 
 	// Call Update() for each desired object to validate that it is up-to-date.
 	updateResults := make(map[Obj]opResult)
-	iter, _ = r.Table.All(txn) // Grab a new iterator as Prune() may have consumed it.
+	iter, _ = r.Config.Table.All(txn) // Grab a new iterator as Prune() may have consumed it.
 	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
 		start := time.Now()
 		var changed bool
@@ -57,10 +57,10 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev
 	// to not lock the table when performing long-running target operations.
 	// If the desired object has been updated in the meanwhile the status update is dropped.
 	if len(updateResults) > 0 {
-		wtxn := r.DB.WriteTxn(r.Table)
+		wtxn := r.DB.WriteTxn(r.Config.Table)
 		for obj, result := range updateResults {
 			obj = r.Config.SetObjectStatus(obj, result.status)
-			_, _, err := r.Table.CompareAndSwap(wtxn, result.rev, obj)
+			_, _, err := r.Config.Table.CompareAndSwap(wtxn, result.rev, obj)
 			if err == nil && result.status.Kind != StatusKindDone {
 				// Object had not changed in the meantime, queue the retry.
 				r.retries.Add(obj)
@@ -71,10 +71,10 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn, lastRev
 
 	r.metrics.FullReconciliationErrors(r.ModuleID, errs)
 	if len(errs) > 0 {
-		return r.Table.Revision(txn), fmt.Errorf("full: %w", joinErrors(errs))
+		return r.Config.Table.Revision(txn), fmt.Errorf("full: %w", joinErrors(errs))
 	}
 
 	// Sync succeeded up to latest revision. Continue incremental reconciliation from
 	// this revision.
-	return r.Table.Revision(txn), nil
+	return r.Config.Table.Revision(txn), nil
 }
