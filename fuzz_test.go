@@ -52,24 +52,26 @@ const (
 )
 
 type fuzzObj struct {
-	id    uint64
+	id    string
 	value uint64
 }
 
-func mkID() uint64 {
-	return 1 + uint64(rand.Int63n(numUniqueIDs))
+func mkID() string {
+	// We use a string hex presentation instead of the raw uint64 so we get
+	// a wide range of different length keys and different prefixes.
+	return fmt.Sprintf("%x", 1+uint64(rand.Int63n(numUniqueIDs)))
 }
 
 func mkValue() uint64 {
 	return 1 + uint64(rand.Int63n(numUniqueValues))
 }
 
-var idIndex = statedb.Index[fuzzObj, uint64]{
+var idIndex = statedb.Index[fuzzObj, string]{
 	Name: "id",
 	FromObject: func(obj fuzzObj) index.KeySet {
-		return index.NewKeySet(index.Uint64(obj.id))
+		return index.NewKeySet(index.String(obj.id))
 	},
-	FromKey: index.Uint64,
+	FromKey: index.String,
 	Unique:  true,
 }
 
@@ -83,10 +85,10 @@ var valueIndex = statedb.Index[fuzzObj, uint64]{
 }
 
 var (
-	tableFuzz1  = statedb.MustNewTable[fuzzObj]("fuzz1", idIndex, valueIndex)
-	tableFuzz2  = statedb.MustNewTable[fuzzObj]("fuzz2", idIndex, valueIndex)
-	tableFuzz3  = statedb.MustNewTable[fuzzObj]("fuzz3", idIndex, valueIndex)
-	tableFuzz4  = statedb.MustNewTable[fuzzObj]("fuzz4", idIndex, valueIndex)
+	tableFuzz1  = statedb.MustNewTable("fuzz1", idIndex, valueIndex)
+	tableFuzz2  = statedb.MustNewTable("fuzz2", idIndex, valueIndex)
+	tableFuzz3  = statedb.MustNewTable("fuzz3", idIndex, valueIndex)
+	tableFuzz4  = statedb.MustNewTable("fuzz4", idIndex, valueIndex)
 	fuzzTables  = []statedb.TableMeta{tableFuzz1, tableFuzz2, tableFuzz3, tableFuzz4}
 	fuzzMetrics = statedb.NewExpVarMetrics(false)
 	fuzzDB      *statedb.DB
@@ -123,7 +125,7 @@ func (a *realActionLog) validateTable(txn statedb.ReadTxn, table statedb.Table[f
 	defer a.Unlock()
 
 	// Collapse the log down to objects that are alive at the end.
-	alive := map[uint64]struct{}{}
+	alive := map[string]struct{}{}
 	for _, e := range a.log[table.Name()] {
 		switch e.act {
 		case actInsert:
@@ -139,7 +141,7 @@ func (a *realActionLog) validateTable(txn statedb.ReadTxn, table statedb.Table[f
 	a.log[table.Name()] = nil
 
 	iter, _ := table.All(txn)
-	actual := map[uint64]struct{}{}
+	actual := map[string]struct{}{}
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 		actual[obj.id] = struct{}{}
 	}
@@ -185,13 +187,13 @@ const (
 type actionLogEntry struct {
 	table statedb.Table[fuzzObj]
 	act   int
-	id    uint64
+	id    string
 	value uint64
 }
 
 type tableAndID struct {
 	table string
-	id    uint64
+	id    string
 }
 
 type txnActionLog struct {
@@ -212,7 +214,7 @@ type action func(ctx actionContext)
 func insertAction(ctx actionContext) {
 	id := mkID()
 	value := mkValue()
-	ctx.log.log("%s: Insert %d", ctx.table.Name(), id)
+	ctx.log.log("%s: Insert %s", ctx.table.Name(), id)
 	ctx.table.Insert(ctx.txn, fuzzObj{id, value})
 	e := actionLogEntry{ctx.table, actInsert, id, value}
 	ctx.actLog.append(e)
@@ -221,7 +223,7 @@ func insertAction(ctx actionContext) {
 
 func deleteAction(ctx actionContext) {
 	id := mkID()
-	ctx.log.log("%s: Delete %d", ctx.table.Name(), id)
+	ctx.log.log("%s: Delete %s", ctx.table.Name(), id)
 	ctx.table.Delete(ctx.txn, fuzzObj{id, 0})
 	e := actionLogEntry{ctx.table, actDelete, id, 0}
 	ctx.actLog.append(e)
@@ -236,7 +238,7 @@ func deleteAllAction(ctx actionContext) {
 		panic(err)
 	}
 	ctx.table.DeleteAll(ctx.txn)
-	ctx.actLog.append(actionLogEntry{ctx.table, actDeleteAll, 0, 0})
+	ctx.actLog.append(actionLogEntry{ctx.table, actDeleteAll, "", 0})
 	clear(ctx.txnLog.latest)
 }
 
@@ -248,7 +250,7 @@ func deleteManyAction(ctx actionContext) {
 	iter, _ := ctx.table.All(ctx.txn)
 	n := 0
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-		ctx.log.log("%s: DeleteMany %d (%d/%d)", ctx.table.Name(), obj.id, n+1, toDelete)
+		ctx.log.log("%s: DeleteMany %s (%d/%d)", ctx.table.Name(), obj.id, n+1, toDelete)
 		_, hadOld, _ := ctx.table.Delete(ctx.txn, obj)
 		if !hadOld {
 			panic("expected Delete of a known object to return the old object")
@@ -312,19 +314,19 @@ func firstAction(ctx actionContext) {
 			}
 		}
 	}
-	ctx.log.log("%s: First(%d) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
+	ctx.log.log("%s: First(%s) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
 func lowerboundAction(ctx actionContext) {
 	id := mkID()
 	iter, _ := ctx.table.LowerBound(ctx.txn, idIndex.Query(id))
-	ctx.log.log("%s: LowerBound(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
+	ctx.log.log("%s: LowerBound(%s) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
 func prefixAction(ctx actionContext) {
 	id := mkID()
 	iter, _ := ctx.table.Prefix(ctx.txn, idIndex.Query(id))
-	ctx.log.log("%s: Prefix(%d) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
+	ctx.log.log("%s: Prefix(%s) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
 var actions = []action{
@@ -380,7 +382,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	defer iter.Close()
 
 	// Keep track of what state the changes lead us to in order to validate it.
-	state := map[uint64]*statedb.Change[fuzzObj]{}
+	state := map[string]*statedb.Change[fuzzObj]{}
 
 	var txn statedb.ReadTxn
 	var prevRev statedb.Revision
@@ -399,7 +401,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			}
 			prevRev = rev
 
-			if change.Object.id == 0 || change.Object.value == 0 {
+			if change.Object.id == "" || change.Object.value == 0 {
 				panic("trackerWorker: object with zero id/value")
 			}
 
@@ -419,7 +421,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
 				change, found := state[obj.id]
 				if !found {
-					panic(fmt.Sprintf("trackerWorker: object %d not found from state", obj.id))
+					panic(fmt.Sprintf("trackerWorker: object %s not found from state", obj.id))
 				}
 
 				if change.Revision != rev {
@@ -434,7 +436,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 
 			if len(state2) > 0 {
 				for id := range state2 {
-					log.log("%d should not exist\n", id)
+					log.log("%s should not exist\n", id)
 				}
 				panic(fmt.Sprintf("trackerWorker: %d orphan object(s)", len(state2)))
 			}
