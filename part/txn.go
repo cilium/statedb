@@ -221,23 +221,32 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 			this.prefix = this.prefix[len(newPrefix):]
 			key = key[len(newPrefix):]
 
-			newLeaf := newLeaf(txn.opts, key, fullKey, value).self()
+			newLeaf := newLeaf(txn.opts, key, fullKey, value)
 			newNode := &node4[T]{
 				header: header[T]{prefix: newPrefix},
 			}
-			if this.prefix[0] < key[0] {
+			newNode.setKind(nodeKind4)
+
+			switch {
+			case len(key) == 0:
+				newNode.setLeaf(newLeaf)
 				newNode.children[0] = this
 				newNode.keys[0] = this.prefix[0]
-				newNode.children[1] = newLeaf
-				newNode.keys[1] = newLeaf.prefix[0]
-			} else {
-				newNode.children[0] = newLeaf
-				newNode.keys[0] = newLeaf.prefix[0]
+				newNode.setSize(1)
+
+			case this.prefix[0] < key[0]:
+				newNode.children[0] = this
+				newNode.keys[0] = this.prefix[0]
+				newNode.children[1] = newLeaf.self()
+				newNode.keys[1] = key[0]
+				newNode.setSize(2)
+			default:
+				newNode.children[0] = newLeaf.self()
+				newNode.keys[0] = key[0]
 				newNode.children[1] = this
 				newNode.keys[1] = this.prefix[0]
+				newNode.setSize(2)
 			}
-			newNode.setKind(nodeKind4)
-			newNode.setSize(2)
 			if !txn.opts.rootOnlyWatch || this == newRoot {
 				newNode.header.watch = make(chan struct{})
 			}

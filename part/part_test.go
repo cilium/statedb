@@ -641,6 +641,23 @@ func Test_lowerbound_regression(t *testing.T) {
 	require.Equal(t, len(values), i)
 }
 
+func Test_prefix_regression(t *testing.T) {
+	// Regression test for bug where a long key and a short key was inserted and where
+	// the keys shared a prefix.
+
+	tree := New[string]()
+	_, _, tree = tree.Insert([]byte("foobar"), "foobar")
+	_, _, tree = tree.Insert([]byte("foo"), "foo")
+
+	s, _, found := tree.Get([]byte("foobar"))
+	require.True(t, found)
+	require.Equal(t, s, "foobar")
+
+	s, _, found = tree.Get([]byte("foo"))
+	require.True(t, found)
+	require.Equal(t, s, "foo")
+}
+
 func Test_iterate(t *testing.T) {
 	sizes := []int{0, 1, 10, 100, 1000, rand.Intn(1000)}
 	for _, size := range sizes {
