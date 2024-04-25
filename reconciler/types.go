@@ -27,6 +27,9 @@ type Reconciler[Obj any] interface {
 }
 
 type Config[Obj any] struct {
+	// Table to reconcile.
+	Table statedb.RWTable[Obj]
+
 	// Metrics to use with this reconciler. The metrics capture the duration
 	// of operations during incremental and full reconcilation and the errors
 	// that occur during either.
@@ -88,6 +91,9 @@ type Config[Obj any] struct {
 }
 
 func (cfg Config[Obj]) validate() error {
+	if cfg.Table == nil {
+		return fmt.Errorf("%T.Table cannot be nil", cfg)
+	}
 	if cfg.GetObjectStatus == nil {
 		return fmt.Errorf("%T.GetObjectStatus cannot be nil", cfg)
 	}

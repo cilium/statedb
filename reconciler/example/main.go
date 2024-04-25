@@ -131,8 +131,9 @@ var Hive = hive.New(
 	),
 )
 
-func NewReconcilerConfig(ops reconciler.Operations[*Memo], m *reconciler.ExpVarMetrics) reconciler.Config[*Memo] {
+func NewReconcilerConfig(ops reconciler.Operations[*Memo], tbl statedb.RWTable[*Memo], m *reconciler.ExpVarMetrics) reconciler.Config[*Memo] {
 	return reconciler.Config[*Memo]{
+		Table:                     tbl,
 		Metrics:                   m,
 		FullReconcilationInterval: 10 * time.Second,
 		RetryBackoffMinDuration:   100 * time.Millisecond,

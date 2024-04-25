@@ -52,7 +52,7 @@ func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, 
 		oldRevision:    rev,
 		ctx:            ctx,
 		txn:            txn,
-		table:          r.Table,
+		table:          r.Config.Table,
 		results:        make(map[Obj]opResult),
 	}
 
