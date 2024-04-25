@@ -16,17 +16,29 @@ import (
 //   01 (270) >= 01 (260) => 09 > 04 => found!
 
 func Int(n int) Key {
+	return Int32(int32(n))
+}
+
+func Int64(n int64) Key {
 	return Uint64(uint64(n))
 }
 
+func Int32(n int32) Key {
+	return Uint32(uint32(n))
+}
+
+func Int16(n int16) Key {
+	return Uint16(uint16(n))
+}
+
 func Uint64(n uint64) Key {
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, n)
-	return buf
+	return binary.BigEndian.AppendUint64(nil, n)
+}
+
+func Uint32(n uint32) Key {
+	return binary.BigEndian.AppendUint32(nil, n)
 }
 
 func Uint16(n uint16) Key {
-	buf := make([]byte, 2)
-	binary.BigEndian.PutUint16(buf, n)
-	return buf
+	return binary.BigEndian.AppendUint16(nil, n)
 }
