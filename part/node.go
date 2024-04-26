@@ -171,6 +171,7 @@ func (n *header[T]) promote(watch bool) *header[T] {
 		node4 := n.node4()
 		node16 := &node16[T]{header: *n}
 		node16.setKind(nodeKind16)
+		node16.leaf = n.getLeaf()
 		size := node4.size()
 		copy(node16.children[:], node4.children[:size])
 		copy(node16.keys[:], node4.keys[:size])
@@ -182,6 +183,7 @@ func (n *header[T]) promote(watch bool) *header[T] {
 		node16 := n.node16()
 		node48 := &node48[T]{header: *n}
 		node48.setKind(nodeKind48)
+		node48.leaf = n.getLeaf()
 		copy(node48.children[:], node16.children[:node16.size()])
 		for i, k := range node16.keys[:node16.size()] {
 			node48.index[k] = int8(i)
@@ -194,6 +196,7 @@ func (n *header[T]) promote(watch bool) *header[T] {
 		node48 := n.node48()
 		node256 := &node256[T]{header: *n}
 		node256.setKind(nodeKind256)
+		node256.leaf = n.getLeaf()
 
 		// Since Node256 has children indexed directly, iterate over the children
 		// to assign them to the right index.
