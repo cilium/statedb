@@ -597,7 +597,6 @@ func Test_lowerbound_edge_cases(t *testing.T) {
 	next(false, 0)
 
 	// Node256
-	fmt.Println("node256:")
 	for i := 1; i < 50; i += 2 { // add less than 256 for some holes in node256.children
 		n := uint32(0x20000 + i)
 		_, _, tree = tree.Insert(uint32Key(n), n)
@@ -735,6 +734,29 @@ func Test_iterate(t *testing.T) {
 			}
 		}
 
+	}
+}
+
+func Test_closed_chan_regression(t *testing.T) {
+	tree := New[uint64]()
+	_, _, tree = tree.Insert(hexKey(uint64(0)), uint64(0))
+	_, _, tree = tree.Insert(hexKey(uint64(1)), uint64(1))
+	_, _, tree = tree.Insert(hexKey(uint64(2)), uint64(2))
+	_, _, tree = tree.Insert(hexKey(uint64(3)), uint64(3))
+
+	txn := tree.Txn()
+	txn.Delete(hexKey(uint64(3)))
+	txn.Delete(hexKey(uint64(1)))
+	tree = txn.Commit()
+
+	// No reachable channel should be closed
+	for _, c := range tree.root.children() {
+		select {
+		case <-c.watch:
+			t.Logf("%x %p closed already", c.prefix, &c.watch)
+			t.FailNow()
+		default:
+		}
 	}
 }
 
