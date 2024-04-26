@@ -4,6 +4,7 @@
 package part
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
@@ -59,6 +60,10 @@ func Test_search(t *testing.T) {
 
 func uint64Key(n uint64) []byte {
 	return binary.BigEndian.AppendUint64(nil, n)
+}
+
+func hexKey(n uint64) []byte {
+	return []byte(fmt.Sprintf("%x", n))
 }
 
 func uint32Key(n uint32) []byte {
@@ -659,28 +664,78 @@ func Test_prefix_regression(t *testing.T) {
 }
 
 func Test_iterate(t *testing.T) {
-	sizes := []int{0, 1, 10, 100, 1000, rand.Intn(1000)}
+	sizes := []int{0, 1, 10, 100, 1000}
 	for _, size := range sizes {
 		t.Logf("size=%d", size)
 		tree := New[uint64]()
+		keys := []uint64{}
 		for i := 0; i < size; i++ {
-			_, _, tree = tree.Insert(uint64Key(uint64(i)), uint64(i))
+			keys = append(keys, uint64(i))
 		}
 
-		iter := tree.LowerBound([]byte{})
-		i := uint64(0)
-		for _, obj, ok := iter.Next(); ok; _, obj, ok = iter.Next() {
-			if obj != uint64(i) {
-				t.Fatalf("expected %d,  got %d", i, obj)
+		rand.Shuffle(len(keys), func(i, j int) {
+			keys[i], keys[j] = keys[j], keys[i]
+		})
+		for _, i := range keys {
+			_, _, tree = tree.Insert(hexKey(uint64(i)), uint64(i))
+		}
+
+		// Insert again and validate that the old value is returned
+		for _, i := range keys {
+			var old uint64
+			var hadOld bool
+			old, hadOld, tree = tree.Insert(hexKey(uint64(i)), uint64(i))
+			assert.True(t, hadOld, "hadOld")
+			assert.Equal(t, old, uint64(i))
+		}
+
+		// The order for the variable length keys is based on prefix,
+		// so we would get 0x0105 before 0x02, since it has "smaller"
+		// prefix. Hence we just check we see all values.
+		iter := tree.Iterator()
+		i := int(0)
+		for key, obj, ok := iter.Next(); ok; key, obj, ok = iter.Next() {
+			if !bytes.Equal(hexKey(obj), key) {
+				t.Fatalf("expected %x, got %x", key, hexKey(obj))
 			}
 			i++
 		}
-		require.EqualValues(t, i, size)
+		if !assert.Equal(t, size, i) {
+			tree.PrintTree()
+			t.FailNow()
+		}
 
 		_, _, ok := iter.Next()
 		require.False(t, ok, "expected exhausted iterator to keep returning false")
-	}
 
+		// Delete keys one at a time, in random order.
+		rand.Shuffle(len(keys), func(i, j int) {
+			keys[i], keys[j] = keys[j], keys[i]
+		})
+		txn := tree.Txn()
+		n := rand.Intn(20)
+		for i, k := range keys {
+			txn.Delete(hexKey(uint64(k)))
+
+			n--
+			if n <= 0 {
+				tree = txn.Commit()
+				txn = tree.Txn()
+				n = rand.Intn(20)
+			}
+
+			// All the rest of the keys can still be found
+			for _, j := range keys[i+1:] {
+				n, _, found := txn.Get(hexKey(j))
+				if !assert.True(t, found) || !assert.Equal(t, n, j) {
+					fmt.Println("--- new tree")
+					txn.PrintTree()
+					t.FailNow()
+				}
+			}
+		}
+
+	}
 }
 
 func Test_lowerbound_bigger(t *testing.T) {
