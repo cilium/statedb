@@ -173,12 +173,14 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 		if bytes.HasPrefix(key, this.prefix) {
 			key = key[len(this.prefix):]
 			if len(key) == 0 {
+				leaf := this.getLeaf()
+				if leaf != nil {
+					oldValue = leaf.value
+					hadOld = true
+				}
 				if this.isLeaf() {
 					// This is a leaf node and we just cloned it. Update the value.
-					leaf := this.getLeaf()
-					oldValue = leaf.value
 					leaf.value = value
-					hadOld = true
 				} else {
 					// This is a non-leaf node, create/replace the existing leaf.
 					this.setLeaf(newLeaf(txn.opts, key, fullKey, value))
