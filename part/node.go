@@ -237,9 +237,9 @@ func (n *header[T]) printTree(level int) {
 		panic("unknown node kind")
 	}
 	if leaf := n.getLeaf(); leaf != nil {
-		fmt.Printf(" %x -> %v", leaf.key, leaf.value)
+		fmt.Printf(" %x -> %v (L:%p W:%p)", leaf.key, leaf.value, leaf, leaf.watch)
 	}
-	fmt.Printf("(%p)\n", n)
+	fmt.Printf(" (N:%p, W:%p)\n", n, n.watch)
 
 	for _, child := range children {
 		if child != nil {
@@ -486,7 +486,7 @@ func search[T any](root *header[T], key []byte) (value T, watch <-chan struct{},
 		if len(key) == 0 {
 			if leaf := this.getLeaf(); leaf != nil {
 				value = leaf.value
-				watch = this.watch
+				watch = leaf.watch
 				ok = true
 			}
 			return

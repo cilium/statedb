@@ -57,11 +57,17 @@ func newIterator[T any](start *header[T]) *Iterator[T] {
 
 func prefixSearch[T any](root *header[T], key []byte) (*Iterator[T], <-chan struct{}) {
 	this := root
-
+	var watch <-chan struct{}
 	for {
+		if !this.isLeaf() && this.watch != nil {
+			// Leaf watch channels only close when the leaf is manipulated,
+			// thus we only return non-leaf watch channels.
+			watch = this.watch
+		}
+
 		switch {
 		case bytes.Equal(key, this.prefix[:min(len(key), len(this.prefix))]):
-			return newIterator(this), this.watch
+			return newIterator(this), watch
 
 		case bytes.HasPrefix(key, this.prefix):
 			key = key[len(this.prefix):]
