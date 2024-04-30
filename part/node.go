@@ -475,6 +475,8 @@ func newNode4[T any]() *header[T] {
 func search[T any](root *header[T], key []byte) (value T, watch <-chan struct{}, ok bool) {
 	this := root
 	for {
+		watch = this.watch
+
 		// Consume the prefix
 		if !bytes.HasPrefix(key, this.prefix) {
 			return
