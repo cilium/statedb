@@ -17,6 +17,134 @@ import (
 
 const numObjectsToInsert = 1000
 
+// Tests that the right channels are closed during insertion.
+func Test_insertion_and_watches(t *testing.T) {
+	assertOpen := func(t testing.TB, c <-chan struct{}) {
+		t.Helper()
+		assert.NotNil(t, c)
+		select {
+		case <-c:
+			t.Error("closed, but should be open")
+		default:
+		}
+	}
+
+	assertClosed := func(t testing.TB, c <-chan struct{}) {
+		t.Helper()
+		assert.NotNil(t, c)
+		select {
+		case <-c:
+		default:
+			t.Error("open, but should be closed")
+		}
+	}
+
+	// Replacement
+	{
+		tree := New[int]()
+
+		txn := tree.Txn()
+		txn.Insert([]byte("abc"), 1)
+		txn.Insert([]byte("ab"), 2)
+		txn.Insert([]byte("abd"), 3)
+		tree = txn.Commit()
+
+		_, w, f := tree.Get([]byte("ab"))
+		assert.True(t, f)
+		assertOpen(t, w)
+		_, w2 := tree.Prefix([]byte("a"))
+		assertOpen(t, w2)
+		_, w3, f2 := tree.Get([]byte("abc"))
+		assert.True(t, f2)
+		assertOpen(t, w3)
+		_, w4 := tree.Prefix([]byte("abc"))
+		assertOpen(t, w4)
+
+		_, _, tree = tree.Insert([]byte("ab"), 42)
+		assertClosed(t, w)
+		assertClosed(t, w2)
+
+		assertOpen(t, w3)
+		assertOpen(t, w4)
+	}
+
+	// Root to leaf and back.
+	// N4() -- Insert(a, 1) -> L(a, 1) -- Insert(b, 2) -> N4()
+	//                                                   /   \
+	//                                             L(a, 1)    L(b, 2)
+	// Neither the Get(a) nor the Prefix(a) watch channels should close.
+	{
+		tree := New[int]()
+
+		_, _, tree = tree.Insert([]byte("a"), 1)
+
+		_, w, f := tree.Get([]byte("a"))
+		assert.True(t, f)
+		assertOpen(t, w)
+		_, w2 := tree.Prefix([]byte("a"))
+		assertOpen(t, w2)
+
+		_, _, tree = tree.Insert([]byte("b"), 2)
+		assertOpen(t, w)
+		assertOpen(t, w2)
+	}
+
+	// "Lateral movement" - L(a, 1) should become the leaf of the root N4
+	{
+		tree := New[int]()
+
+		_, _, tree = tree.Insert([]byte("a"), 1)
+
+		_, w, f := tree.Get([]byte("a"))
+		assert.True(t, f)
+		assertOpen(t, w)
+		_, w2 := tree.Prefix([]byte("a"))
+		assertOpen(t, w2)
+
+		txn := tree.Txn()
+		txn.Insert([]byte("aa"), 2)
+		txn.Insert([]byte("ab"), 3)
+		assertOpen(t, w) // shouldn't close until commit
+		assertOpen(t, w2)
+		tree = txn.Commit()
+
+		assertOpen(t, w)
+		assertClosed(t, w2)
+	}
+
+	// Second variant of "lateral movement" of leaf node.
+	//    N4(a) - L(a,1)                       N4(a) - L(a,1)
+	//  /      \         -- Insert(abc) -->   /     \
+	// L(aa,2) L(ab,3)                     L(aa,2)  N4(b) - L(ab, 3)
+	//                                              /
+	//                                             L(abc, 4)
+	{
+		tree := New[int]()
+
+		txn := tree.Txn()
+		txn.Insert([]byte("a"), 1)
+		txn.Insert([]byte("aa"), 2)
+		txn.Insert([]byte("ab"), 3)
+		tree = txn.Commit()
+
+		_, w, f := tree.Get([]byte("ab"))
+		assert.True(t, f)
+		assertOpen(t, w)
+
+		_, w2 := tree.Prefix([]byte("ab"))
+		assertOpen(t, w2)
+
+		// This should move the L(ab) laterally and insert a N4(ab) with a L(abc, 4)
+		// child
+		_, _, tree = tree.Insert([]byte("abc"), 4)
+		// The precise "ab" chan should be open.
+		assertOpen(t, w)
+		// The "ab" prefix chan should be closed.
+		assertClosed(t, w2)
+	}
+
+}
+
 func Test_commonPrefix(t *testing.T) {
 	check := func(a, b, common string) {
 		actual := string(commonPrefix([]byte(a), []byte(b)))
