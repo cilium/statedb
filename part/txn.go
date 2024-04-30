@@ -181,23 +181,31 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 			break
 		}
 
-		// Clone the parent.
-		this = txn.cloneNode(this)
-		*thisp = this
-
 		child, idx := this.findIndex(key[0])
 		if child == nil {
 			// We've found a free slot where to insert the key.
 			if this.size()+1 > this.cap() {
 				// Node too small, promote it to the next size.
+				if this.watch != nil {
+					txn.watches[this.watch] = struct{}{}
+				}
 				this = this.promote(!txn.opts.rootOnlyWatch || this == newRoot)
+				txn.mutated.put(this)
+			} else {
+				// Node is big enough, clone it so we can mutate it
+				this = txn.cloneNode(this)
 			}
 			this.insert(idx, newLeaf(txn.opts, key, fullKey, value).self())
 			*thisp = this
 			return
 		}
+
+		// Clone the parent so we can modify it
+		this = txn.cloneNode(this)
+		*thisp = this
+		// And recurse into the child
 		thisp = &this.children()[idx]
-		this = child
+		this = *thisp
 	}
 
 	// A node exists where we wanted to insert the key.
