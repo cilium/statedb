@@ -65,14 +65,18 @@ func Test_insertion_and_watches(t *testing.T) {
 		assertClosed(t, w2)
 
 		assertOpen(t, w3)
-		assertOpen(t, w4)
+
+		// Prefix watch is closed as it's on the "ab" node
+		// since that's the closest non-leaf node to "abc" leaf.
+		assertClosed(t, w4)
 	}
 
 	// Root to leaf and back.
-	// N4() -- Insert(a, 1) -> L(a, 1) -- Insert(b, 2) -> N4()
-	//                                                   /   \
-	//                                             L(a, 1)    L(b, 2)
-	// Neither the Get(a) nor the Prefix(a) watch channels should close.
+	// N4() -- Insert(a, 1) -> N4() -- Insert(b, 2) -> N4()
+	//                         /                      /   \
+	//                      L(a, 1)             L(a, 1)    L(b, 2)
+	// The Get(a) channel closes, but not Prefix(a) since the prefix search
+	// uses the root channel.
 	{
 		tree := New[int]()
 
@@ -86,7 +90,7 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		_, _, tree = tree.Insert([]byte("b"), 2)
 		assertOpen(t, w)
-		assertOpen(t, w2)
+		assertClosed(t, w2)
 	}
 
 	// "Lateral movement" - L(a, 1) should become the leaf of the root N4
