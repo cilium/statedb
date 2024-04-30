@@ -183,6 +183,9 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 					leaf.value = value
 				} else {
 					// This is a non-leaf node, create/replace the existing leaf.
+					if !txn.opts.rootOnlyWatch && leaf != nil {
+						txn.watches[leaf.watch] = struct{}{}
+					}
 					this.setLeaf(newLeaf(txn.opts, key, fullKey, value))
 				}
 				return
