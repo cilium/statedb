@@ -157,104 +157,166 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, hadOld bool, newRoot *header[T]) {
 	fullKey := key
 
-	if root.size() == 0 && root.getLeaf() == nil {
-		txn.watches[root.watch] = struct{}{}
-		newRoot = newLeaf(txn.opts, key, key, value).self()
-		if newRoot.watch == nil {
-			newRoot.watch = make(chan struct{})
+	this := root
+	thisp := &newRoot
+
+	// Try to insert the key into the tree. If we find a free slot into which to insert
+	// it, we do it and return. If an existing node exists where the key should go, then
+	// we stop. 'this' points to that node, and 'thisp' to its memory location. It has
+	// not been cloned.
+	for {
+		if this.isLeaf() {
+			// We've reached a leaf node, cannot go further.
+			break
 		}
-		return
+
+		if !bytes.HasPrefix(key, this.prefix) {
+			break
+		}
+
+		// Prefix matched. Consume it and go further.
+		key = key[len(this.prefix):]
+		if len(key) == 0 {
+			// Our key matches this node.
+			break
+		}
+
+		// Clone the parent.
+		this = txn.cloneNode(this)
+		*thisp = this
+
+		child, idx := this.findIndex(key[0])
+		if child == nil {
+			// We've found a free slot where to insert the key.
+			if this.size()+1 > this.cap() {
+				// Node too small, promote it to the next size.
+				this = this.promote(!txn.opts.rootOnlyWatch || this == newRoot)
+			}
+			this.insert(idx, newLeaf(txn.opts, key, fullKey, value).self())
+			*thisp = this
+			return
+		}
+		thisp = &this.children()[idx]
+		this = child
 	}
 
-	newRoot = txn.cloneNode(root)
-	this := newRoot
-	thisp := &newRoot
-	for {
-		if bytes.HasPrefix(key, this.prefix) {
-			key = key[len(this.prefix):]
-			if len(key) == 0 {
-				leaf := this.getLeaf()
-				if leaf != nil {
-					oldValue = leaf.value
-					hadOld = true
-				}
-				if this.isLeaf() {
-					// This is a leaf node and we just cloned it. Update the value.
-					leaf.value = value
-				} else {
-					// This is a non-leaf node, create/replace the existing leaf.
-					if !txn.opts.rootOnlyWatch && leaf != nil {
-						txn.watches[leaf.watch] = struct{}{}
-					}
-					this.setLeaf(newLeaf(txn.opts, key, fullKey, value))
-				}
-				return
-			}
-
-			child, idx := this.findIndex(key[0])
-
-			if child == nil || child.prefix[0] != key[0] {
-				// No node for this key, add it.
-				if this.size()+1 > this.cap() {
-					// too small, need to promote to a larger size.
-					if !txn.opts.rootOnlyWatch || this == newRoot {
-						txn.watches[this.watch] = struct{}{}
-					}
-					this = this.promote(!txn.opts.rootOnlyWatch || this == newRoot)
-				} else {
-					// it fits, just need a clone.
-					this = txn.cloneNode(this)
-				}
-				this.insert(idx, newLeaf(txn.opts, key, fullKey, value).self())
-				*thisp = this
-				return
-			}
-
-			// Node exists, replace it with a clone and recurse into it.
-			child = txn.cloneNode(child)
-			thisp = &this.children()[idx]
-			*thisp = child
-			this = child
+	// A node exists where we wanted to insert the key.
+	// 'this' points to it, and 'thisp' is its memory location. The parents
+	// have been cloned.
+	switch {
+	case this.isLeaf():
+		common := commonPrefix(key, this.prefix)
+		if len(common) == len(this.prefix) && len(common) == len(key) {
+			// Exact match, clone and update the value.
+			oldValue = this.getLeaf().value
+			hadOld = true
+			this = txn.cloneNode(this)
+			*thisp = this
+			this.getLeaf().value = value
 		} else {
-			// Reached a node with a different prefix, split it.
-			newPrefix := commonPrefix(key, this.prefix)
-
-			this.prefix = this.prefix[len(newPrefix):]
-			key = key[len(newPrefix):]
-
-			newLeaf := newLeaf(txn.opts, key, fullKey, value)
+			// Partially matching prefix.
 			newNode := &node4[T]{
-				header: header[T]{prefix: newPrefix},
+				header: header[T]{prefix: common},
 			}
 			newNode.setKind(nodeKind4)
 
+			// Make a shallow copy of the leaf. But keep its watch channel
+			// intact since we're only manipulating its prefix.
+			oldLeafCopy := *this.getLeaf()
+			oldLeaf := &oldLeafCopy
+			oldLeaf.prefix = oldLeaf.prefix[len(common):]
+			key = key[len(common):]
+			newLeaf := newLeaf(txn.opts, key, fullKey, value)
+
+			// Insert the two leaves into the node we created. If one has
+			// a key that is a subset of the other, then we can insert them
+			// as a leaf of the node4, otherwise they become children.
 			switch {
-			case len(key) == 0:
-				newNode.setLeaf(newLeaf)
-				newNode.children[0] = this
-				newNode.keys[0] = this.prefix[0]
+			case len(oldLeaf.prefix) == 0:
+				oldLeaf.prefix = common
+				newNode.setLeaf(oldLeaf)
+				newNode.children[0] = newLeaf.self()
+				newNode.keys[0] = newLeaf.prefix[0]
 				newNode.setSize(1)
 
-			case this.prefix[0] < key[0]:
-				newNode.children[0] = this
-				newNode.keys[0] = this.prefix[0]
+			case len(key) == 0:
+				newLeaf.prefix = common
+				newNode.setLeaf(newLeaf)
+				newNode.children[0] = oldLeaf.self()
+				newNode.keys[0] = oldLeaf.prefix[0]
+				newNode.setSize(1)
+
+			case oldLeaf.prefix[0] < key[0]:
+				newNode.children[0] = oldLeaf.self()
+				newNode.keys[0] = oldLeaf.prefix[0]
 				newNode.children[1] = newLeaf.self()
 				newNode.keys[1] = key[0]
 				newNode.setSize(2)
+
 			default:
 				newNode.children[0] = newLeaf.self()
 				newNode.keys[0] = key[0]
-				newNode.children[1] = this
-				newNode.keys[1] = this.prefix[0]
+				newNode.children[1] = oldLeaf.self()
+				newNode.keys[1] = oldLeaf.prefix[0]
 				newNode.setSize(2)
 			}
-			if !txn.opts.rootOnlyWatch || this == newRoot {
-				newNode.header.watch = make(chan struct{})
-			}
 			*thisp = newNode.self()
-			return
 		}
+	case len(key) == 0:
+		// Exact match, but not a leaf node
+		this = txn.cloneNode(this)
+		*thisp = this
+		if leaf := this.getLeaf(); leaf != nil {
+			// Replace the existing leaf
+			oldValue = leaf.value
+			hadOld = true
+			leaf = txn.cloneNode(leaf.self()).getLeaf()
+			leaf.value = value
+			this.setLeaf(leaf)
+		} else {
+			// Set the leaf
+			this.setLeaf(newLeaf(txn.opts, this.prefix, fullKey, value))
+		}
+
+	default:
+		// Partially matching prefix, non-leaf node.
+		common := commonPrefix(key, this.prefix)
+
+		this = txn.cloneNode(this)
+		*thisp = this
+		this.prefix = this.prefix[len(common):]
+		key = key[len(common):]
+
+		newLeaf := newLeaf(txn.opts, key, fullKey, value)
+		newNode := &node4[T]{
+			header: header[T]{prefix: common},
+		}
+		newNode.setKind(nodeKind4)
+
+		switch {
+		case len(key) == 0:
+			newLeaf.prefix = common
+			newNode.setLeaf(newLeaf)
+			newNode.children[0] = this
+			newNode.keys[0] = this.prefix[0]
+			newNode.setSize(1)
+
+		case this.prefix[0] < key[0]:
+			newNode.children[0] = this
+			newNode.keys[0] = this.prefix[0]
+			newNode.children[1] = newLeaf.self()
+			newNode.keys[1] = key[0]
+			newNode.setSize(2)
+		default:
+			newNode.children[0] = newLeaf.self()
+			newNode.keys[0] = key[0]
+			newNode.children[1] = this
+			newNode.keys[1] = this.prefix[0]
+			newNode.setSize(2)
+		}
+		*thisp = newNode.self()
 	}
+	return
 }
 
 // deleteParent tracks a node on the path to the target node that is being

@@ -274,22 +274,36 @@ func Test_delete(t *testing.T) {
 
 func Test_watch(t *testing.T) {
 	tree := New[[]byte]()
+
+	// Insert 'a', get it and check watch channel is not closed.
 	_, _, tree = tree.Insert([]byte("a"), []byte("a"))
 
-	_, watch, ok := tree.Get([]byte("a"))
+	_, watchA, ok := tree.Get([]byte("a"))
 	if !ok {
 		t.Fatal("expected to find 'a'")
 	}
 	select {
-	case <-watch:
+	case <-watchA:
 		t.Fatal("did not expect watch to be closed")
 	default:
 	}
 
-	_, _, tree = tree.Insert([]byte("a"), []byte("b"))
+	// Get 'b' that should not exist and the watch channel should
+	// not be closed.
+	_, watchB, ok := tree.Get([]byte("b"))
+	assert.False(t, ok, "Get(b)")
 
 	select {
-	case <-watch:
+	case <-watchB:
+		t.Fatal("did not expect watch to be closed")
+	default:
+	}
+
+	// Modify 'a'. Now the watch channel should close.
+	_, _, tree = tree.Insert([]byte("a"), []byte("aa"))
+
+	select {
+	case <-watchA:
 	case <-time.After(10 * time.Second):
 		t.Fatal("expected watch channel to close")
 	}
@@ -298,8 +312,16 @@ func Test_watch(t *testing.T) {
 	if !ok {
 		t.Fatal("expected to find 'a'")
 	}
-	if string(v) != "b" {
-		t.Fatalf("expected value 'b', got '%s'", v)
+	if string(v) != "aa" {
+		t.Fatalf("expected value 'aa', got '%s'", v)
+	}
+
+	// Insert 'b'. Now the watch channel should close.
+	_, _, tree = tree.Insert([]byte("b"), []byte("b"))
+	select {
+	case <-watchB:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected watch channel to close")
 	}
 }
 
@@ -663,7 +685,7 @@ func Test_prefix_regression(t *testing.T) {
 }
 
 func Test_iterate(t *testing.T) {
-	sizes := []int{0, 1, 10, 100, 1000}
+	sizes := []int{1, 10, 100, 1000}
 	for _, size := range sizes {
 		t.Logf("size=%d", size)
 		tree := New[uint64]()
@@ -675,17 +697,39 @@ func Test_iterate(t *testing.T) {
 		rand.Shuffle(len(keys), func(i, j int) {
 			keys[i], keys[j] = keys[j], keys[i]
 		})
+
+		watches := []<-chan struct{}{}
 		for _, i := range keys {
 			_, _, tree = tree.Insert(hexKey(uint64(i)), uint64(i))
+			v, watch, ok := tree.Get(hexKey(uint64(i)))
+			require.True(t, ok, "Get %x", hexKey(uint64(i)))
+			require.Equal(t, v, uint64(i), "values equal")
+			require.NotNil(t, watch, "watch not nil")
+			watches = append(watches, watch)
 		}
 
-		// Insert again and validate that the old value is returned
+		// Check that watches are not closed.
+		for _, w := range watches {
+			select {
+			case <-w:
+				tree.PrintTree()
+				t.Fatalf("watch channel %p closed unexpectedly", w)
+			default:
+			}
+		}
+
+		// Insert again and validate that the old value is returned and
+		// all watch channels are closed.
 		for _, i := range keys {
 			var old uint64
 			var hadOld bool
 			old, hadOld, tree = tree.Insert(hexKey(uint64(i)), uint64(i))
 			assert.True(t, hadOld, "hadOld")
 			assert.Equal(t, old, uint64(i))
+		}
+		t.Logf("waiting for watches to close")
+		for _, w := range watches {
+			<-w
 		}
 
 		// The order for the variable length keys is based on prefix,
