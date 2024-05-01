@@ -141,7 +141,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opUpdate(ID_3))
 			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
 
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 			h.waitForReconciliation()
 
 			// Set one to be faulty => object will error
@@ -150,14 +150,14 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opFail(opUpdate(ID_1)))
 			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
 			h.expectRetried(ID_1)
-			h.expectHealthLevel(cell.StatusDegraded)
+			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
 
 			// Fix the object => object will reconcile again.
 			t.Log("Setting '1' non-faulty")
 			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
 			h.expectOp(opUpdate(ID_1))
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
 			t.Log("Delete 1 & 2")
 			h.markForDelete(ID_1)
@@ -172,14 +172,12 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.setTargetFaulty(true)
 			h.markForDelete(ID_3)
 			h.expectOp(opFail(opDelete(3)))
-			h.expectStatus(ID_3, reconciler.StatusKindError, "delete fail")
-			h.expectHealthLevel(cell.StatusDegraded)
+			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "delete fail")
 
-			t.Log("Delete 3")
+			t.Log("Set the target non-faulty to delete '3'")
 			h.setTargetFaulty(false)
 			h.expectOp(opDelete(3))
-			h.expectNotFound(ID_3)
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 0 objects", "")
 
 			h.waitForReconciliation()
 
@@ -196,7 +194,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			t.Log("Full reconciliation without objects")
 			h.triggerFullReconciliation()
 			h.expectOp(opPrune(0))
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 0 objects", "")
 
 			// Register a table initializer to prohibit pruning.
 			markInitialized := h.registerInitializer()
@@ -218,7 +216,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectNumUpdates(ID_1, 1)
 			h.expectNumUpdates(ID_2, 1)
 			h.expectNumUpdates(ID_3, 1)
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
 			// Full reconciliation with functioning ops.
 			t.Log("Full reconciliation with non-faulty ops")
@@ -230,7 +228,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectNumUpdates(ID_1, 2)
 			h.expectNumUpdates(ID_2, 2)
 			h.expectNumUpdates(ID_3, 2)
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
 			// Make the ops faulty and trigger the full reconciliation.
 			t.Log("Full reconciliation with faulty ops")
@@ -241,7 +239,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 				opFail(opUpdate(ID_2)),
 				opFail(opUpdate(ID_3)),
 			)
-			h.expectHealthLevel(cell.StatusDegraded)
+			h.expectHealth(cell.StatusDegraded, "3 failure(s)", "update fail")
 
 			// Expect the objects to be retried also after the full reconciliation.
 			h.expectRetried(ID_1)
@@ -260,7 +258,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
 			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
-			h.expectHealthLevel(cell.StatusOK)
+			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
 			// Cleanup.
 			h.markForDelete(ID_1)
@@ -504,12 +502,7 @@ func (h testHelper) insert(id uint64, faulty bool, status reconciler.Status) {
 
 func (h testHelper) markForDelete(id uint64) {
 	wtxn := h.db.WriteTxn(h.tbl)
-	_, _, err := h.tbl.Insert(wtxn, &testObject{
-		id:     id,
-		faulty: false,
-		status: reconciler.StatusPendingDelete(),
-	})
-	require.NoError(h.t, err, "delete failed")
+	h.tbl.Delete(wtxn, &testObject{id: id})
 	wtxn.Commit()
 }
 
@@ -590,19 +583,24 @@ func (h testHelper) expectRetried(id uint64) {
 	require.Eventually(h.t, cond, time.Second, time.Millisecond, "expected %d to be retried", id)
 }
 
-func (h testHelper) expectHealthLevel(level cell.Level) {
+func (h testHelper) expectHealth(level cell.Level, statusSubString string, errSubString string) {
 	h.t.Helper()
 	cond := func() bool {
-		h := h.health.GetChild("test", "job-reconciler-loop")
-		if h == nil {
-			return false
+		health := h.health.GetChild("test", "job-reconciler-loop")
+		require.NotNil(h.t, h, "GetChild")
+		health.Lock()
+		defer health.Unlock()
+		errStr := ""
+		if health.Error != nil {
+			errStr = health.Error.Error()
 		}
-		h.Lock()
-		defer h.Unlock()
-		return level == h.Level
+		return level == health.Level && strings.Contains(health.Status, statusSubString) && strings.Contains(errStr, errSubString)
 	}
 	if !assert.Eventually(h.t, cond, time.Second, time.Millisecond) {
-		require.Failf(h.t, "health mismatch", "expected health level %q, got: %q (%s)", level, h.health.Level, h.health.Status)
+		hc := h.health.GetChild("test", "job-reconciler-loop")
+		hc.Lock()
+		defer hc.Unlock()
+		require.Failf(h.t, "health mismatch", "expected health level %q, status %q, error %q, got: %q, %q, %q", level, statusSubString, errSubString, hc.Level, hc.Status, hc.Error)
 	}
 }
 

@@ -13,7 +13,7 @@ import (
 
 // full performs full reconciliation of all objects. First the Prune() operations is performed to clean up and then
 // Update() is called for each object. Full reconciliation is used to recover from unexpected outside modifications.
-func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) (statedb.Revision, error) {
+func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) []error {
 	var errs []error
 	outOfSync := false
 	ops := r.Config.Operations
@@ -42,7 +42,7 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) (stated
 			updateResults[obj] = opResult{rev: rev, status: StatusDone()}
 			r.retries.Clear(obj)
 		} else {
-			updateResults[obj] = opResult{rev: rev, status: StatusError(false, err)}
+			updateResults[obj] = opResult{rev: rev, status: StatusError(err)}
 			errs = append(errs, err)
 		}
 	}
@@ -70,11 +70,6 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) (stated
 	}
 
 	r.metrics.FullReconciliationErrors(r.ModuleID, errs)
-	if len(errs) > 0 {
-		return r.Config.Table.Revision(txn), fmt.Errorf("full: %w", joinErrors(errs))
-	}
 
-	// Sync succeeded up to latest revision. Continue incremental reconciliation from
-	// this revision.
-	return r.Config.Table.Revision(txn), nil
+	return errs
 }

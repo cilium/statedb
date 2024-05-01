@@ -124,9 +124,7 @@ func (cfg Config[Obj]) validate() error {
 // Operations defines how to reconcile an object.
 //
 // Each operation is given a context that limits the lifetime of the operation
-// and a ReadTxn to allow for the option of looking up realized state from another
-// statedb table as an optimization (main use-case is reconciling routes against
-// Table[Route] to avoid a syscall per route).
+// and a ReadTxn to allow looking up referenced state.
 type Operations[Obj any] interface {
 	// Update the object in the target. If the operation is long-running it should
 	// abort if context is cancelled. Should return an error if the operation fails.
@@ -197,25 +195,19 @@ func (s StatusKind) Key() index.Key {
 
 // Status is embedded into the reconcilable object. It allows
 // inspecting per-object reconciliation status and waiting for
-// the reconciler.
+// the reconciler. Object may have multiple reconcilers and
+// multiple reconciliation statuses.
 type Status struct {
-	Kind StatusKind
-
-	// Delete is true if the object should be deleted by the reconciler.
-	// If an object is deleted outside the reconciler it will not be
-	// processed by the incremental reconciliation.
-	// We use soft deletes in order to observe and wait for deletions.
-	Delete bool
-
+	Kind      StatusKind
 	UpdatedAt time.Time
 	Error     string
 }
 
 func (s Status) String() string {
 	if s.Kind == StatusKindError {
-		return fmt.Sprintf("%s (delete: %v, updated: %s ago, error: %s)", s.Kind, s.Delete, time.Now().Sub(s.UpdatedAt), s.Error)
+		return fmt.Sprintf("%s (updated: %s ago, error: %s)", s.Kind, time.Now().Sub(s.UpdatedAt), s.Error)
 	}
-	return fmt.Sprintf("%s (delete: %v, updated: %s ago)", s.Kind, s.Delete, time.Now().Sub(s.UpdatedAt))
+	return fmt.Sprintf("%s (updated: %s ago)", s.Kind, time.Now().Sub(s.UpdatedAt))
 }
 
 // StatusPending constructs the status for marking the object as
@@ -226,23 +218,6 @@ func StatusPending() Status {
 	return Status{
 		Kind:      StatusKindPending,
 		UpdatedAt: time.Now(),
-		Delete:    false,
-		Error:     "",
-	}
-}
-
-// StatusPendingDelete constructs the status for marking the
-// object to be deleted.
-//
-// The reconciler uses soft-deletes in order to be able to
-// retry and to report failed deletions of objects.
-// When the delete operation is successfully performed
-// the reconciler will delete the object from the table.
-func StatusPendingDelete() Status {
-	return Status{
-		Kind:      StatusKindPending,
-		UpdatedAt: time.Now(),
-		Delete:    true,
 		Error:     "",
 	}
 }
@@ -259,11 +234,10 @@ func StatusDone() Status {
 
 // StatusError constructs the status that marks the object
 // as failed to be reconciled.
-func StatusError(delete bool, err error) Status {
+func StatusError(err error) Status {
 	return Status{
 		Kind:      StatusKindError,
 		UpdatedAt: time.Now(),
-		Delete:    delete,
 		Error:     err.Error(),
 	}
 }
@@ -272,5 +246,4 @@ func StatusError(delete bool, err error) Status {
 type opResult struct {
 	rev    statedb.Revision // revision of the object
 	status Status           // the status to commit
-	delete bool             // if true delete object from the table
 }

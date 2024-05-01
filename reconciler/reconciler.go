@@ -5,7 +5,6 @@ package reconciler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -79,6 +78,7 @@ type reconciler[Obj comparable] struct {
 	retries             *retries
 	externalFullTrigger chan struct{}
 	primaryIndexer      statedb.Indexer[Obj]
+	changes             *statedb.ChangeIterator[Obj]
 }
 
 func (r *reconciler[Obj]) TriggerFullReconciliation() {
@@ -119,8 +119,15 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 		fullReconTickerChan = fullReconTicker.C
 	}
 
+	// Create the change iterator to watch for inserts and deletes to the table.
+	wtxn := r.DB.WriteTxn(r.Config.Table)
+	changes, err := r.Config.Table.Changes(wtxn)
+	txn := wtxn.Commit()
+	if err != nil {
+		return fmt.Errorf("watching for changes failed: %w", err)
+	}
+
 	tableWatchChan := closedWatchChannel
-	revision := statedb.Revision(0)
 	fullReconciliation := false
 
 	for {
@@ -145,18 +152,13 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 			// Table has changed
 		}
 
-		var (
-			err  error
-			errs []error
-			txn  = r.DB.ReadTxn()
-		)
-
 		// Perform incremental reconciliation and retries of previously failed
 		// objects.
-		revision, tableWatchChan, err = r.incremental(ctx, txn, revision)
-		if err != nil {
-			errs = append(errs, err)
-		}
+		errs := r.incremental(ctx, txn, changes)
+
+		// Refresh the transaction to read the new changes.
+		txn = r.DB.ReadTxn()
+		tableWatchChan = changes.Watch(txn)
 
 		if fullReconciliation && r.Config.Table.Initialized(txn) {
 			// Time to perform a full reconciliation. An incremental reconciliation
@@ -169,17 +171,16 @@ func (r *reconciler[Obj]) loop(ctx context.Context, health cell.Health) error {
 			// will be retried via the retry queue.
 			fullReconciliation = false
 
-			var err error
-			revision, err = r.full(ctx, txn)
-			if err != nil {
-				errs = append(errs, err)
-			}
+			errs = append(errs, r.full(ctx, txn)...)
 		}
 
 		if len(errs) == 0 {
-			health.OK(fmt.Sprintf("OK, %d objects", r.Config.Table.NumObjects(txn)))
+			health.OK(
+				fmt.Sprintf("OK, %d objects", r.Config.Table.NumObjects(txn)))
 		} else {
-			health.Degraded("Reconciliation failed", errors.Join(errs...))
+			health.Degraded(
+				fmt.Sprintf("%d failure(s)", len(errs)),
+				joinErrors(errs))
 		}
 	}
 }

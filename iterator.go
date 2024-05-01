@@ -246,7 +246,7 @@ func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
 
 		updateIter, watch := it.table.LowerBound(txn, ByRevision[Obj](it.revision+1))
 		deleteIter := it.dt.deleted(txn, it.revision+1)
-		it.iter = NewDualIterator[Obj](deleteIter, updateIter)
+		it.iter = NewDualIterator(deleteIter, updateIter)
 
 		// It is enough to watch the revision index and not the graveyard since
 		// any object that is inserted into the graveyard will be deleted from
