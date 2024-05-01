@@ -340,7 +340,7 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	// Prepare the iterator
 	updateIter, watch := t.LowerBound(txn, ByRevision[Obj](0)) // observe all current objects
 	deleteIter := iter.dt.deleted(txn, iter.dt.getRevision())  // only observe new deletions
-	iter.iter = NewDualIterator[Obj](deleteIter, updateIter)
+	iter.iter = NewDualIterator(deleteIter, updateIter)
 	iter.watch = watch
 
 	return iter, nil

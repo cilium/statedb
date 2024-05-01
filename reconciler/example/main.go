@@ -199,8 +199,7 @@ func registerHTTPServer(
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			memo = memo.Clone().SetStatus(reconciler.StatusPendingDelete())
-			memos.Insert(txn, memo)
+			memos.Delete(txn, memo)
 			log.Info("Deleted memo", "name", name)
 			w.WriteHeader(http.StatusOK)
 		}

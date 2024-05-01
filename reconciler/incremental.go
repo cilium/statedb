@@ -5,7 +5,6 @@ package reconciler
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -23,7 +22,6 @@ type incrementalRound[Obj comparable] struct {
 	ctx            context.Context
 	txn            statedb.ReadTxn
 	table          statedb.RWTable[Obj]
-	oldRevision    statedb.Revision
 
 	// numReconciled counts the number of objects that have been reconciled in this
 	// round, both for new & changed objects and for retried objects. If
@@ -32,7 +30,7 @@ type incrementalRound[Obj comparable] struct {
 	// reconciliation per object is slow.
 	numReconciled int
 
-	// results collects the results of update and delete operations.
+	// results collects the results of update operations.
 	// The results are committed in a separate write transaction in order to
 	// not lock the table while reconciling. If an object has changed in the meanwhile
 	// the stale reconciliation result for that object is dropped.
@@ -41,7 +39,7 @@ type incrementalRound[Obj comparable] struct {
 	errs []error
 }
 
-func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision) (statedb.Revision, <-chan struct{}, error) {
+func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, changes statedb.ChangeIterator[Obj]) []error {
 	round := incrementalRound[Obj]{
 		moduleID:       r.ModuleID,
 		metrics:        r.metrics,
@@ -49,7 +47,6 @@ func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, 
 		retries:        r.retries,
 		primaryIndexer: r.primaryIndexer,
 		db:             r.DB,
-		oldRevision:    rev,
 		ctx:            ctx,
 		txn:            txn,
 		table:          r.Config.Table,
@@ -58,42 +55,30 @@ func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, 
 
 	// Reconcile new and changed objects using either Operations
 	// or BatchOperations.
-	var newRevision statedb.Revision
 	if r.Config.BatchOperations != nil {
-		newRevision = round.batch()
+		round.batch(changes)
 	} else {
-		newRevision = round.single()
+		round.single(changes)
 	}
 
 	// Process objects that need to be retried that were not cleared.
 	round.processRetries()
 
 	// Finally commit the status updates.
-	watch := round.commitStatus()
-
-	if round.numReconciled >= r.Config.IncrementalRoundSize {
-		// Round size limit was hit, use a closed watch channel to retrigger
-		// incremental reconciliation immediately.
-		watch = closedWatchChannel
-	}
+	round.commitStatus()
 
 	r.metrics.IncrementalReconciliationErrors(r.ModuleID, round.errs)
 
-	if len(round.errs) > 0 {
-		return newRevision, watch, fmt.Errorf("incremental: %w", joinErrors(round.errs))
-	}
-	return newRevision, watch, nil
+	return round.errs
 }
 
-func (round *incrementalRound[Obj]) single() statedb.Revision {
+func (round *incrementalRound[Obj]) single(changes statedb.ChangeIterator[Obj]) {
 	// Iterate in revision order through new and changed objects.
-	newRevision := round.oldRevision
-	iter, _ := round.table.LowerBound(round.txn, statedb.ByRevision[Obj](round.oldRevision+1))
-	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
-		newRevision = rev
+	for change, _, ok := changes.Next(); ok; change, _, ok = changes.Next() {
+		obj := change.Object
 
 		status := round.config.GetObjectStatus(obj)
-		if status.Kind != StatusKindPending {
+		if !change.Deleted && status.Kind != StatusKindPending {
 			// Only process objects that are pending reconciliation, e.g.
 			// changed from outside.
 			// Failures (e.g. StatusKindError) are processed via the retry queue.
@@ -103,32 +88,27 @@ func (round *incrementalRound[Obj]) single() statedb.Revision {
 		// Clear retries as the object has changed.
 		round.retries.Clear(obj)
 
-		err := round.processSingle(obj, rev, status.Delete)
+		err := round.processSingle(obj, change.Revision, change.Deleted)
 		if err != nil {
 			round.errs = append(round.errs, err)
 		}
-
 		round.numReconciled++
 		if round.numReconciled >= round.config.IncrementalRoundSize {
 			break
 		}
 	}
-	return newRevision
 }
 
-func (round *incrementalRound[Obj]) batch() statedb.Revision {
+func (round *incrementalRound[Obj]) batch(changes statedb.ChangeIterator[Obj]) {
 	ops := round.config.BatchOperations
 	updateBatch := []BatchEntry[Obj]{}
 	deleteBatch := []BatchEntry[Obj]{}
 
-	// Iterate in revision order through new and changed objects.
-	newRevision := round.oldRevision
-	iter, _ := round.table.LowerBound(round.txn, statedb.ByRevision[Obj](round.oldRevision+1))
-	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
-		newRevision = rev
+	for change, rev, ok := changes.Next(); ok; change, rev, ok = changes.Next() {
+		obj := change.Object
 
 		status := round.config.GetObjectStatus(obj)
-		if status.Kind != StatusKindPending {
+		if !change.Deleted && status.Kind != StatusKindPending {
 			// Only process objects that are pending reconciliation, e.g.
 			// changed from outside.
 			// Failures (e.g. StatusKindError) are processed via the retry queue.
@@ -141,7 +121,7 @@ func (round *incrementalRound[Obj]) batch() statedb.Revision {
 		// Clone the object so we or the operations can mutate it.
 		obj = round.config.CloneObject(obj)
 
-		if status.Delete {
+		if change.Deleted {
 			deleteBatch = append(deleteBatch, BatchEntry[Obj]{Object: obj, Revision: rev})
 		} else {
 			updateBatch = append(updateBatch, BatchEntry[Obj]{Object: obj, Revision: rev})
@@ -163,13 +143,10 @@ func (round *incrementalRound[Obj]) batch() statedb.Revision {
 			time.Since(start),
 		)
 		for _, entry := range deleteBatch {
-			if entry.Result == nil {
-				// Reconciling succeeded, so clear the retries.
-				round.retries.Clear(entry.Object)
-				round.results[entry.Object] = opResult{rev: entry.Revision, delete: true}
-			} else {
+			if entry.Result != nil {
+				// Delete failed, queue a retry for it.
 				round.errs = append(round.errs, entry.Result)
-				round.results[entry.Object] = opResult{rev: entry.Revision, status: StatusError(true, entry.Result)}
+				round.retries.Add(entry.Object)
 			}
 		}
 	}
@@ -191,11 +168,10 @@ func (round *incrementalRound[Obj]) batch() statedb.Revision {
 				round.results[entry.Object] = opResult{rev: entry.Revision, status: StatusDone()}
 			} else {
 				round.errs = append(round.errs, entry.Result)
-				round.results[entry.Object] = opResult{rev: entry.Revision, status: StatusError(false, entry.Result)}
+				round.results[entry.Object] = opResult{rev: entry.Revision, status: StatusError(entry.Result)}
 			}
 		}
 	}
-	return newRevision
 }
 
 func (round *incrementalRound[Obj]) processRetries() {
@@ -207,20 +183,17 @@ func (round *incrementalRound[Obj]) processRetries() {
 		}
 		round.retries.Pop()
 
-		obj, rev, ok := round.table.First(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
-		if !ok {
-			// Object has been deleted unexpectedly (e.g. from outside
-			// the reconciler). Assume that it can be forgotten about.
-			round.retries.Clear(robj)
-			continue
+		obj, rev, found := round.table.First(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
+		if found {
+			status := round.config.GetObjectStatus(obj)
+			if status.Kind != StatusKindError {
+				continue
+			}
+		} else {
+			obj = robj.(Obj)
 		}
 
-		status := round.config.GetObjectStatus(obj)
-		if status.Kind != StatusKindError {
-			continue
-		}
-
-		err := round.processSingle(obj, rev, status.Delete)
+		err := round.processSingle(obj, rev, !found)
 		if err != nil {
 			round.errs = append(round.errs, err)
 		}
@@ -232,10 +205,6 @@ func (round *incrementalRound[Obj]) processRetries() {
 func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision, delete bool) error {
 	start := time.Now()
 
-	// Clone the object so it can be mutated by the operations and to be able to set the
-	// status.
-	obj = round.config.CloneObject(obj)
-
 	var (
 		err error
 		op  string
@@ -243,18 +212,19 @@ func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision,
 	if delete {
 		op = OpDelete
 		err = round.config.Operations.Delete(round.ctx, round.txn, obj)
-		if err == nil {
-			round.results[obj] = opResult{rev: rev, delete: true}
-		} else {
-			round.results[obj] = opResult{rev: rev, status: StatusError(true, err)}
+		if err != nil {
+			// Deletion failed. Retry again later.
+			round.retries.Add(obj)
 		}
 	} else {
+		// Clone the object so it can be mutated by Update()
+		obj = round.config.CloneObject(obj)
 		op = OpUpdate
 		err = round.config.Operations.Update(round.ctx, round.txn, obj, nil /* changed */)
 		if err == nil {
 			round.results[obj] = opResult{rev: rev, status: StatusDone()}
 		} else {
-			round.results[obj] = opResult{rev: rev, status: StatusError(false, err)}
+			round.results[obj] = opResult{rev: rev, status: StatusError(err)}
 		}
 	}
 	round.metrics.IncrementalReconciliationDuration(round.moduleID, op, time.Since(start))
@@ -268,29 +238,17 @@ func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision,
 
 }
 
-func (round *incrementalRound[Obj]) commitStatus() <-chan struct{} {
+func (round *incrementalRound[Obj]) commitStatus() {
 	if len(round.results) == 0 {
 		// Nothing to commit.
-		_, watch := round.table.All(round.txn)
-		return watch
+		return
 	}
 
 	wtxn := round.db.WriteTxn(round.table)
 	defer wtxn.Commit()
 
-	// The revision up to which we just now reconciled.
-	revReconciled := round.table.Revision(round.txn)
-
-	// The revision before committing the status updates.
-	revBeforeWrite := round.table.Revision(wtxn)
-
 	// Commit status for updated objects.
 	for obj, result := range round.results {
-		if result.delete {
-			round.table.CompareAndDelete(wtxn, result.rev, obj)
-			continue
-		}
-
 		// Update the object if it is unchanged. It may happen that the object has
 		// been updated in the meanwhile, in which case we ignore the status as the
 		// update will be picked up by next reconciliation round.
@@ -302,15 +260,4 @@ func (round *incrementalRound[Obj]) commitStatus() <-chan struct{} {
 			round.retries.Add(obj)
 		}
 	}
-
-	watch := closedWatchChannel
-	if revReconciled == revBeforeWrite {
-		// No outside changes happened between the ReadTxn and this WriteTxn. Grab a new
-		// watch channel of the root to only watch for new changes after this write.
-		//
-		// If changes did happen, we'll return a closed watch channel and
-		// immediately reconcile again.
-		_, watch = round.table.All(wtxn)
-	}
-	return watch
 }

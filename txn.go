@@ -119,7 +119,7 @@ func (txn *txn) mustIndexWriteTxn(meta TableMeta, indexPos int) indexTxn {
 }
 
 func (txn *txn) insert(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
-	if txn.db == nil {
+	if txn.modifiedTables == nil {
 		return object{}, false, ErrTransactionClosed
 	}
 
@@ -238,7 +238,7 @@ func (txn *txn) hasDeleteTrackers(meta TableMeta) bool {
 }
 
 func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDeleteTracker) error {
-	if txn.db == nil {
+	if txn.modifiedTables == nil {
 		return ErrTransactionClosed
 	}
 	table := txn.modifiedTables[meta.tablePos()]
@@ -256,7 +256,7 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDelet
 }
 
 func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
-	if txn.db == nil {
+	if txn.modifiedTables == nil {
 		return object{}, false, ErrTransactionClosed
 	}
 
@@ -380,7 +380,9 @@ func (txn *txn) Abort() {
 	*txn = zeroTxn
 }
 
-func (txn *txn) Commit() {
+// Commit the transaction. Returns a ReadTxn that is the snapshot of the database at the
+// point of commit.
+func (txn *txn) Commit() ReadTxn {
 	runtime.SetFinalizer(txn, nil)
 
 	// We operate here under the following properties:
@@ -404,7 +406,7 @@ func (txn *txn) Commit() {
 	// If db is nil, this transaction has already been committed or aborted, and
 	// thus there is nothing to do.
 	if txn.db == nil {
-		return
+		return nil
 	}
 
 	db := txn.db
@@ -470,8 +472,12 @@ func (txn *txn) Commit() {
 		txn.tableNames,
 		time.Since(txn.acquiredAt))
 
-	// Zero out the transaction to make it inert.
+	// Zero out the transaction to make it inert and
+	// convert it into a ReadTxn.
 	*txn = zeroTxn
+	txn.db = db
+	txn.root = root
+	return txn
 }
 
 func writeTableAsJSON(buf *bufio.Writer, txn *txn, table *tableEntry) error {

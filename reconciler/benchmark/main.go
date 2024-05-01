@@ -12,6 +12,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/hive"
@@ -28,7 +29,7 @@ var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to `file`")
 var memprofile = flag.String("memprofile", "", "write memory profile to `file`")
-var numObjects = flag.Int("objects", 100000, "number of objects to create")
+var numObjects = flag.Int("objects", 1000000, "number of objects to create")
 var batchSize = flag.Int("batchsize", 1000, "batch size for writes")
 var incrBatchSize = flag.Int("incrbatchsize", 1000, "maximum batch size for incremental reconciliation")
 var quiet = flag.Bool("quiet", false, "quiet output for CI")
@@ -53,6 +54,7 @@ func (t *testObject) Clone() *testObject {
 }
 
 type mockOps struct {
+	numUpdates atomic.Int32
 }
 
 // Delete implements reconciler.Operations.
@@ -67,6 +69,7 @@ func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.
 
 // Update implements reconciler.Operations.
 func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject, changed *bool) error {
+	mt.numUpdates.Add(1)
 	if changed != nil {
 		*changed = true
 	}
@@ -197,6 +200,19 @@ func main() {
 
 	timePerObject := float64(duration) / float64(*numObjects)
 	objsPerSecond := float64(time.Second) / timePerObject
+
+	// Check that all objects were updated.
+	if mt.numUpdates.Load() != int32(*numObjects) {
+		log.Fatalf("expected %d updates, but only saw %d", *numObjects, mt.numUpdates.Load())
+	}
+
+	// Check that all statuses are correctly set.
+	iter, _ := testObjects.All(db.ReadTxn())
+	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+		if obj.status.Kind != reconciler.StatusKindDone {
+			log.Fatalf("Object with unexpected status: %#v", obj)
+		}
+	}
 
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)

@@ -29,7 +29,7 @@ func omittedError(n int) error {
 
 func joinErrors(errs []error) error {
 	if len(errs) > maxJoinedErrors {
-		errs = append(slices.Clone(errs)[:maxJoinedErrors], omittedError(len(errs)))
+		errs = append(slices.Clone(errs)[:maxJoinedErrors], omittedError(len(errs)-maxJoinedErrors))
 	}
 	return errors.Join(errs...)
 }
