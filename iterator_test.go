@@ -16,7 +16,7 @@ func TestFilter(t *testing.T) {
 		ID int
 	}
 
-	db, _ := NewDB(nil, NewExpVarMetrics(false))
+	db := New()
 	idIndex := Index[*testObject, int]{
 		Name: "id",
 		FromObject: func(t *testObject) index.KeySet {
@@ -27,6 +27,8 @@ func TestFilter(t *testing.T) {
 	}
 	table, _ := NewTable("test", idIndex)
 	require.NoError(t, db.RegisterTable(table))
+	db.Start()
+	defer db.Stop()
 
 	txn := db.WriteTxn(table)
 	table.Insert(txn, &testObject{ID: 1})

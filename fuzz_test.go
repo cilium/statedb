@@ -4,7 +4,6 @@
 package statedb_test
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +17,7 @@ import (
 
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
+	"github.com/stretchr/testify/require"
 	"golang.org/x/exp/maps"
 )
 
@@ -501,10 +501,13 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 func TestDB_Fuzz(t *testing.T) {
 	t.Parallel()
 
-	fuzzDB, _ = statedb.NewDB(fuzzTables, fuzzMetrics)
+	fuzzDB = statedb.New(statedb.WithMetrics(fuzzMetrics))
+	for _, tbl := range fuzzTables {
+		require.NoError(t, fuzzDB.RegisterTable(tbl))
+	}
 
-	fuzzDB.Start(context.TODO())
-	defer fuzzDB.Stop(context.TODO())
+	fuzzDB.Start()
+	defer fuzzDB.Stop()
 
 	actionLog := &realActionLog{
 		log: map[string][]actionLogEntry{},
