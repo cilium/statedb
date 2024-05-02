@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/part"
 )
 
 func httpFixture(t *testing.T) (*DB, Table[testObject], *httptest.Server) {
@@ -25,10 +26,10 @@ func httpFixture(t *testing.T) (*DB, Table[testObject], *httptest.Server) {
 	t.Cleanup(ts.Close)
 
 	wtxn := db.WriteTxn(table)
-	table.Insert(wtxn, testObject{1, []string{"foo"}})
-	table.Insert(wtxn, testObject{2, []string{"foo"}})
-	table.Insert(wtxn, testObject{3, []string{"foobar"}})
-	table.Insert(wtxn, testObject{4, []string{"baz"}})
+	table.Insert(wtxn, testObject{1, part.NewStringSet("foo")})
+	table.Insert(wtxn, testObject{2, part.NewStringSet("foo")})
+	table.Insert(wtxn, testObject{3, part.NewStringSet("foobar")})
+	table.Insert(wtxn, testObject{4, part.NewStringSet("baz")})
 	wtxn.Commit()
 
 	return db, table, ts

@@ -14,6 +14,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/part"
 )
 
 type derived struct {
@@ -67,11 +68,12 @@ func TestDerive(t *testing.T) {
 	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
 		t.Logf("transform(%v, %v)", obj, deleted)
 
-		if len(obj.Tags) > 0 && obj.Tags[0] == "skip" {
+		tag, _ := obj.Tags.All().Next()
+		if obj.Tags.Len() > 0 && tag == "skip" {
 			return derived{}, DeriveSkip
 		}
 		if deleted {
-			if len(obj.Tags) > 0 && obj.Tags[0] == "delete" {
+			if obj.Tags.Len() > 0 && tag == "delete" {
 				return derived{ID: obj.ID}, DeriveDelete
 			}
 			return derived{ID: obj.ID, Deleted: true}, DeriveUpdate
@@ -115,7 +117,7 @@ func TestDerive(t *testing.T) {
 	wtxn := db.WriteTxn(inTable)
 	inTable.Insert(wtxn, testObject{ID: 1})
 	inTable.Insert(wtxn, testObject{ID: 2})
-	inTable.Insert(wtxn, testObject{ID: 3, Tags: []string{"skip"}})
+	inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewStringSet("skip")})
 	wtxn.Commit()
 
 	require.Eventually(t,
@@ -148,7 +150,7 @@ func TestDerive(t *testing.T) {
 
 	// Delete 1 (testing DeriveDelete)
 	wtxn = db.WriteTxn(inTable)
-	inTable.Insert(wtxn, testObject{ID: 1, Tags: []string{"delete"}})
+	inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewStringSet("delete")})
 	wtxn.Commit()
 	wtxn = db.WriteTxn(inTable)
 	inTable.Delete(wtxn, testObject{ID: 1})

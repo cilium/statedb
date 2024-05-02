@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/part"
 	"github.com/cilium/stream"
 )
 
@@ -33,7 +34,7 @@ func TestMain(m *testing.M) {
 
 type testObject struct {
 	ID   uint64
-	Tags []string
+	Tags part.Set[string]
 }
 
 func (t testObject) getID() uint64 {
@@ -57,7 +58,7 @@ var (
 	tagsIndex = Index[testObject, string]{
 		Name: "tags",
 		FromObject: func(t testObject) index.KeySet {
-			return index.StringSlice(t.Tags)
+			return index.Set(t.Tags)
 		},
 		FromKey: index.String,
 		Unique:  false,
@@ -150,11 +151,11 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: []string{"hello", "world"}})
+		table.Insert(txn, testObject{ID: 42, Tags: part.NewStringSet("hello", "world")})
 		txn.Commit()
 
 		txn = db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: []string{"foo"}})
+		table.Insert(txn, testObject{ID: 71, Tags: part.NewStringSet("foo")})
 		txn.Commit()
 	}
 
@@ -187,7 +188,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: []string{"foo", "modified"}})
+		table.Insert(txn, testObject{ID: 71, Tags: part.NewStringSet("foo", "modified")})
 		txn.Commit()
 	}
 
@@ -213,9 +214,9 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: []string{"a", "b"}})
-		table.Insert(txn, testObject{ID: 82, Tags: []string{"abc"}})
-		table.Insert(txn, testObject{ID: 71, Tags: []string{"ab"}})
+		table.Insert(txn, testObject{ID: 42, Tags: part.NewStringSet("a", "b")})
+		table.Insert(txn, testObject{ID: 82, Tags: part.NewStringSet("abc")})
+		table.Insert(txn, testObject{ID: 71, Tags: part.NewStringSet("ab")})
 		txn.Commit()
 	}
 
@@ -232,7 +233,7 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 12, Tags: []string{"bc"}})
+		table.Insert(txn, testObject{ID: 12, Tags: part.NewStringSet("bc")})
 		txn.Commit()
 	}
 
@@ -244,7 +245,7 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 99, Tags: []string{"abcd"}})
+		table.Insert(txn, testObject{ID: 99, Tags: part.NewStringSet("abcd")})
 		txn.Commit()
 	}
 
@@ -266,9 +267,9 @@ func TestDB_EventIterator(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: []string{"hello", "world"}})
-		table.Insert(txn, testObject{ID: 71, Tags: []string{"foo"}})
-		table.Insert(txn, testObject{ID: 83, Tags: []string{"bar"}})
+		table.Insert(txn, testObject{ID: 42, Tags: part.NewStringSet("hello", "world")})
+		table.Insert(txn, testObject{ID: 71, Tags: part.NewStringSet("foo")})
+		table.Insert(txn, testObject{ID: 83, Tags: part.NewStringSet("bar")})
 		txn.Commit()
 	}
 
@@ -301,7 +302,7 @@ func TestDB_EventIterator(t *testing.T) {
 
 		// Reinsert and redelete to test updating graveyard with existing object.
 		txn = db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: []string{"foo"}})
+		table.Insert(txn, testObject{ID: 71, Tags: part.NewStringSet("foo")})
 		txn.Commit()
 
 		txn = db.WriteTxn(table)
@@ -387,7 +388,7 @@ func TestDB_EventIterator(t *testing.T) {
 	// Insert a new object and consume the event
 	{
 		wtxn := db.WriteTxn(table)
-		table.Insert(wtxn, testObject{ID: 88, Tags: []string{"foo"}})
+		table.Insert(wtxn, testObject{ID: 88, Tags: part.NewStringSet("foo")})
 		wtxn.Commit()
 	}
 
@@ -449,7 +450,7 @@ func TestDB_EventIterator(t *testing.T) {
 	iter2.Close()
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 78, Tags: []string{"world"}})
+		table.Insert(txn, testObject{ID: 78, Tags: part.NewStringSet("world")})
 		txn.Commit()
 		txn = db.WriteTxn(table)
 		table.DeleteAll(txn)
@@ -589,7 +590,7 @@ func TestDB_GetFirstLast(t *testing.T) {
 			if i%2 == 0 {
 				tag = "even"
 			}
-			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: []string{tag}})
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: part.NewStringSet(tag)})
 			require.NoError(t, err)
 		}
 		// Check that we can query the not-yet-committed write transaction.
@@ -641,7 +642,7 @@ func TestDB_GetFirstLast(t *testing.T) {
 
 	// Modify the testObject(2) to trigger closing of the watch channels.
 	wtxn := db.WriteTxn(table)
-	_, hadOld, err := table.Insert(wtxn, testObject{ID: uint64(2), Tags: []string{"even", "modified"}})
+	_, hadOld, err := table.Insert(wtxn, testObject{ID: uint64(2), Tags: part.NewStringSet("even", "modified")})
 	require.True(t, hadOld)
 	require.NoError(t, err)
 	wtxn.Commit()
@@ -665,7 +666,7 @@ func TestDB_GetFirstLast(t *testing.T) {
 	obj, rev, _, ok = table.FirstWatch(txn, tagsIndex.Query("even"))
 	require.True(t, ok, "expected First(even) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
-	require.ElementsMatch(t, obj.Tags, []string{"even", "modified"})
+	require.ElementsMatch(t, obj.Tags.Slice(), []string{"even", "modified"})
 	require.EqualValues(t, 2, obj.ID)
 
 	iter, _ = table.Get(txn, tagsIndex.Query("odd"))
@@ -683,7 +684,7 @@ func TestDB_CommitAbort(t *testing.T) {
 	db := dbX.NewHandle("test-handle")
 
 	txn := db.WriteTxn(table)
-	_, _, err := table.Insert(txn, testObject{ID: 123, Tags: nil})
+	_, _, err := table.Insert(txn, testObject{ID: 123, Tags: part.StringSet})
 	require.NoError(t, err)
 	txn.Commit()
 
@@ -696,16 +697,16 @@ func TestDB_CommitAbort(t *testing.T) {
 	require.True(t, ok, "expected First(1) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 123, "expected obj.ID to equal 123")
-	require.Nil(t, obj.Tags, "expected no tags")
+	require.Zero(t, obj.Tags.Len(), "expected no tags")
 
-	_, _, err = table.Insert(txn, testObject{ID: 123, Tags: []string{"insert-after-commit"}})
+	_, _, err = table.Insert(txn, testObject{ID: 123, Tags: part.NewStringSet("insert-after-commit")})
 	require.ErrorIs(t, err, ErrTransactionClosed)
 	txn.Commit() // should be no-op
 
 	txn = db.WriteTxn(table)
 	txn.Abort()
 
-	_, _, err = table.Insert(txn, testObject{ID: 123, Tags: []string{"insert-after-abort"}})
+	_, _, err = table.Insert(txn, testObject{ID: 123, Tags: part.NewStringSet("insert-after-abort")})
 	require.ErrorIs(t, err, ErrTransactionClosed)
 	txn.Commit() // should be no-op
 
@@ -715,7 +716,7 @@ func TestDB_CommitAbort(t *testing.T) {
 	require.True(t, ok, "expected object to exist")
 	require.Equal(t, rev, newRev, "expected unchanged revision")
 	require.EqualValues(t, obj.ID, 123, "expected obj.ID to equal 123")
-	require.Nil(t, obj.Tags, "expected no tags")
+	require.Zero(t, obj.Tags.Len(), "expected no tags")
 }
 
 func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
@@ -746,7 +747,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 
 	// Updating an object with matching revision number works
 	wtxn = db.WriteTxn(table)
-	obj.Tags = []string{"updated"} // NOTE: testObject stored by value so no explicit copy needed.
+	obj.Tags = part.NewStringSet("updated") // NOTE: testObject stored by value so no explicit copy needed.
 	oldObj, hadOld, err := table.CompareAndSwap(wtxn, rev1, obj)
 	require.NoError(t, err)
 	require.True(t, hadOld)
@@ -755,12 +756,13 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 
 	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
-	require.Len(t, obj.Tags, 1)
-	require.Equal(t, "updated", obj.Tags[0])
+	require.Equal(t, 1, obj.Tags.Len())
+	v, _ := obj.Tags.All().Next()
+	require.Equal(t, "updated", v)
 
 	// Updating an object with mismatching revision number fails
 	wtxn = db.WriteTxn(table)
-	obj.Tags = []string{"mismatch"}
+	obj.Tags = part.NewStringSet("mismatch")
 	oldObj, hadOld, err = table.CompareAndSwap(wtxn, rev1, obj)
 	require.ErrorIs(t, ErrRevisionNotEqual, err)
 	require.True(t, hadOld)
@@ -769,12 +771,13 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 
 	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
-	require.Len(t, obj.Tags, 1)
-	require.Equal(t, "updated", obj.Tags[0])
+	require.Equal(t, 1, obj.Tags.Len())
+	v, _ = obj.Tags.All().Next()
+	require.Equal(t, "updated", v)
 
 	// Deleting an object with mismatching revision number fails
 	wtxn = db.WriteTxn(table)
-	obj.Tags = []string{"mismatch"}
+	obj.Tags = part.NewStringSet("mismatch")
 	oldObj, hadOld, err = table.CompareAndDelete(wtxn, rev1, obj)
 	require.ErrorIs(t, ErrRevisionNotEqual, err)
 	require.True(t, hadOld)
@@ -783,12 +786,13 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 
 	obj, rev2, ok := table.First(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
-	require.Len(t, obj.Tags, 1)
-	require.Equal(t, "updated", obj.Tags[0])
+	require.Equal(t, 1, obj.Tags.Len())
+	v, _ = obj.Tags.All().Next()
+	require.Equal(t, "updated", v)
 
 	// Deleting with matching revision number works
 	wtxn = db.WriteTxn(table)
-	obj.Tags = []string{"mismatch"}
+	obj.Tags = part.NewStringSet("mismatch")
 	oldObj, hadOld, err = table.CompareAndDelete(wtxn, rev2, obj)
 	require.NoError(t, err)
 	require.True(t, hadOld)
