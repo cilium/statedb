@@ -5,7 +5,6 @@ package statedb
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"runtime"
 	"slices"
@@ -14,7 +13,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb/internal"
 )
 
@@ -97,21 +95,39 @@ type DB struct {
 
 type dbRoot = []tableEntry
 
-func NewDB(tables []TableMeta, metrics Metrics) (*DB, error) {
+type Option func(*opts)
+
+type opts struct {
+	metrics Metrics
+}
+
+func WithMetrics(m Metrics) Option {
+	return func(o *opts) {
+		o.metrics = m
+	}
+}
+
+// New creates a new database.
+//
+// The created database must be started and stopped!
+func New(options ...Option) *DB {
+	var opts opts
+	for _, o := range options {
+		o(&opts)
+	}
+	if opts.metrics == nil {
+		// Use the default metrics implementation but don't publish it.
+		opts.metrics = NewExpVarMetrics(false)
+	}
+
 	db := &DB{
-		metrics:             metrics,
+		metrics:             opts.metrics,
 		gcRateLimitInterval: defaultGCRateLimitInterval,
 	}
 	db.defaultHandle = Handle{db, "DB"}
-	root := make(dbRoot, 0, len(tables))
-	for _, t := range tables {
-		if err := db.registerTable(t, &root); err != nil {
-			return nil, err
-		}
-	}
+	root := dbRoot{}
 	db.root.Store(&root)
-
-	return db, nil
+	return db
 }
 
 // RegisterTable registers a table to the database:
@@ -174,7 +190,11 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 	return db.defaultHandle.WriteTxn(table, tables...)
 }
 
-func (db *DB) Start(cell.HookContext) error {
+// Start the background workers for the database.
+//
+// This starts the graveyard worker that deals with garbage collecting
+// deleted objects that are no longer necessary for Changes().
+func (db *DB) Start() error {
 	db.gcTrigger = make(chan struct{}, 1)
 	db.gcExited = make(chan struct{})
 	db.ctx, db.cancel = context.WithCancel(context.Background())
@@ -182,13 +202,10 @@ func (db *DB) Start(cell.HookContext) error {
 	return nil
 }
 
-func (db *DB) Stop(stopCtx cell.HookContext) error {
+// Stop the background workers.
+func (db *DB) Stop() error {
 	db.cancel()
-	select {
-	case <-stopCtx.Done():
-		return errors.New("timed out waiting for graveyard worker to exit")
-	case <-db.gcExited:
-	}
+	<-db.gcExited
 	return nil
 }
 
@@ -227,6 +244,10 @@ type Handle struct {
 }
 
 func (h Handle) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
+	if h.db.gcTrigger == nil {
+		panic("Database has not been started with Start()")
+	}
+
 	db := h.db
 	allTables := append(tables, table)
 	smus := internal.SortableMutexes{}

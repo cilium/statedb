@@ -115,7 +115,10 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 }
 
 func TestDB_Insert_SamePointer(t *testing.T) {
-	db, _ := NewDB(nil, NewExpVarMetrics(false))
+	db := New()
+	db.Start()
+	defer db.Stop()
+
 	idIndex := Index[*testObject, uint64]{
 		Name: "id",
 		FromObject: func(t *testObject) index.KeySet {

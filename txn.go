@@ -50,7 +50,7 @@ func (txn *txn) getTxn() *txn {
 // has been Aborted or Committed. This is a safeguard against forgetting to
 // Abort/Commit which would cause the table to be locked forever.
 func txnFinalizer(txn *txn) {
-	if txn.db != nil {
+	if txn.modifiedTables != nil {
 		panic(fmt.Sprintf("WriteTxn from handle %s against tables %v was never Abort()'d or Commit()'d", txn.handle, txn.tableNames))
 	}
 }
@@ -367,7 +367,7 @@ func (txn *txn) Abort() {
 	//
 	//  txn.Commit()
 	//
-	if txn.db == nil {
+	if txn.modifiedTables == nil {
 		return
 	}
 

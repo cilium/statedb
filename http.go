@@ -6,6 +6,7 @@ package statedb
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -82,7 +83,7 @@ func (h dbHandler) query(w http.ResponseWriter, r *http.Request) {
 	}
 	if table == nil {
 		w.WriteHeader(http.StatusNotFound)
-		enc.Encode(QueryResponse{Err: err.Error()})
+		enc.Encode(QueryResponse{Err: fmt.Sprintf("Table %q not found", req.Table)})
 		return
 	}
 
