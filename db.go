@@ -244,10 +244,6 @@ type Handle struct {
 }
 
 func (h Handle) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
-	if h.db.gcTrigger == nil {
-		panic("Database has not been started with Start()")
-	}
-
 	db := h.db
 	allTables := append(tables, table)
 	smus := internal.SortableMutexes{}
