@@ -174,9 +174,9 @@ type BatchOperations[Obj any] interface {
 type StatusKind string
 
 const (
-	StatusKindPending StatusKind = "pending"
-	StatusKindDone    StatusKind = "done"
-	StatusKindError   StatusKind = "error"
+	StatusKindPending StatusKind = "Pending"
+	StatusKindDone    StatusKind = "Done"
+	StatusKindError   StatusKind = "Error"
 )
 
 // Key implements an optimized construction of index.Key for StatusKind
@@ -205,9 +205,30 @@ type Status struct {
 
 func (s Status) String() string {
 	if s.Kind == StatusKindError {
-		return fmt.Sprintf("%s (updated: %s ago, error: %s)", s.Kind, time.Now().Sub(s.UpdatedAt), s.Error)
+		return fmt.Sprintf("Error: %s (%s ago)", s.Error, prettySince(s.UpdatedAt))
 	}
-	return fmt.Sprintf("%s (updated: %s ago)", s.Kind, time.Now().Sub(s.UpdatedAt))
+	return fmt.Sprintf("%s (%s ago)", s.Kind, prettySince(s.UpdatedAt))
+}
+
+func prettySince(t time.Time) string {
+	ago := float64(time.Now().Sub(t)) / float64(time.Millisecond)
+	// millis
+	if ago < 1000.0 {
+		return fmt.Sprintf("%.1fms", ago)
+	}
+	// secs
+	ago /= 1000.0
+	if ago < 60.0 {
+		return fmt.Sprintf("%.1fs", ago)
+	}
+	// mins
+	ago /= 60.0
+	if ago < 60.0 {
+		return fmt.Sprintf("%.1fm", ago)
+	}
+	// hours
+	ago /= 60.0
+	return fmt.Sprintf("%.1fh", ago)
 }
 
 // StatusPending constructs the status for marking the object as

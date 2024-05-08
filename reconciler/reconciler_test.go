@@ -624,3 +624,30 @@ func concatLabels(m map[string]string) string {
 	}
 	return strings.Join(labels, ",")
 }
+
+func TestStatusString(t *testing.T) {
+	now := time.Now()
+
+	s := reconciler.Status{
+		Kind:      reconciler.StatusKindPending,
+		UpdatedAt: now,
+		Error:     "",
+	}
+	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+	s.UpdatedAt = now.Add(-time.Hour)
+	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+h ago\)`, s.String())
+
+	s = reconciler.Status{
+		Kind:      reconciler.StatusKindDone,
+		UpdatedAt: now,
+		Error:     "",
+	}
+	assert.Regexp(t, `Done \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+
+	s = reconciler.Status{
+		Kind:      reconciler.StatusKindError,
+		UpdatedAt: now,
+		Error:     "hey I'm an error",
+	}
+	assert.Regexp(t, `Error: hey I'm an error \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+}
