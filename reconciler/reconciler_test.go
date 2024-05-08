@@ -290,7 +290,6 @@ func testReconciler(t *testing.T, batchOps bool) {
 	}
 
 	assert.Greater(t, getInt(expVarMetrics.FullReconciliationCountVar.Get("test")), int64(0), "FullReconciliationCount")
-	assert.Greater(t, getInt(expVarMetrics.FullReconciliationOutOfSyncCountVar.Get("test")), int64(0), "FullReconciliationOutOfSyncCount")
 	assert.Greater(t, getFloat(expVarMetrics.FullReconciliationDurationVar.Get("test/prune")), float64(0), "FullReconciliationDuration/prune")
 	assert.Greater(t, getFloat(expVarMetrics.FullReconciliationDurationVar.Get("test/update")), float64(0), "FullReconciliationDuration/update")
 	assert.Equal(t, getInt(expVarMetrics.FullReconciliationCurrentErrorsVar.Get("test")), int64(0), "FullReconciliationCurrentErrors")
@@ -421,7 +420,7 @@ func (mt *mockOps) DeleteBatch(ctx context.Context, txn statedb.ReadTxn, batch [
 // UpdateBatch implements reconciler.BatchOperations.
 func (mt *mockOps) UpdateBatch(ctx context.Context, txn statedb.ReadTxn, batch []reconciler.BatchEntry[*testObject]) {
 	for i := range batch {
-		batch[i].Result = mt.Update(ctx, txn, batch[i].Object, nil)
+		batch[i].Result = mt.Update(ctx, txn, batch[i].Object)
 	}
 }
 
@@ -444,10 +443,7 @@ func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.
 }
 
 // Update implements reconciler.Operations.
-func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject, changed *bool) error {
-	if changed != nil {
-		*changed = true
-	}
+func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
 	mt.updates.incr(obj.id)
 	if mt.faulty.Load() || obj.faulty {
 		mt.history.add(opFail(opUpdate(obj.id)))

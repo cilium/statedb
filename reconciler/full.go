@@ -15,14 +15,12 @@ import (
 // Update() is called for each object. Full reconciliation is used to recover from unexpected outside modifications.
 func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) []error {
 	var errs []error
-	outOfSync := false
 	ops := r.Config.Operations
 
 	// First perform pruning to make room in the target.
 	iter, _ := r.Config.Table.All(txn)
 	start := time.Now()
 	if err := ops.Prune(ctx, txn, iter); err != nil {
-		outOfSync = true
 		errs = append(errs, fmt.Errorf("pruning failed: %w", err))
 	}
 	r.metrics.FullReconciliationDuration(r.ModuleID, OpPrune, time.Since(start))
@@ -32,12 +30,10 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) []error
 	iter, _ = r.Config.Table.All(txn) // Grab a new iterator as Prune() may have consumed it.
 	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
 		start := time.Now()
-		var changed bool
 		obj = r.Config.CloneObject(obj)
-		err := ops.Update(ctx, txn, obj, &changed)
+		err := ops.Update(ctx, txn, obj)
 		r.metrics.FullReconciliationDuration(r.ModuleID, OpUpdate, time.Since(start))
 
-		outOfSync = outOfSync || changed
 		if err == nil {
 			updateResults[obj] = opResult{rev: rev, status: StatusDone()}
 			r.retries.Clear(obj)
@@ -45,12 +41,6 @@ func (r *reconciler[Obj]) full(ctx context.Context, txn statedb.ReadTxn) []error
 			updateResults[obj] = opResult{rev: rev, status: StatusError(err)}
 			errs = append(errs, err)
 		}
-	}
-
-	// Increment the out-of-sync counter if full reconciliation catched any out-of-sync
-	// objects.
-	if outOfSync {
-		r.metrics.FullReconciliationOutOfSync(r.ModuleID)
 	}
 
 	// Commit the new desired object status. This is performed separately in order
