@@ -14,7 +14,6 @@ type Metrics interface {
 	IncrementalReconciliationDuration(moduleID cell.FullModuleID, operation string, duration time.Duration)
 	IncrementalReconciliationErrors(moduleID cell.FullModuleID, errs []error)
 
-	FullReconciliationOutOfSync(moduleID cell.FullModuleID)
 	FullReconciliationErrors(moduleID cell.FullModuleID, errs []error)
 	FullReconciliationDuration(moduleID cell.FullModuleID, operation string, duration time.Duration)
 }
@@ -31,19 +30,14 @@ type ExpVarMetrics struct {
 	IncrementalReconciliationTotalErrorsVar   *expvar.Map
 	IncrementalReconciliationCurrentErrorsVar *expvar.Map
 
-	FullReconciliationCountVar          *expvar.Map
-	FullReconciliationDurationVar       *expvar.Map
-	FullReconciliationTotalErrorsVar    *expvar.Map
-	FullReconciliationCurrentErrorsVar  *expvar.Map
-	FullReconciliationOutOfSyncCountVar *expvar.Map
+	FullReconciliationCountVar         *expvar.Map
+	FullReconciliationDurationVar      *expvar.Map
+	FullReconciliationTotalErrorsVar   *expvar.Map
+	FullReconciliationCurrentErrorsVar *expvar.Map
 }
 
 func (m *ExpVarMetrics) FullReconciliationDuration(moduleID cell.FullModuleID, operation string, duration time.Duration) {
 	m.FullReconciliationDurationVar.AddFloat(moduleID.String()+"/"+operation, duration.Seconds())
-}
-
-func (m *ExpVarMetrics) FullReconciliationOutOfSync(moduleID cell.FullModuleID) {
-	m.FullReconciliationOutOfSyncCountVar.Add(moduleID.String(), 1)
 }
 
 func (m *ExpVarMetrics) FullReconciliationErrors(moduleID cell.FullModuleID, errs []error) {
@@ -94,6 +88,5 @@ func newExpVarMetrics(publish bool) *ExpVarMetrics {
 		FullReconciliationDurationVar:             newMap("full_reconciliation_duration"),
 		FullReconciliationTotalErrorsVar:          newMap("full_reconciliation_total_errors"),
 		FullReconciliationCurrentErrorsVar:        newMap("full_reconciliation_current_errors"),
-		FullReconciliationOutOfSyncCountVar:       newMap("full_reconciliation_out_of_sync_count"),
 	}
 }

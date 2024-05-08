@@ -220,7 +220,7 @@ func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision,
 		// Clone the object so it can be mutated by Update()
 		obj = round.config.CloneObject(obj)
 		op = OpUpdate
-		err = round.config.Operations.Update(round.ctx, round.txn, obj, nil /* changed */)
+		err = round.config.Operations.Update(round.ctx, round.txn, obj)
 		if err == nil {
 			round.results[obj] = opResult{rev: rev, status: StatusDone()}
 		} else {

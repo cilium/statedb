@@ -135,16 +135,9 @@ type Operations[Obj any] interface {
 	// reconciliation is performed when the desired state is updated. A full
 	// reconciliation is done periodically by calling 'Update' on all objects.
 	//
-	// If 'changed' is non-nil then the Update must compare the realized state
-	// with the desired state and set it to true if they differ, e.g. whether
-	// the operation resulted in a change to the realized state. This is used
-	// during full reconciliation to catch cases where the realized state has
-	// gone out of sync due to outside influence. This is tracked in the
-	// "full_out_of_sync_total" metric.
-	//
 	// The object handed to Update is a clone produced by Config.CloneObject
 	// and thus Update can mutate the object.
-	Update(ctx context.Context, txn statedb.ReadTxn, obj Obj, changed *bool) error
+	Update(ctx context.Context, txn statedb.ReadTxn, obj Obj) error
 
 	// Delete the object in the target. Same semantics as with Update.
 	// Deleting a non-existing object is not an error and returns nil.
