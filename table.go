@@ -197,12 +197,12 @@ func (t *genTable[Obj]) NumObjects(txn ReadTxn) int {
 	return table.indexes[PrimaryIndexPos].tree.Len()
 }
 
-func (t *genTable[Obj]) First(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
-	obj, revision, _, ok = t.FirstWatch(txn, q)
+func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
+	obj, revision, _, ok = t.GetWatch(txn, q)
 	return
 }
 
-func (t *genTable[Obj]) FirstWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
+func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
 	var iobj object
 	if indexTxn.unique {
@@ -261,7 +261,12 @@ func (t *genTable[Obj]) All(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
 	return &iterator[Obj]{indexTxn.Iterator()}, watch
 }
 
-func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
+func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) Iterator[Obj] {
+	iter, _ := t.ListWatch(txn, q)
+	return iter
+}
+
+func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.Prefix(q.key)
 	if indexTxn.unique {

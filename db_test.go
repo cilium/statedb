@@ -580,7 +580,7 @@ func TestDB_Revision(t *testing.T) {
 	require.Equal(t, writeRevision, readRevision, "committed transaction changed revision")
 }
 
-func TestDB_GetFirstLast(t *testing.T) {
+func TestDB_GetList(t *testing.T) {
 	t.Parallel()
 
 	db, table, _ := newTestDB(t, tagsIndex)
@@ -597,8 +597,8 @@ func TestDB_GetFirstLast(t *testing.T) {
 			require.NoError(t, err)
 		}
 		// Check that we can query the not-yet-committed write transaction.
-		obj, rev, ok := table.First(txn, idIndex.Query(1))
-		require.True(t, ok, "expected First(1) to return result")
+		obj, rev, ok := table.Get(txn, idIndex.Query(1))
+		require.True(t, ok, "expected Get(1) to return result")
 		require.NotZero(t, rev, "expected non-zero revision")
 		require.EqualValues(t, obj.ID, 1, "expected first obj.ID to equal 1")
 		txn.Commit()
@@ -606,40 +606,40 @@ func TestDB_GetFirstLast(t *testing.T) {
 
 	txn := db.ReadTxn()
 
-	// Test Get against the ID index.
-	iter, _ := table.Get(txn, idIndex.Query(0))
+	// Test List against the ID index.
+	iter := table.List(txn, idIndex.Query(0))
 	items := Collect(iter)
 	require.Len(t, items, 0, "expected Get(0) to not return results")
 
-	iter, _ = table.Get(txn, idIndex.Query(1))
+	iter = table.List(txn, idIndex.Query(1))
 	items = Collect(iter)
 	require.Len(t, items, 1, "expected Get(1) to return result")
 	require.EqualValues(t, items[0].ID, 1, "expected items[0].ID to equal 1")
 
-	iter, getWatch := table.Get(txn, idIndex.Query(2))
+	iter, listWatch := table.ListWatch(txn, idIndex.Query(2))
 	items = Collect(iter)
 	require.Len(t, items, 1, "expected Get(2) to return result")
 	require.EqualValues(t, items[0].ID, 2, "expected items[0].ID to equal 2")
 
-	// Test First/FirstWatch against the ID index.
-	_, _, ok := table.First(txn, idIndex.Query(0))
-	require.False(t, ok, "expected First(0) to not return result")
+	// Test Get/GetWatch against the ID index.
+	_, _, ok := table.Get(txn, idIndex.Query(0))
+	require.False(t, ok, "expected Get(0) to not return result")
 
-	obj, rev, ok := table.First(txn, idIndex.Query(1))
-	require.True(t, ok, "expected First(1) to return result")
+	obj, rev, ok := table.Get(txn, idIndex.Query(1))
+	require.True(t, ok, "expected Get(1) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 1, "expected first obj.ID to equal 1")
 
-	obj, rev, firstWatch, ok := table.FirstWatch(txn, idIndex.Query(2))
-	require.True(t, ok, "expected FirstWatch(2) to return result")
+	obj, rev, getWatch, ok := table.GetWatch(txn, idIndex.Query(2))
+	require.True(t, ok, "expected GetWatch(2) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 2, "expected obj.ID to equal 2")
 
 	select {
-	case <-firstWatch:
-		t.Fatalf("FirstWatch channel closed before changes")
 	case <-getWatch:
-		t.Fatalf("Get channel closed before changes")
+		t.Fatalf("GetWatch channel closed before changes")
+	case <-listWatch:
+		t.Fatalf("List channel closed before changes")
 	default:
 	}
 
@@ -651,28 +651,28 @@ func TestDB_GetFirstLast(t *testing.T) {
 	wtxn.Commit()
 
 	select {
-	case <-firstWatch:
-	case <-time.After(watchCloseTimeout):
-		t.Fatalf("FirstWatch channel not closed after change")
-	}
-	select {
 	case <-getWatch:
 	case <-time.After(watchCloseTimeout):
-		t.Fatalf("Get channel not closed after change")
+		t.Fatalf("GetWatch channel not closed after change")
+	}
+	select {
+	case <-listWatch:
+	case <-time.After(watchCloseTimeout):
+		t.Fatalf("List channel not closed after change")
 	}
 
 	// Since we modified the database, grab a fresh read transaction.
 	txn = db.ReadTxn()
 
-	// Test First and Last against the tags multi-index which will
+	// Test Get and Last against the tags multi-index which will
 	// return multiple results.
-	obj, rev, _, ok = table.FirstWatch(txn, tagsIndex.Query("even"))
-	require.True(t, ok, "expected First(even) to return result")
+	obj, rev, _, ok = table.GetWatch(txn, tagsIndex.Query("even"))
+	require.True(t, ok, "expected Get(even) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.ElementsMatch(t, obj.Tags.Slice(), []string{"even", "modified"})
 	require.EqualValues(t, 2, obj.ID)
 
-	iter, _ = table.Get(txn, tagsIndex.Query("odd"))
+	iter = table.List(txn, tagsIndex.Query("odd"))
 	items = Collect(iter)
 	require.Len(t, items, 5, "expected Get(odd) to return 5 items")
 	for i, item := range items {
@@ -696,8 +696,8 @@ func TestDB_CommitAbort(t *testing.T) {
 	assert.Greater(t, expvarFloat(metrics.WriteTxnAcquisitionVar.Get("test-handle/test")), 0.0, "WriteTxnAcquisition")
 	assert.Greater(t, expvarFloat(metrics.WriteTxnDurationVar.Get("test-handle/test")), 0.0, "WriteTxnDuration")
 
-	obj, rev, ok := table.First(db.ReadTxn(), idIndex.Query(123))
-	require.True(t, ok, "expected First(1) to return result")
+	obj, rev, ok := table.Get(db.ReadTxn(), idIndex.Query(123))
+	require.True(t, ok, "expected Get(1) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
 	require.EqualValues(t, obj.ID, 123, "expected obj.ID to equal 123")
 	require.Zero(t, obj.Tags.Len(), "expected no tags")
@@ -715,7 +715,7 @@ func TestDB_CommitAbort(t *testing.T) {
 
 	// Check that insert after commit and insert after abort do not change the
 	// table.
-	obj, newRev, ok := table.First(db.ReadTxn(), idIndex.Query(123))
+	obj, newRev, ok := table.Get(db.ReadTxn(), idIndex.Query(123))
 	require.True(t, ok, "expected object to exist")
 	require.Equal(t, rev, newRev, "expected unchanged revision")
 	require.EqualValues(t, obj.ID, 123, "expected obj.ID to equal 123")
@@ -745,7 +745,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	table.Insert(wtxn, testObject{ID: 1})
 	wtxn.Commit()
 
-	obj, rev1, ok := table.First(db.ReadTxn(), idIndex.Query(1))
+	obj, rev1, ok := table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 
 	// Updating an object with matching revision number works
@@ -757,7 +757,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
-	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
+	obj, _, ok = table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
 	v, _ := obj.Tags.All().Next()
@@ -772,7 +772,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
-	obj, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
+	obj, _, ok = table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
 	v, _ = obj.Tags.All().Next()
@@ -787,7 +787,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
-	obj, rev2, ok := table.First(db.ReadTxn(), idIndex.Query(1))
+	obj, rev2, ok := table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
 	v, _ = obj.Tags.All().Next()
@@ -802,7 +802,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	require.EqualValues(t, 1, oldObj.ID)
 	wtxn.Commit()
 
-	_, _, ok = table.First(db.ReadTxn(), idIndex.Query(1))
+	_, _, ok = table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.False(t, ok)
 
 	// Deleting non-existing object yields not found

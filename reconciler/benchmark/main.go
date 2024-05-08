@@ -188,7 +188,7 @@ func main() {
 	// Wait for all to be reconciled by waiting for the last added objects to be marked
 	// reconciled. This only works here since none of the operations fail.
 	for {
-		obj, _, watch, ok := testObjects.FirstWatch(db.ReadTxn(), idIndex.Query(id-1))
+		obj, _, watch, ok := testObjects.GetWatch(db.ReadTxn(), idIndex.Query(id-1))
 		if ok && obj.status.Kind == reconciler.StatusKindDone {
 			break
 		}

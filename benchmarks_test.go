@@ -293,7 +293,7 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 	for j := 0; j < b.N; j++ {
 		txn := db.ReadTxn()
 		for _, q := range queries {
-			_, _, ok := table.First(txn, q)
+			_, _, ok := table.Get(txn, q)
 			if !ok {
 				b.Fatal("object not found")
 			}
@@ -319,7 +319,7 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	txn := db.ReadTxn()
 	for n := 0; n < b.N; n++ {
 		for _, q := range queries {
-			_, _, ok := table.First(txn, q)
+			_, _, ok := table.Get(txn, q)
 			if !ok {
 				b.Fatalf("Object not found")
 			}
@@ -374,7 +374,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	txn := db.ReadTxn()
 	for n := 0; n < b.N; n++ {
 		for _, q := range queries {
-			_, _, ok := table.First(txn, q)
+			_, _, ok := table.Get(txn, q)
 			if !ok {
 				b.Fatalf("Object not found")
 			}

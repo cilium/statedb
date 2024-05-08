@@ -183,7 +183,7 @@ func (round *incrementalRound[Obj]) processRetries() {
 		}
 		round.retries.Pop()
 
-		obj, rev, found := round.table.First(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
+		obj, rev, found := round.table.Get(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
 		if found {
 			status := round.config.GetObjectStatus(obj)
 			if status.Kind != StatusKindError {
