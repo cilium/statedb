@@ -271,9 +271,9 @@ func allAction(ctx actionContext) {
 	ctx.log.log("%s: All => %d found", ctx.table.Name(), len(statedb.Collect(iter)))
 }
 
-func getAction(ctx actionContext) {
+func listAction(ctx actionContext) {
 	value := mkValue()
-	iter, _ := ctx.table.Get(ctx.txn, valueIndex.Query(value))
+	iter := ctx.table.List(ctx.txn, valueIndex.Query(value))
 	ctx.log.log("%s: Get(%d)", ctx.table.Name(), value)
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 		if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), obj.id}]; ok2 {
@@ -296,25 +296,25 @@ func getAction(ctx actionContext) {
 	}
 }
 
-func firstAction(ctx actionContext) {
+func getAction(ctx actionContext) {
 	id := mkID()
-	obj, rev, ok := ctx.table.First(ctx.txn, idIndex.Query(id))
+	obj, rev, ok := ctx.table.Get(ctx.txn, idIndex.Query(id))
 
 	if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}]; ok2 {
 		if e.act == actInsert {
 			if !ok {
-				panic("First() returned not found, expected last inserted value")
+				panic("Get() returned not found, expected last inserted value")
 			}
 			if e.value != obj.value {
-				panic("First() did not return the last write")
+				panic("Get() did not return the last write")
 			}
 		} else if e.act == actDelete {
 			if ok {
-				panic("First() returned value even though it was deleted")
+				panic("Get() returned value even though it was deleted")
 			}
 		}
 	}
-	ctx.log.log("%s: First(%s) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
+	ctx.log.log("%s: Get(%s) => rev=%d, ok=%v", ctx.table.Name(), id, rev, ok)
 }
 
 func lowerboundAction(ctx actionContext) {
@@ -358,10 +358,10 @@ var actions = []action{
 	deleteAction, deleteAction, deleteAction,
 	deleteManyAction, deleteAllAction,
 
-	firstAction, firstAction, firstAction, firstAction, firstAction,
-	firstAction, firstAction, firstAction, firstAction, firstAction,
-	firstAction, firstAction, firstAction, firstAction, firstAction,
 	getAction, getAction, getAction, getAction, getAction,
+	getAction, getAction, getAction, getAction, getAction,
+	getAction, getAction, getAction, getAction, getAction,
+	listAction, listAction, listAction, listAction, listAction,
 	allAction, allAction,
 	lowerboundAction, lowerboundAction, lowerboundAction,
 	prefixAction, prefixAction, prefixAction,

@@ -89,14 +89,14 @@ func example() {
   myObjects.Insert(wtxn, &MyObject{3, "c"})
 
   // Modify an object
-  if obj, _, found := myObjects.First(wtxn, IDIndex.Query(1)); found {
+  if obj, _, found := myObjects.Get(wtxn, IDIndex.Query(1)); found {
     objCopy := *obj
     objCopy.Foo = "d"
     myObjects.Insert(wtxn, &objCopy)
   }
 
   // Delete an object
-  if obj, _, found := myObjects.First(wtxn, IDIndex.Query(2)); found {
+  if obj, _, found := myObjects.Get(wtxn, IDIndex.Query(2)); found {
     myObjects.Delete(wtxn, obj)
   }
   
@@ -111,7 +111,7 @@ func example() {
   // Query the objects with a snapshot of the database.
   txn := db.ReadTxn()
 
-  if obj, _, found := myObjects.First(wtxn, IDIndex.Query(1)); found {
+  if obj, _, found := myObjects.Get(wtxn, IDIndex.Query(1)); found {
     ...
   }
 
@@ -314,33 +314,39 @@ var (
   found bool
   watch <-chan struct{}
 )
-// First returns the first matching object in the query.
-obj, revision, found = myObjects.First(txn, IDIndex.Query(42))
+// Get returns the first matching object in the query.
+obj, revision, found = myObjects.Get(txn, IDIndex.Query(42))
 if found {
   // obj points to the object we inserted earlier.
   // revision is the "table revision" for the object. Revisions are
   // incremented for a table on every insertion or deletion.
 }
-// FirstWatch is the same as First, but also gives us a watch
+// GetWatch is the same as Get, but also gives us a watch
 // channel that we can use to wait on the object to appear or to
 // change.
-obj, revision, watch, found = myObjects.FirstWatch(txn, IDIndex.Query(42))
+obj, revision, watch, found = myObjects.GetWatch(txn, IDIndex.Query(42))
 <-watch // closes when object with ID '42' is inserted or deleted
 ```
 
 ### Iterating
 
-`Get` can be used to iterate over all objects that match the query.
+`List` can be used to iterate over all objects that match the query.
 
 ```go
 var iter statedb.Iterator[*MyObject]
-// Get returns all matching objects as an iterator. The iterator is lazy
+// List returns all matching objects as an iterator. The iterator is lazy
 // and one can stop reading at any time without worrying about the rest.
-iter, watch = myObjects.Get(txn, TagsIndex.Query("hello"))
+iter := myObjects.List(txn, TagsIndex.Query("hello"))
 for obj, revision, ok := iter.Next(); ok; obj, revision, ok = iter.Next() {
   // ...
 }
-<-watch // closes when an object with tag "hello" is inserted or deleted
+
+// ListWatch is like List, but also returns a watch channel.
+iter, watch := myObjects.ListWatch(txn, TagsIndex.Query("hello"))
+for obj, revision, ok := iter.Next(); ok; obj, revision, ok = iter.Next() { ... }
+
+// closes when an object with tag "hello" is inserted or deleted
+<-watch
 ```
 
 `Prefix` can be used to iterate over objects that match a given prefix.
@@ -461,7 +467,7 @@ wtxn := db.WriteTxn(myObjects)
 
 // Now that we have the table written we can retrieve an object and none will
 // be able to modify it until we commit.
-obj, revision, found := myObjects.First(wtxn, IDIndex.Query(42))
+obj, revision, found := myObjects.Get(wtxn, IDIndex.Query(42))
 if !found { panic("it should be there, I swear!") }
 
 // We cannot just straight up modify 'obj' since someone might be reading it.
@@ -498,7 +504,7 @@ txn := db.ReadTxn()
 
 // Look up the object we want to update and perform some slow calculation
 // to produce the desired new object.
-obj, revision, found := myObjects.First(txn, IDIndex.Query(42))
+obj, revision, found := myObjects.Get(txn, IDIndex.Query(42))
 obj = veryExpensiveCalculation(obj)
 
 // Now that we're ready to insert we can grab a WriteTxn.

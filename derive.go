@@ -68,7 +68,7 @@ type derive[In, Out any] struct {
 	transform func(obj In, deleted bool) (Out, DeriveResult)
 }
 
-func (d derive[In, Out]) loop(ctx context.Context, health cell.Health) error {
+func (d derive[In, Out]) loop(ctx context.Context, _ cell.Health) error {
 	out := d.OutTable
 	txn := d.DB.WriteTxn(d.InTable)
 	iter, err := d.InTable.Changes(txn)
@@ -85,7 +85,7 @@ func (d derive[In, Out]) loop(ctx context.Context, health cell.Health) error {
 			case DeriveInsert:
 				_, _, err = out.Insert(wtxn, outObj)
 			case DeriveUpdate:
-				_, _, found := out.First(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
+				_, _, found := out.Get(wtxn, out.PrimaryIndexer().QueryFromObject(outObj))
 				if found {
 					_, _, err = out.Insert(wtxn, outObj)
 				}
