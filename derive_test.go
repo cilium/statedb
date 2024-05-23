@@ -117,7 +117,7 @@ func TestDerive(t *testing.T) {
 	wtxn := db.WriteTxn(inTable)
 	inTable.Insert(wtxn, testObject{ID: 1})
 	inTable.Insert(wtxn, testObject{ID: 2})
-	inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewStringSet("skip")})
+	inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewSet("skip")})
 	wtxn.Commit()
 
 	require.Eventually(t,
@@ -150,7 +150,7 @@ func TestDerive(t *testing.T) {
 
 	// Delete 1 (testing DeriveDelete)
 	wtxn = db.WriteTxn(inTable)
-	inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewStringSet("delete")})
+	inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("delete")})
 	wtxn.Commit()
 	wtxn = db.WriteTxn(inTable)
 	inTable.Delete(wtxn, testObject{ID: 1})

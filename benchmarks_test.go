@@ -27,7 +27,7 @@ func BenchmarkDB_WriteTxn_1(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		txn := db.WriteTxn(table)
-		_, _, err := table.Insert(txn, testObject{ID: 123, Tags: part.StringSet})
+		_, _, err := table.Insert(txn, testObject{ID: 123})
 		if err != nil {
 			b.Fatalf("Insert error: %s", err)
 		}
@@ -59,7 +59,7 @@ func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	for n > 0 {
 		txn := db.WriteTxn(table)
 		for j := 0; j < batchSize; j++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.StringSet})
+			_, _, err := table.Insert(txn, testObject{ID: uint64(j)})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
@@ -69,7 +69,7 @@ func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	}
 	txn := db.WriteTxn(table)
 	for j := 0; j < n; j++ {
-		_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.StringSet})
+		_, _, err := table.Insert(txn, testObject{ID: uint64(j)})
 		if err != nil {
 			b.Fatalf("Insert error: %s", err)
 		}
@@ -85,7 +85,7 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	for n > 0 {
 		txn := db.WriteTxn(table)
 		for j := 0; j < 100; j++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewStringSet(tags...)})
+			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewSet(tags...)})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
@@ -95,7 +95,7 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	}
 	txn := db.WriteTxn(table)
 	for j := 0; j < n; j++ {
-		_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewStringSet(tags...)})
+		_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewSet(tags...)})
 		if err != nil {
 			b.Fatalf("Insert error: %s", err)
 		}
@@ -118,7 +118,7 @@ func BenchmarkDB_RandomInsert(b *testing.B) {
 	for j := 0; j < b.N; j++ {
 		txn := db.WriteTxn(table)
 		for _, id := range ids {
-			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.StringSet})
+			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.Set[string]{}})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
@@ -144,7 +144,7 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 		if i%2 == 0 {
 			tag = "even"
 		}
-		table.Insert(txn, testObject{ID: uint64(i), Tags: part.NewStringSet(tag)})
+		table.Insert(txn, testObject{ID: uint64(i), Tags: part.NewSet(tag)})
 		ids = append(ids, uint64(i))
 	}
 	txn.Commit()
@@ -160,7 +160,7 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 			if id%2 == 0 {
 				tag = "even"
 			}
-			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.NewStringSet(tag)})
+			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.NewSet(tag)})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
@@ -179,7 +179,7 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 	for j := 0; j < b.N; j++ {
 		txn := db.WriteTxn(table)
 		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
-			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.StringSet})
+			_, _, err := table.Insert(txn, testObject{ID: id})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
@@ -198,7 +198,7 @@ func BenchmarkDB_Changes_Baseline(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		txn := db.WriteTxn(table)
 		for i := uint64(0); i < numObjectsToInsert; i++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: part.StringSet})
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 			if err != nil {
 				b.Fatalf("Insert: %s", err)
 			}
@@ -226,7 +226,7 @@ func BenchmarkDB_Changes(b *testing.B) {
 		// Create objects
 		txn = db.WriteTxn(table)
 		for i := 0; i < numObjectsToInsert; i++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: part.StringSet})
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 			if err != nil {
 				b.Fatalf("Insert: %s", err)
 			}
@@ -281,7 +281,7 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 	queries := []Query[testObject]{}
 	for i := 0; i < numObjectsToInsert; i++ {
 		queries = append(queries, idIndex.Query(uint64(i)))
-		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: part.StringSet})
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
@@ -310,7 +310,7 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	for i := 0; i < numObjectsToInsert; i++ {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
-		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: part.StringSet})
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
@@ -334,7 +334,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
 	for i := 0; i < numObjectsIteration; i++ {
-		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: part.StringSet})
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
@@ -365,7 +365,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	for i := 0; i < numObjectsIteration; i++ {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
-		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Tags: part.StringSet})
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
@@ -440,7 +440,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		// Commit a batch to the first table.
 		wtxn := db.WriteTxn(table1)
 		for i := 0; i < batchSize; i++ {
-			table1.Insert(wtxn, testObject{ID: uint64(i), Tags: part.StringSet})
+			table1.Insert(wtxn, testObject{ID: uint64(i)})
 		}
 		wtxn.Commit()
 
