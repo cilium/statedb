@@ -1,14 +1,16 @@
 package part_test
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStringSet(t *testing.T) {
-	s := part.StringSet
+	var s part.Set[string]
 
 	assert.False(t, s.Has("nothing"), "Has nothing")
 
@@ -23,7 +25,7 @@ func TestStringSet(t *testing.T) {
 	assert.False(t, ok, "Next")
 	assert.Equal(t, "", v)
 
-	s2 := part.NewStringSet("bar")
+	s2 := part.NewSet("bar")
 
 	s3 := s.Union(s2)
 	assert.False(t, s.Has("bar"), "s has no bar")
@@ -45,4 +47,16 @@ func TestStringSet(t *testing.T) {
 	xs := s3.Slice()
 	assert.Len(t, xs, 1)
 	assert.Equal(t, "bar", xs[0])
+}
+
+func TestSetJSON(t *testing.T) {
+	s := part.NewSet("foo", "bar", "baz")
+
+	bs, err := json.Marshal(s)
+	require.NoError(t, err, "Marshal")
+
+	var s2 part.Set[string]
+	err = json.Unmarshal(bs, &s2)
+	require.NoError(t, err, "Unmarshal")
+	require.True(t, s.Equal(s2), "Equal")
 }

@@ -4,15 +4,17 @@
 package part_test
 
 import (
+	"encoding/json"
 	"math/rand/v2"
 	"testing"
 
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStringMap(t *testing.T) {
-	m := part.NewStringMap[int]()
+	var m part.Map[string, int]
 
 	//
 	// Operations on empty map
@@ -26,7 +28,7 @@ func TestStringMap(t *testing.T) {
 		t.Helper()
 		k, v, ok := iter.Next()
 		assert.False(t, ok, "expected empty iterator")
-		assert.Equal(t, "", k)
+		assert.Empty(t, k, "empty key")
 		assert.Equal(t, 0, v)
 	}
 	assertIterEmpty(m.LowerBound(""))
@@ -70,8 +72,8 @@ func TestStringMap(t *testing.T) {
 	for _, kv := range kvs {
 		k, v, ok := iter.Next()
 		assert.True(t, ok, "All.Next %d", kv.v)
-		assert.Equal(t, kv.k, k)
-		assert.Equal(t, kv.v, v)
+		assert.EqualValues(t, kv.k, k)
+		assert.EqualValues(t, kv.v, v)
 	}
 	assert.False(t, ok, "All.Next")
 
@@ -79,8 +81,8 @@ func TestStringMap(t *testing.T) {
 	for _, kv := range kvs[1:] {
 		k, v, ok := iter.Next()
 		assert.True(t, ok, "LowerBound.Next %d", kv.v)
-		assert.Equal(t, kv.k, k)
-		assert.Equal(t, kv.v, v)
+		assert.EqualValues(t, kv.k, k)
+		assert.EqualValues(t, kv.v, v)
 	}
 	_, _, ok = iter.Next()
 	assert.False(t, ok, "LowerBound.Next")
@@ -89,8 +91,8 @@ func TestStringMap(t *testing.T) {
 	for _, kv := range kvs[2:] {
 		k, v, ok := iter.Next()
 		assert.True(t, ok, "Prefix.Next %d", kv.v)
-		assert.Equal(t, kv.k, k)
-		assert.Equal(t, kv.v, v)
+		assert.EqualValues(t, kv.k, k)
+		assert.EqualValues(t, kv.v, v)
 	}
 	assert.False(t, ok, "Prefix.Next")
 
@@ -106,7 +108,7 @@ func TestStringMap(t *testing.T) {
 func TestUint64Map(t *testing.T) {
 	// TestStringMap tests most of the operations. We just check here that
 	// fromBytes and toBytes work and can iterate in the right order.
-	m := part.NewUint64Map[int]()
+	var m part.Map[uint64, int]
 	m = m.Set(42, 42)
 	m = m.Set(55, 55)
 	m = m.Set(72, 72)
@@ -119,14 +121,52 @@ func TestUint64Map(t *testing.T) {
 	k, v, ok := iter.Next()
 	assert.True(t, ok, "Next")
 	assert.EqualValues(t, 55, k)
-	assert.EqualValues(t, k, v)
+	assert.EqualValues(t, 55, v)
 
 	k, v, ok = iter.Next()
 	assert.True(t, ok, "Next")
 	assert.EqualValues(t, 72, k)
+	assert.EqualValues(t, 72, v)
 
 	_, _, ok = iter.Next()
 	assert.False(t, ok)
+}
+
+func TestRegisterKeyType(t *testing.T) {
+	type testKey struct {
+		X string
+	}
+	part.RegisterKeyType(func(k testKey) []byte { return []byte(k.X) })
+
+	var m part.Map[testKey, int]
+	m = m.Set(testKey{"hello"}, 123)
+
+	v, ok := m.Get(testKey{"hello"})
+	assert.True(t, ok, "Get 'hello'")
+	assert.Equal(t, 123, v)
+
+	iter := m.All()
+	k, v, ok := iter.Next()
+	assert.True(t, ok, "Next")
+	assert.Equal(t, testKey{"hello"}, k)
+	assert.Equal(t, 123, v)
+
+	_, _, ok = iter.Next()
+	assert.False(t, ok, "Next")
+
+}
+
+func TestMapJSON(t *testing.T) {
+	var m part.Map[string, int]
+	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
+
+	bs, err := json.Marshal(m)
+	require.NoError(t, err, "Marshal")
+
+	var m2 part.Map[string, int]
+	err = json.Unmarshal(bs, &m2)
+	require.NoError(t, err, "Unmarshal")
+	require.True(t, m.SlowEqual(m2), "SlowEqual")
 }
 
 func Benchmark_Uint64Map_Random(b *testing.B) {
@@ -137,7 +177,7 @@ func Benchmark_Uint64Map_Random(b *testing.B) {
 		keys[k] = int(k)
 	}
 	for n := 0; n < b.N; n++ {
-		m := part.NewUint64Map[int]()
+		var m part.Map[uint64, int]
 		for k, v := range keys {
 			m = m.Set(k, v)
 			v2, ok := m.Get(k)
@@ -153,7 +193,7 @@ func Benchmark_Uint64Map_Sequential(b *testing.B) {
 	numItems := 1000
 
 	for n := 0; n < b.N; n++ {
-		m := part.NewUint64Map[int]()
+		var m part.Map[uint64, int]
 		for i := 0; i < numItems; i++ {
 			k := uint64(i)
 			m = m.Set(k, i)
