@@ -843,6 +843,41 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 	require.Len(t, Collect(iter), 1)
 }
 
+func TestDB_Initialization(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	wtxn := db.WriteTxn(table)
+	done1 := table.RegisterInitializer(wtxn, "test1")
+	done2 := table.RegisterInitializer(wtxn, "test2")
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+	require.False(t, table.Initialized(txn), "Initialized should be false")
+	require.Equal(t, []string{"test1", "test2"}, table.PendingInitializers(txn), "test1, test2 should be pending")
+
+	wtxn = db.WriteTxn(table)
+	done1(wtxn)
+	wtxn.Commit()
+
+	// Old read transaction unaffected.
+	require.False(t, table.Initialized(txn), "Initialized should be false")
+	require.Equal(t, []string{"test1", "test2"}, table.PendingInitializers(txn), "test1, test2 should be pending")
+
+	txn = db.ReadTxn()
+	require.False(t, table.Initialized(txn), "Initialized should be false")
+	require.Equal(t, []string{"test2"}, table.PendingInitializers(txn), "test2 should be pending")
+
+	wtxn = db.WriteTxn(table)
+	done2(wtxn)
+	wtxn.Commit()
+
+	txn = db.ReadTxn()
+	require.True(t, table.Initialized(txn), "Initialized should be false")
+	require.Empty(t, table.PendingInitializers(txn), "There should be no pending initializers")
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
