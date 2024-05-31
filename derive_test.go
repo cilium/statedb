@@ -60,9 +60,9 @@ var _ cell.Health = &nopHealth{}
 
 func TestDerive(t *testing.T) {
 	var db *DB
-	inTable, err := NewTable[testObject]("test", idIndex)
+	inTable, err := NewTable("test", idIndex)
 	require.NoError(t, err)
-	outTable, err := NewTable[derived]("derived", derivedIdIndex)
+	outTable, err := NewTable("derived", derivedIdIndex)
 	require.NoError(t, err)
 
 	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
@@ -99,7 +99,7 @@ func TestDerive(t *testing.T) {
 				return inTable, outTable, nil
 			}),
 
-			cell.Invoke(Derive[testObject, derived]("testObject-to-derived", transform)),
+			cell.Invoke(Derive("testObject-to-derived", transform)),
 		),
 	)
 	require.NoError(t, h.Start(context.TODO()), "Start")
@@ -115,9 +115,12 @@ func TestDerive(t *testing.T) {
 
 	// Insert 1, 2 and 3 (skipped) and validate.
 	wtxn := db.WriteTxn(inTable)
-	inTable.Insert(wtxn, testObject{ID: 1})
-	inTable.Insert(wtxn, testObject{ID: 2})
-	inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewSet("skip")})
+	_, _, err = inTable.Insert(wtxn, testObject{ID: 1})
+	require.NoError(t, err, "Insert failed")
+	_, _, err = inTable.Insert(wtxn, testObject{ID: 2})
+	require.NoError(t, err, "Insert failed")
+	_, _, err = inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewSet("skip")})
+	require.NoError(t, err, "Insert failed")
 	wtxn.Commit()
 
 	require.Eventually(t,
@@ -133,7 +136,9 @@ func TestDerive(t *testing.T) {
 
 	// Delete 2 (testing DeriveUpdate)
 	wtxn = db.WriteTxn(inTable)
-	inTable.Delete(wtxn, testObject{ID: 2})
+	_, hadOld, err := inTable.Delete(wtxn, testObject{ID: 2})
+	require.NoError(t, err, "Delete failed")
+	require.True(t, hadOld, "Expected object to be deleted")
 	wtxn.Commit()
 
 	require.Eventually(t,
@@ -150,10 +155,12 @@ func TestDerive(t *testing.T) {
 
 	// Delete 1 (testing DeriveDelete)
 	wtxn = db.WriteTxn(inTable)
-	inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("delete")})
+	_, _, err = inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("delete")})
+	require.NoError(t, err, "Insert failed")
 	wtxn.Commit()
 	wtxn = db.WriteTxn(inTable)
-	inTable.Delete(wtxn, testObject{ID: 1})
+	_, _, err = inTable.Delete(wtxn, testObject{ID: 1})
+	require.NoError(t, err, "Delete failed")
 	wtxn.Commit()
 
 	require.Eventually(t,

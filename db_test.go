@@ -85,7 +85,7 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 	var (
 		db *DB
 	)
-	table, err := NewTable[testObject](
+	table, err := NewTable(
 		"test",
 		idIndex,
 		secondaryIndexers...,
@@ -98,7 +98,8 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 		cell.Provide(func() Metrics { return metrics }),
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) {
-			db_.RegisterTable(table)
+			err := db_.RegisterTable(table)
+			require.NoError(t, err, "RegisterTable failed")
 
 			// Use a short GC interval.
 			db_.setGCRateLimitInterval(50 * time.Millisecond)
@@ -116,8 +117,8 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 
 func TestDB_Insert_SamePointer(t *testing.T) {
 	db := New()
-	db.Start()
-	defer db.Stop()
+	require.NoError(t, db.Start(), "Start")
+	defer func() { require.NoError(t, db.Stop(), "Stop") }()
 
 	idIndex := Index[*testObject, uint64]{
 		Name: "id",
@@ -127,12 +128,13 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 		FromKey: index.Uint64,
 		Unique:  true,
 	}
-	table, _ := NewTable[*testObject]("test", idIndex)
-	db.RegisterTable(table)
+	table, _ := NewTable("test", idIndex)
+	require.NoError(t, db.RegisterTable(table), "RegisterTable")
 
 	txn := db.WriteTxn(table)
 	obj := &testObject{ID: 1}
-	table.Insert(txn, obj)
+	_, _, err := table.Insert(txn, obj)
+	require.NoError(t, err, "Insert failed")
 	txn.Commit()
 
 	defer func() {
@@ -144,7 +146,8 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 
 	// Try to insert the same again. This will panic.
 	txn = db.WriteTxn(table)
-	table.Insert(txn, obj)
+	_, _, err = table.Insert(txn, obj)
+	require.NoError(t, err, "Insert failed")
 }
 
 func TestDB_LowerBound_ByRevision(t *testing.T) {
@@ -154,11 +157,13 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("hello", "world")})
+		_, _, err := table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("hello", "world")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 
 		txn = db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
+		_, _, err = table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -191,7 +196,8 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo", "modified")})
+		_, _, err := table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo", "modified")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -217,9 +223,12 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("a", "b")})
-		table.Insert(txn, testObject{ID: 82, Tags: part.NewSet("abc")})
-		table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("ab")})
+		_, _, err := table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("a", "b")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: 82, Tags: part.NewSet("abc")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("ab")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -236,7 +245,8 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 12, Tags: part.NewSet("bc")})
+		_, _, err := table.Insert(txn, testObject{ID: 12, Tags: part.NewSet("bc")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -248,7 +258,8 @@ func TestDB_Prefix(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 99, Tags: part.NewSet("abcd")})
+		_, _, err := table.Insert(txn, testObject{ID: 99, Tags: part.NewSet("abcd")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -270,9 +281,12 @@ func TestDB_EventIterator(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("hello", "world")})
-		table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
-		table.Insert(txn, testObject{ID: 83, Tags: part.NewSet("bar")})
+		_, _, err := table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("hello", "world")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: 83, Tags: part.NewSet("bar")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 	}
 
@@ -305,13 +319,14 @@ func TestDB_EventIterator(t *testing.T) {
 
 		// Reinsert and redelete to test updating graveyard with existing object.
 		txn = db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
+		_, _, err = table.Insert(txn, testObject{ID: 71, Tags: part.NewSet("foo")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 
 		txn = db.WriteTxn(table)
 		_, deleted, err = table.Delete(txn, testObject{ID: 71})
 		require.True(t, deleted)
-		require.NoError(t, err)
+		require.NoError(t, err, "Delete failed")
 		txn.Commit()
 	}
 
@@ -391,7 +406,8 @@ func TestDB_EventIterator(t *testing.T) {
 	// Insert a new object and consume the event
 	{
 		wtxn := db.WriteTxn(table)
-		table.Insert(wtxn, testObject{ID: 88, Tags: part.NewSet("foo")})
+		_, _, err := table.Insert(wtxn, testObject{ID: 88, Tags: part.NewSet("foo")})
+		require.NoError(t, err, "Insert failed")
 		wtxn.Commit()
 	}
 
@@ -421,7 +437,7 @@ func TestDB_EventIterator(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.DeleteAll(txn)
+		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
 	require.False(t, db.graveyardIsEmpty())
@@ -453,10 +469,11 @@ func TestDB_EventIterator(t *testing.T) {
 	iter2.Close()
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: 78, Tags: part.NewSet("world")})
+		_, _, err := table.Insert(txn, testObject{ID: 78, Tags: part.NewSet("world")})
+		require.NoError(t, err, "Insert failed")
 		txn.Commit()
 		txn = db.WriteTxn(table)
-		table.DeleteAll(txn)
+		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
 	require.True(t, db.graveyardIsEmpty())
@@ -470,11 +487,15 @@ func TestDB_Observable(t *testing.T) {
 
 	db, table, _ := newTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	events := stream.ToChannel(ctx, Observable[testObject](db, table))
+	events := stream.ToChannel(ctx, Observable(db, table))
 
 	txn := db.WriteTxn(table)
-	table.Insert(txn, testObject{ID: uint64(1)})
-	table.Insert(txn, testObject{ID: uint64(2)})
+	_, hadOld, err := table.Insert(txn, testObject{ID: uint64(1)})
+	require.False(t, hadOld, "Expected no prior object")
+	require.NoError(t, err, "Insert failed")
+	_, hadOld, err = table.Insert(txn, testObject{ID: uint64(2)})
+	require.False(t, hadOld, "Expected no prior object")
+	require.NoError(t, err, "Insert failed")
 	txn.Commit()
 
 	event := <-events
@@ -485,8 +506,12 @@ func TestDB_Observable(t *testing.T) {
 	require.Equal(t, uint64(2), event.Object.ID)
 
 	txn = db.WriteTxn(table)
-	table.Delete(txn, testObject{ID: uint64(1)})
-	table.Delete(txn, testObject{ID: uint64(2)})
+	_, hadOld, err = table.Delete(txn, testObject{ID: uint64(1)})
+	require.True(t, hadOld, "Expected that object was deleted")
+	require.NoError(t, err, "Delete failed")
+	_, hadOld, err = table.Delete(txn, testObject{ID: uint64(2)})
+	require.True(t, hadOld, "Expected that object was deleted")
+	require.NoError(t, err, "Delete failed")
 	txn.Commit()
 
 	event = <-events
@@ -508,9 +533,12 @@ func TestDB_All(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Insert(txn, testObject{ID: uint64(1)})
-		table.Insert(txn, testObject{ID: uint64(2)})
-		table.Insert(txn, testObject{ID: uint64(3)})
+		_, _, err := table.Insert(txn, testObject{ID: uint64(1)})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: uint64(2)})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, testObject{ID: uint64(3)})
+		require.NoError(t, err, "Insert failed")
 		iter, _ := table.All(txn)
 		objs := Collect(iter)
 		require.Len(t, objs, 3)
@@ -536,7 +564,9 @@ func TestDB_All(t *testing.T) {
 
 	{
 		txn := db.WriteTxn(table)
-		table.Delete(txn, testObject{ID: uint64(1)})
+		_, hadOld, err := table.Delete(txn, testObject{ID: uint64(1)})
+		require.True(t, hadOld, "expected object to be deleted")
+		require.NoError(t, err, "Delete failed")
 		txn.Commit()
 	}
 
@@ -742,7 +772,9 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 
 	// Insert a test object and retrieve it.
 	wtxn = db.WriteTxn(table)
-	table.Insert(wtxn, testObject{ID: 1})
+	_, hadOld, err := table.Insert(wtxn, testObject{ID: 1})
+	require.False(t, hadOld, "expected Insert to not replace object")
+	require.NoError(t, err, "Insert failed")
 	wtxn.Commit()
 
 	obj, rev1, ok := table.Get(db.ReadTxn(), idIndex.Query(1))
@@ -823,7 +855,8 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 	iter, _ := table.All(txn)
 	require.Len(t, Collect(iter), 0)
 
-	table.Insert(txn, testObject{ID: 1})
+	_, _, err := table.Insert(txn, testObject{ID: 1})
+	require.NoError(t, err, "Insert failed")
 
 	iter, _ = table.All(txn)
 	require.Len(t, Collect(iter), 1)
@@ -833,7 +866,8 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 	iter, _ = table.All(txn)
 	require.Len(t, Collect(iter), 0)
 
-	table.Insert(txn, testObject{ID: 2})
+	_, _, err = table.Insert(txn, testObject{ID: 2})
+	require.NoError(t, err, "Insert failed")
 	iter, _ = table.All(txn)
 	require.Len(t, Collect(iter), 1)
 

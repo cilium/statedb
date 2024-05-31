@@ -161,7 +161,9 @@ func registerHTTPServer(
 	mux.HandleFunc("/statedb", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		db.ReadTxn().WriteJSON(w)
+		if err := db.ReadTxn().WriteJSON(w); err != nil {
+			panic(err)
+		}
 	})
 
 	// For creating and deleting memos:
