@@ -38,7 +38,7 @@ func Test_Regression_29324(t *testing.T) {
 	}
 
 	db, _, _ := newTestDB(t)
-	table, err := NewTable[object]("objects", idIndex, tagIndex)
+	table, err := NewTable("objects", idIndex, tagIndex)
 	require.NoError(t, err)
 	require.NoError(t, db.RegisterTable(table))
 

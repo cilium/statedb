@@ -58,7 +58,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 
 	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
 
-	testObjects, err := statedb.NewTable[*testObject]("test-objects", idIndex, statusIndex)
+	testObjects, err := statedb.NewTable("test-objects", idIndex, statusIndex)
 	require.NoError(t, err, "NewTable")
 
 	hive := hive.New(
@@ -319,7 +319,7 @@ var idIndex = statedb.Index[*testObject, uint64]{
 	Unique:  true,
 }
 
-var statusIndex = reconciler.NewStatusIndex[*testObject]((*testObject).GetStatus)
+var statusIndex = reconciler.NewStatusIndex((*testObject).GetStatus)
 
 func (t *testObject) GetStatus() reconciler.Status {
 	return t.status
@@ -476,7 +476,7 @@ const (
 
 func (h testHelper) registerInitializer() func() {
 	wtxn := h.db.WriteTxn(h.tbl)
-	done := h.tbl.RegisterInitializer(wtxn)
+	done := h.tbl.RegisterInitializer(wtxn, "test")
 	wtxn.Commit()
 	return func() {
 		wtxn := h.db.WriteTxn(h.tbl)
@@ -492,13 +492,14 @@ func (h testHelper) insert(id uint64, faulty bool, status reconciler.Status) {
 		faulty: faulty,
 		status: status,
 	})
-	require.NoError(h.t, err, "insert failed")
+	require.NoError(h.t, err, "Insert failed")
 	wtxn.Commit()
 }
 
 func (h testHelper) markForDelete(id uint64) {
 	wtxn := h.db.WriteTxn(h.tbl)
-	h.tbl.Delete(wtxn, &testObject{id: id})
+	_, _, err := h.tbl.Delete(wtxn, &testObject{id: id})
+	require.NoError(h.t, err, "Delete failed")
 	wtxn.Commit()
 }
 
@@ -609,16 +610,8 @@ func (h testHelper) triggerFullReconciliation() {
 }
 
 func (h testHelper) waitForReconciliation() {
-	err := reconciler.WaitForReconciliation[*testObject](context.TODO(), h.db, h.tbl, statusIndex)
+	err := reconciler.WaitForReconciliation(context.TODO(), h.db, h.tbl, statusIndex)
 	require.NoError(h.t, err, "expected WaitForReconciliation to succeed")
-}
-
-func concatLabels(m map[string]string) string {
-	labels := []string{}
-	for k, v := range m {
-		labels = append(labels, k+"="+v)
-	}
-	return strings.Join(labels, ",")
 }
 
 func TestStatusString(t *testing.T) {
