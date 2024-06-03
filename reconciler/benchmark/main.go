@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/reconciler"
+	"golang.org/x/time/rate"
 )
 
 var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -133,12 +134,9 @@ func main() {
 			),
 			cell.Provide(func() reconciler.Config[*testObject] {
 				return reconciler.Config[*testObject]{
-					Table: testObjects,
-
-					// Don't run the full reconciliation via timer, but rather explicitly so that the full
-					// reconciliation operations don't mix with incremental when not expected.
-					FullReconcilationInterval: time.Hour,
-
+					Table:                   testObjects,
+					PruneInterval:           0, // No pruning
+					RefreshInterval:         0, // No refreshing
 					RetryBackoffMinDuration: time.Millisecond,
 					RetryBackoffMaxDuration: 10 * time.Millisecond,
 					IncrementalRoundSize:    *incrBatchSize,
@@ -146,6 +144,10 @@ func main() {
 					SetObjectStatus:         (*testObject).SetStatus,
 					CloneObject:             (*testObject).Clone,
 					Operations:              mt,
+
+					// Run 1k rounds per second. With batch size of 1k this limits the
+					// benchmark to 1M objects per second.
+					RateLimiter: rate.NewLimiter(1000.0, 10),
 				}
 			}),
 			cell.Invoke(reconciler.Register[*testObject]),
