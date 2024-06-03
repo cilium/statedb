@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 	"golang.org/x/exp/slices"
+	"golang.org/x/time/rate"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
@@ -48,82 +49,101 @@ func testReconciler(t *testing.T, batchOps bool) {
 		goleak.IgnoreCurrent(),
 	)
 
-	var (
-		ops = &mockOps{}
-		db  *statedb.DB
-		r   reconciler.Reconciler[*testObject]
+	getInt := func(v expvar.Var) int64 {
+		if v, ok := v.(*expvar.Int); ok && v != nil {
+			return v.Value()
+		}
+		return -1
+	}
 
-		fakeHealth *cell.SimpleHealth
-	)
+	getFloat := func(v expvar.Var) float64 {
+		if v, ok := v.(*expvar.Float); ok && v != nil {
+			return v.Value()
+		}
+		return -1
+	}
 
-	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
+	runTest := func(name string, refreshInterval time.Duration, run func(testHelper)) {
+		var (
+			ops        = &mockOps{}
+			db         *statedb.DB
+			r          reconciler.Reconciler[*testObject]
+			fakeHealth *cell.SimpleHealth
+		)
 
-	testObjects, err := statedb.NewTable("test-objects", idIndex, statusIndex)
-	require.NoError(t, err, "NewTable")
+		expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
 
-	hive := hive.New(
-		statedb.Cell,
-		job.Cell,
+		testObjects, err := statedb.NewTable[*testObject]("test-objects", idIndex, statusIndex)
+		require.NoError(t, err, "NewTable")
 
-		cell.Provide(cell.NewSimpleHealth),
+		hive := hive.New(
+			statedb.Cell,
+			job.Cell,
 
-		cell.Module(
-			"test",
-			"Test",
+			cell.Provide(cell.NewSimpleHealth),
 
-			cell.Provide(func() reconciler.Metrics {
-				return expVarMetrics
-			}),
+			cell.Module(
+				"test",
+				"Test",
 
-			cell.Invoke(func(db_ *statedb.DB) error {
-				db = db_
-				return db.RegisterTable(testObjects)
-			}),
-			cell.Provide(func() reconciler.Config[*testObject] {
-				cfg := reconciler.Config[*testObject]{
-					Table: testObjects,
-					// Don't run the full reconciliation via timer, but rather explicitly so that the full
-					// reconciliation operations don't mix with incremental when not expected.
-					FullReconcilationInterval: time.Hour,
+				cell.Provide(func() reconciler.Metrics {
+					return expVarMetrics
+				}),
 
-					RetryBackoffMinDuration: time.Millisecond,
-					RetryBackoffMaxDuration: 10 * time.Millisecond,
-					IncrementalRoundSize:    1000,
-					GetObjectStatus:         (*testObject).GetStatus,
-					SetObjectStatus:         (*testObject).SetStatus,
-					CloneObject:             (*testObject).Clone,
-					Operations:              ops,
-				}
-				if batchOps {
-					cfg.BatchOperations = ops
-				}
-				return cfg
-			}),
-			cell.Provide(reconciler.New[*testObject]),
+				cell.Invoke(func(db_ *statedb.DB) error {
+					db = db_
+					return db.RegisterTable(testObjects)
+				}),
+				cell.Provide(func() reconciler.Config[*testObject] {
+					cfg := reconciler.Config[*testObject]{
+						Table:                   testObjects,
+						PruneInterval:           0,
+						RefreshInterval:         refreshInterval,
+						RetryBackoffMinDuration: time.Millisecond,
+						RetryBackoffMaxDuration: 10 * time.Millisecond,
+						IncrementalRoundSize:    1000,
+						GetObjectStatus:         (*testObject).GetStatus,
+						SetObjectStatus:         (*testObject).SetStatus,
+						CloneObject:             (*testObject).Clone,
+						RateLimiter:             rate.NewLimiter(1000.0, 1),
+						RefreshRateLimiter:      rate.NewLimiter(1000.0, 1),
+						Operations:              ops,
+					}
+					if batchOps {
+						cfg.BatchOperations = ops
+					}
+					return cfg
+				}),
+				cell.Provide(reconciler.New[*testObject]),
 
-			cell.Invoke(func(r_ reconciler.Reconciler[*testObject], h *cell.SimpleHealth) {
-				r = r_
-				fakeHealth = h
-			}),
-		),
-	)
+				cell.Invoke(func(r_ reconciler.Reconciler[*testObject], h *cell.SimpleHealth) {
+					r = r_
+					fakeHealth = h
+				}),
+			),
+		)
 
-	require.NoError(t, hive.Start(context.TODO()), "Start")
+		t.Run(name, func(t *testing.T) {
+			require.NoError(t, hive.Start(context.TODO()), "Start")
+			t.Cleanup(func() {
+				assert.NoError(t, hive.Stop(context.TODO()), "Stop")
+			})
+			run(testHelper{
+				t:      t,
+				db:     db,
+				tbl:    testObjects,
+				ops:    ops,
+				r:      r,
+				health: fakeHealth,
+				m:      expVarMetrics,
+			})
 
-	h := testHelper{
-		t:      t,
-		db:     db,
-		tbl:    testObjects,
-		ops:    ops,
-		r:      r,
-		health: fakeHealth,
+		})
 	}
 
 	numIterations := 3
 
-	t.Run("incremental", func(t *testing.T) {
-		h.t = t
-
+	runTest("incremental", 0, func(h testHelper) {
 		for i := 0; i < numIterations; i++ {
 			t.Logf("Iteration %d", i)
 
@@ -181,18 +201,21 @@ func testReconciler(t *testing.T, batchOps bool) {
 
 			h.waitForReconciliation()
 
+			assert.Greater(t, getInt(h.m.ReconciliationCountVar.Get("test")), int64(0), "ReconciliationCount")
+			assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/update")), float64(0), "ReconciliationDuration/update")
+			assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/delete")), float64(0), "ReconciliationDuration/delete")
+			assert.Greater(t, getInt(h.m.ReconciliationTotalErrorsVar.Get("test")), int64(0), "ReconciliationTotalErrors")
+			assert.Equal(t, getInt(h.m.ReconciliationCurrentErrorsVar.Get("test")), int64(0), "ReconciliationCurrentErrors")
 		}
 	})
 
-	t.Run("full", func(t *testing.T) {
-		h.t = t
-
+	runTest("pruning", 0, func(h testHelper) {
 		for i := 0; i < numIterations; i++ {
 			t.Logf("Iteration %d", i)
 
 			// Without any objects, we should only see prune.
-			t.Log("Full reconciliation without objects")
-			h.triggerFullReconciliation()
+			t.Log("Pruning without objects")
+			h.triggerPrune()
 			h.expectOp(opPrune(0))
 			h.expectHealth(cell.StatusOK, "OK, 0 objects", "")
 
@@ -201,7 +224,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 
 			// With table not initialized, we should not see the prune.
 			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.triggerFullReconciliation()
+			h.triggerPrune()
 			h.expectOp(opUpdate(ID_1))
 			markInitialized()
 
@@ -218,46 +241,23 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectNumUpdates(ID_3, 1)
 			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
-			// Full reconciliation with functioning ops.
-			t.Log("Full reconciliation with non-faulty ops")
-			h.triggerFullReconciliation()
-			h.expectOps(opPrune(3), opUpdate(ID_1), opUpdate(ID_2), opUpdate(ID_3))
-			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
-			h.expectNumUpdates(ID_1, 2)
-			h.expectNumUpdates(ID_2, 2)
-			h.expectNumUpdates(ID_3, 2)
+			// Pruning with functioning ops.
+			t.Log("Prune with non-faulty ops")
+			h.triggerPrune()
+			h.expectOps(opPrune(3))
 			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
-			// Make the ops faulty and trigger the full reconciliation.
-			t.Log("Full reconciliation with faulty ops")
+			// Make the ops faulty and trigger the pruning.
+			t.Log("Prune with faulty ops")
 			h.setTargetFaulty(true)
-			h.triggerFullReconciliation()
-			h.expectOps(
-				opFail(opUpdate(ID_1)),
-				opFail(opUpdate(ID_2)),
-				opFail(opUpdate(ID_3)),
-			)
-			h.expectHealth(cell.StatusDegraded, "3 failure(s)", "update fail")
+			h.triggerPrune()
+			h.expectOps(opPrune(3))
+			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "prune failed: prune fail")
 
-			// Expect the objects to be retried also after the full reconciliation.
-			h.expectRetried(ID_1)
-			h.expectRetried(ID_2)
-			h.expectRetried(ID_3)
-
-			// All should be marked as errored.
-			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
-			h.expectStatus(ID_2, reconciler.StatusKindError, "update fail")
-			h.expectStatus(ID_3, reconciler.StatusKindError, "update fail")
-
-			// Make the ops healthy again and check that the objects recover.
-			t.Log("Retries succeed after ops is non-faulty")
+			// Make the ops healthy again and try pruning again.
+			t.Log("Prune again with non-faulty ops")
 			h.setTargetFaulty(false)
-			h.expectOps(opUpdate(ID_1), opUpdate(ID_2), opUpdate(ID_3))
-			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
+			h.triggerPrune()
 			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
 
 			// Cleanup.
@@ -267,40 +267,51 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectNotFound(ID_1)
 			h.expectNotFound(ID_2)
 			h.expectNotFound(ID_3)
-			h.triggerFullReconciliation()
+			h.triggerPrune()
 			h.expectOps(opDelete(1), opDelete(2), opDelete(3), opPrune(0))
 			h.waitForReconciliation()
+
+			// Validate metrics.
+			assert.Greater(t, getInt(h.m.PruneCountVar.Get("test")), int64(0), "PruneCount")
+			assert.Greater(t, getFloat(h.m.PruneDurationVar.Get("test")), float64(0), "PruneDuration")
+			assert.Equal(t, getInt(h.m.PruneCurrentErrorsVar.Get("test")), int64(0), "PruneCurrentErrors")
 
 		}
 	})
 
-	// Validate that the metrics are populated and make some sense.
-	getInt := func(v expvar.Var) int64 {
-		if v, ok := v.(*expvar.Int); ok && v != nil {
-			return v.Value()
-		}
-		return -1
-	}
+	runTest("refreshing", 100*time.Millisecond /* refresh interval */, func(h testHelper) {
+		t.Logf("Inserting test object 1")
+		h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+		h.expectOp(opUpdate(ID_1))
+		h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 
-	getFloat := func(v expvar.Var) float64 {
-		if v, ok := v.(*expvar.Float); ok && v != nil {
-			return v.Value()
-		}
-		return -1
-	}
+		t.Logf("Setting UpdatedAt to be in past to force refresh")
+		status := reconciler.StatusDone()
+		status.UpdatedAt = status.UpdatedAt.Add(-time.Minute)
+		h.insert(ID_1, NonFaulty, status)
 
-	assert.Greater(t, getInt(expVarMetrics.FullReconciliationCountVar.Get("test")), int64(0), "FullReconciliationCount")
-	assert.Greater(t, getFloat(expVarMetrics.FullReconciliationDurationVar.Get("test/prune")), float64(0), "FullReconciliationDuration/prune")
-	assert.Greater(t, getFloat(expVarMetrics.FullReconciliationDurationVar.Get("test/update")), float64(0), "FullReconciliationDuration/update")
-	assert.Equal(t, getInt(expVarMetrics.FullReconciliationCurrentErrorsVar.Get("test")), int64(0), "FullReconciliationCurrentErrors")
+		h.expectOps(
+			opUpdate(ID_1),        // Initial insert
+			opUpdateRefresh(ID_1), // The refresh
+		)
 
-	assert.Greater(t, getInt(expVarMetrics.IncrementalReconciliationCountVar.Get("test")), int64(0), "IncrementalReconciliationCount")
-	assert.Greater(t, getFloat(expVarMetrics.IncrementalReconciliationDurationVar.Get("test/update")), float64(0), "IncrementalReconciliationDuration/update")
-	assert.Greater(t, getFloat(expVarMetrics.IncrementalReconciliationDurationVar.Get("test/delete")), float64(0), "IncrementalReconciliationDuration/delete")
-	assert.Greater(t, getInt(expVarMetrics.IncrementalReconciliationTotalErrorsVar.Get("test")), int64(0), "IncrementalReconciliationTotalErrors")
-	assert.Equal(t, getInt(expVarMetrics.IncrementalReconciliationCurrentErrorsVar.Get("test")), int64(0), "IncrementalReconciliationCurrentErrors")
+		t.Logf("Setting target faulty and forcing refresh")
+		h.setTargetFaulty(true)
+		status.UpdatedAt = status.UpdatedAt.Add(-time.Minute)
+		h.insert(ID_1, NonFaulty, status)
+		h.expectOp(opFail(opUpdateRefresh(ID_1)))
+		h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
+		h.expectRetried(ID_1)
+		h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
 
-	assert.NoError(t, hive.Stop(context.TODO()), "Stop")
+		t.Logf("Setting target healthy")
+		h.setTargetFaulty(false)
+		h.expectOp(opUpdate(ID_1))
+		h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+		h.expectHealth(cell.StatusOK, "OK, 1 objects", "")
+
+	})
+
 }
 
 type testObject struct {
@@ -344,6 +355,9 @@ type opHistoryItem = string
 
 func opUpdate(id uint64) opHistoryItem {
 	return opHistoryItem(fmt.Sprintf("update(%d)", id))
+}
+func opUpdateRefresh(id uint64) opHistoryItem {
+	return opHistoryItem(fmt.Sprintf("update-refresh(%d)", id))
 }
 func opDelete(id uint64) opHistoryItem {
 	return opHistoryItem(fmt.Sprintf("delete(%d)", id))
@@ -437,6 +451,9 @@ func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, obj *testObj
 
 // Prune implements reconciler.Operations.
 func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*testObject]) error {
+	if mt.faulty.Load() {
+		return errors.New("prune fail")
+	}
 	objs := statedb.Collect(iter)
 	mt.history.add(opPrune(len(objs)))
 	return nil
@@ -445,12 +462,16 @@ func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.
 // Update implements reconciler.Operations.
 func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
 	mt.updates.incr(obj.id)
+
+	op := opUpdate(obj.id)
+	if obj.status.Kind == reconciler.StatusKindRefreshing {
+		op = opUpdateRefresh(obj.id)
+	}
 	if mt.faulty.Load() || obj.faulty {
-		mt.history.add(opFail(opUpdate(obj.id)))
+		mt.history.add(opFail(op))
 		return errors.New("update fail")
 	}
-	mt.history.add(opUpdate(obj.id))
-
+	mt.history.add(op)
 	obj.updates += 1
 
 	return nil
@@ -467,6 +488,7 @@ type testHelper struct {
 	ops    *mockOps
 	r      reconciler.Reconciler[*testObject]
 	health *cell.SimpleHealth
+	m      *reconciler.ExpVarMetrics
 }
 
 const (
@@ -516,7 +538,6 @@ func (h testHelper) expectStatus(id uint64, kind reconciler.StatusKind, err stri
 		}
 		require.Failf(h.t, "status mismatch", "expected object %d to be marked with status %q, but it was %q",
 			id, kind, actual)
-
 	}
 }
 
@@ -583,8 +604,8 @@ func (h testHelper) expectRetried(id uint64) {
 func (h testHelper) expectHealth(level cell.Level, statusSubString string, errSubString string) {
 	h.t.Helper()
 	cond := func() bool {
-		health := h.health.GetChild("test", "job-reconciler-loop")
-		require.NotNil(h.t, h, "GetChild")
+		health := h.health.GetChild("test", "job-reconcile")
+		require.NotNil(h.t, health, "GetChild")
 		health.Lock()
 		defer health.Unlock()
 		errStr := ""
@@ -594,7 +615,8 @@ func (h testHelper) expectHealth(level cell.Level, statusSubString string, errSu
 		return level == health.Level && strings.Contains(health.Status, statusSubString) && strings.Contains(errStr, errSubString)
 	}
 	if !assert.Eventually(h.t, cond, time.Second, time.Millisecond) {
-		hc := h.health.GetChild("test", "job-reconciler-loop")
+		hc := h.health.GetChild("test", "job-reconcile")
+		require.NotNil(h.t, hc, "GetChild")
 		hc.Lock()
 		defer hc.Unlock()
 		require.Failf(h.t, "health mismatch", "expected health level %q, status %q, error %q, got: %q, %q, %q", level, statusSubString, errSubString, hc.Level, hc.Status, hc.Error)
@@ -605,8 +627,8 @@ func (h testHelper) setTargetFaulty(faulty bool) {
 	h.ops.faulty.Store(faulty)
 }
 
-func (h testHelper) triggerFullReconciliation() {
-	h.r.TriggerFullReconciliation()
+func (h testHelper) triggerPrune() {
+	h.r.Prune()
 }
 
 func (h testHelper) waitForReconciliation() {

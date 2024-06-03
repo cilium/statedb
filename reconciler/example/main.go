@@ -133,16 +133,17 @@ var Hive = hive.New(
 
 func NewReconcilerConfig(ops reconciler.Operations[*Memo], tbl statedb.RWTable[*Memo], m *reconciler.ExpVarMetrics) reconciler.Config[*Memo] {
 	return reconciler.Config[*Memo]{
-		Table:                     tbl,
-		Metrics:                   m,
-		FullReconcilationInterval: 10 * time.Second,
-		RetryBackoffMinDuration:   100 * time.Millisecond,
-		RetryBackoffMaxDuration:   5 * time.Second,
-		IncrementalRoundSize:      100,
-		GetObjectStatus:           (*Memo).GetStatus,
-		SetObjectStatus:           (*Memo).SetStatus,
-		CloneObject:               (*Memo).Clone,
-		Operations:                ops,
+		Table:                   tbl,
+		Metrics:                 m,
+		PruneInterval:           time.Minute,      // Prune unexpected memos from disk once a minute.
+		RefreshInterval:         10 * time.Second, // Force-refresh memos every 10 seconds.
+		RetryBackoffMinDuration: 100 * time.Millisecond,
+		RetryBackoffMaxDuration: 5 * time.Second,
+		IncrementalRoundSize:    100,
+		GetObjectStatus:         (*Memo).GetStatus,
+		SetObjectStatus:         (*Memo).SetStatus,
+		CloneObject:             (*Memo).Clone,
+		Operations:              ops,
 	}
 }
 
