@@ -5,6 +5,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -42,6 +43,7 @@ type opResult struct {
 	original any              // the original object
 	rev      statedb.Revision // revision of the object
 	err      error
+	id       uint64 // the "pending" identifier
 }
 
 func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, changes statedb.ChangeIterator[Obj]) []error {
@@ -167,10 +169,11 @@ func (round *incrementalRound[Obj]) batch(changes statedb.ChangeIterator[Obj]) {
 		)
 
 		for _, entry := range updateBatch {
+			status := round.config.GetObjectStatus(entry.Object)
 			if entry.Result == nil {
 				round.retries.Clear(entry.Object)
 			}
-			round.results[entry.Object] = opResult{rev: entry.Revision, err: entry.Result, original: entry.original}
+			round.results[entry.Object] = opResult{rev: entry.Revision, id: status.id, err: entry.Result, original: entry.original}
 		}
 	}
 }
@@ -208,7 +211,8 @@ func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision,
 		obj = round.config.CloneObject(obj)
 		op = OpUpdate
 		err = round.config.Operations.Update(round.ctx, round.txn, obj)
-		round.results[obj] = opResult{original: orig, rev: rev, err: err}
+		status := round.config.GetObjectStatus(obj)
+		round.results[obj] = opResult{original: orig, id: status.id, rev: rev, err: err}
 	}
 	round.metrics.ReconciliationDuration(round.moduleID, op, time.Since(start))
 
@@ -229,8 +233,9 @@ func (round *incrementalRound[Obj]) commitStatus() (numErrors int) {
 	// Commit status for updated objects.
 	for obj, result := range round.results {
 		// Update the object if it is unchanged. It may happen that the object has
-		// been updated in the meanwhile, in which case we ignore the status as the
-		// update will be picked up by next reconciliation round.
+		// been updated in the meanwhile, in which case we skip updating the status
+		// and reprocess the object on the next round.
+
 		var status Status
 		if result.err == nil {
 			status = StatusDone()
@@ -238,8 +243,24 @@ func (round *incrementalRound[Obj]) commitStatus() (numErrors int) {
 			status = StatusError(result.err)
 			numErrors++
 		}
-		_, _, err := round.table.CompareAndSwap(wtxn, result.rev,
-			round.config.SetObjectStatus(obj, status))
+
+		current, exists, err := round.table.CompareAndSwap(wtxn, result.rev, round.config.SetObjectStatus(obj, status))
+		if errors.Is(err, statedb.ErrRevisionNotEqual) && exists {
+			// The object had changed. Check if the pending status still carries the same
+			// identifier and if so update the object. This is an optimization for supporting
+			// multiple reconcilers per object to avoid repeating work when only the
+			// reconciliation status had changed.
+			//
+			// The limitation of this approach is that we cannot support the reconciler
+			// modifying the object during reconciliation as the following will forget
+			// the changes.
+			currentStatus := round.config.GetObjectStatus(current)
+			if currentStatus.Kind == StatusKindPending && currentStatus.id == result.id {
+				current = round.config.CloneObject(current)
+				current = round.config.SetObjectStatus(current, status)
+				round.table.Insert(wtxn, current)
+			}
+		}
 
 		if result.err != nil && err == nil {
 			// Reconciliation of the object had failed and the status was updated
