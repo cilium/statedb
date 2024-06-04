@@ -4,9 +4,14 @@
 package reconciler
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -56,7 +61,8 @@ type Operations[Obj any] interface {
 	// reconciliation is done periodically by calling 'Update' on all objects.
 	//
 	// The object handed to Update is a clone produced by Config.CloneObject
-	// and thus Update can mutate the object.
+	// and thus Update can mutate the object. The mutations are only guaranteed
+	// to be retained if the object has a single reconciler (one Status).
 	Update(ctx context.Context, txn statedb.ReadTxn, obj Obj) error
 
 	// Delete the object in the target. Same semantics as with Update.
@@ -95,18 +101,25 @@ const (
 	StatusKindError      StatusKind = "Error"
 )
 
+var (
+	pendingKey    = index.Key("P")
+	refreshingKey = index.Key("R")
+	doneKey       = index.Key("D")
+	errorKey      = index.Key("E")
+)
+
 // Key implements an optimized construction of index.Key for StatusKind
 // to avoid copying and allocation.
 func (s StatusKind) Key() index.Key {
 	switch s {
 	case StatusKindPending:
-		return index.Key("P")
+		return pendingKey
 	case StatusKindRefreshing:
-		return index.Key("R")
+		return refreshingKey
 	case StatusKindDone:
-		return index.Key("D")
+		return doneKey
 	case StatusKindError:
-		return index.Key("E")
+		return errorKey
 	}
 	panic("BUG: unmatched StatusKind")
 }
@@ -119,6 +132,13 @@ type Status struct {
 	Kind      StatusKind
 	UpdatedAt time.Time
 	Error     string
+
+	// id is a unique identifier for a pending object.
+	// The reconciler uses this to compare whether the object
+	// has really changed when committing the resulting status.
+	// This allows multiple reconcilers to exist for a single
+	// object without repeating work when status is updated.
+	id uint64
 }
 
 func (s Status) IsPendingOrRefreshing() bool {
@@ -153,6 +173,12 @@ func prettySince(t time.Time) string {
 	return fmt.Sprintf("%.1fh", ago)
 }
 
+var idGen atomic.Uint64
+
+func nextID() uint64 {
+	return idGen.Add(1)
+}
+
 // StatusPending constructs the status for marking the object as
 // requiring reconciliation. The reconciler will perform the
 // Update operation and on success transition to Done status, or
@@ -162,6 +188,7 @@ func StatusPending() Status {
 		Kind:      StatusKindPending,
 		UpdatedAt: time.Now(),
 		Error:     "",
+		id:        nextID(),
 	}
 }
 
@@ -191,7 +218,7 @@ func StatusDone() Status {
 	}
 }
 
-// StatusError constructs the status that marks the object
+// statusError constructs the status that marks the object
 // as failed to be reconciled.
 func StatusError(err error) Status {
 	return Status{
@@ -199,4 +226,158 @@ func StatusError(err error) Status {
 		UpdatedAt: time.Now(),
 		Error:     err.Error(),
 	}
+}
+
+// StatusSet is a set of named statuses. This allows for the use of
+// multiple reconcilers per object when the reconcilers are not known
+// up front.
+type StatusSet struct {
+	id        uint64
+	createdAt time.Time
+	statuses  []namedStatus
+}
+
+type namedStatus struct {
+	Status
+	name string
+}
+
+func NewStatusSet() StatusSet {
+	return StatusSet{
+		id:        nextID(),
+		createdAt: time.Now(),
+		statuses:  nil,
+	}
+}
+
+// Pending returns a new pending status set.
+// The names of reconcilers are reused to be able to show which
+// are still pending.
+func (s StatusSet) Pending() StatusSet {
+	// Generate a new id. This lets an individual reconciler
+	// differentiate between the status changing in an object
+	// versus the data itself, which is needed when the reconciler
+	// writes back the reconciliation status and the object has
+	// changed.
+	s.id = nextID()
+	s.createdAt = time.Now()
+
+	s.statuses = slices.Clone(s.statuses)
+	for i := range s.statuses {
+		s.statuses[i].Kind = StatusKindPending
+		s.statuses[i].id = s.id
+	}
+	return s
+}
+
+func (s StatusSet) String() string {
+	if len(s.statuses) == 0 {
+		return "Pending"
+	}
+
+	var updatedAt time.Time
+	done := []string{}
+	pending := []string{}
+	errored := []string{}
+
+	for _, status := range s.statuses {
+		if status.UpdatedAt.After(updatedAt) {
+			updatedAt = status.UpdatedAt
+		}
+		switch status.Kind {
+		case StatusKindDone:
+			done = append(done, status.name)
+		case StatusKindError:
+			errored = append(errored, status.name+" ("+status.Error+")")
+		default:
+			pending = append(pending, status.name)
+		}
+	}
+	var b strings.Builder
+	if len(errored) > 0 {
+		b.WriteString("Errored: ")
+		b.WriteString(strings.Join(errored, " "))
+	}
+	if len(pending) > 0 {
+		if b.Len() > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("Pending: ")
+		b.WriteString(strings.Join(pending, " "))
+	}
+	if len(done) > 0 {
+		if b.Len() > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("Done: ")
+		b.WriteString(strings.Join(done, " "))
+	}
+	b.WriteString(" (")
+	b.WriteString(prettySince(updatedAt))
+	b.WriteString(" ago)")
+	return b.String()
+}
+
+// Set the reconcilation status of the named reconciler.
+// Use this to implement 'SetObjectStatus' for your reconciler.
+func (s StatusSet) Set(name string, status Status) StatusSet {
+	idx := slices.IndexFunc(
+		s.statuses,
+		func(st namedStatus) bool { return st.name == name })
+
+	s.statuses = slices.Clone(s.statuses)
+	if idx >= 0 {
+		s.statuses[idx] = namedStatus{status, name}
+	} else {
+		s.statuses = append(s.statuses, namedStatus{status, name})
+		slices.SortFunc(s.statuses,
+			func(a, b namedStatus) int { return cmp.Compare(a.name, b.name) })
+	}
+	return s
+}
+
+// Get returns the status for the named reconciler.
+// Use this to implement 'GetObjectStatus' for your reconciler.
+// If this reconciler is new the status is pending.
+func (s StatusSet) Get(name string) Status {
+	idx := slices.IndexFunc(
+		s.statuses,
+		func(st namedStatus) bool { return st.name == name })
+	if idx < 0 {
+		return Status{
+			Kind:      StatusKindPending,
+			UpdatedAt: s.createdAt,
+			id:        s.id,
+		}
+	}
+	return s.statuses[idx].Status
+}
+
+func (s StatusSet) All() map[string]Status {
+	m := make(map[string]Status, len(s.statuses))
+	for _, ns := range s.statuses {
+		m[ns.name] = ns.Status
+	}
+	return m
+}
+
+func (s *StatusSet) UnmarshalJSON(data []byte) error {
+	m := map[string]Status{}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+	s.statuses = make([]namedStatus, 0, len(m))
+	for name, status := range m {
+		s.statuses = append(s.statuses, namedStatus{status, name})
+	}
+	slices.SortFunc(s.statuses,
+		func(a, b namedStatus) int { return cmp.Compare(a.name, b.name) })
+	return nil
+}
+
+// MarshalJSON marshals the StatusSet as a map[string]Status.
+// It carries enough information over to be able to implement String()
+// so this can be used to implement the TableRow() method.
+func (s StatusSet) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.All())
 }
