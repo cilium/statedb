@@ -135,7 +135,7 @@ func NewReconcilerConfig(ops reconciler.Operations[*Memo], tbl statedb.RWTable[*
 	return reconciler.Config[*Memo]{
 		Table:                     tbl,
 		Metrics:                   m,
-		FullReconcilationInterval: 10 * time.Second,
+		FullReconcilationInterval: time.Second,
 		RetryBackoffMinDuration:   100 * time.Millisecond,
 		RetryBackoffMaxDuration:   5 * time.Second,
 		IncrementalRoundSize:      100,
