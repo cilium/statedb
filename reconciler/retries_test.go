@@ -22,77 +22,78 @@ func TestRetries(t *testing.T) {
 
 	// Add objects to be retried in order. We assume here that 'time.Time' has
 	// enough granularity for these to be added with rising retryAt times.
-	rq.Add(obj1)
-	rq.Add(obj2)
-	rq.Add(obj3)
+	rq.Add(obj1, 1, false)
+	rq.Add(obj2, 2, false)
+	rq.Add(obj3, 3, false)
 
 	<-rq.Wait()
-	obj, retryAt, ok := rq.Top()
+	item, ok := rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		rq.Clear(obj)
-		assert.True(t, retryAt.Before(time.Now()), "expected item to be expired")
-		assert.Equal(t, obj, obj1)
+		rq.Clear(item.object)
+		assert.True(t, item.retryAt.Before(time.Now()), "expected item to be expired")
+		assert.Equal(t, item.object, obj1)
 	}
 
 	<-rq.Wait()
-	obj, retryAt, ok = rq.Top()
+	item, ok = rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		rq.Clear(obj)
-		assert.True(t, retryAt.Before(time.Now()), "expected item to be expired")
-		assert.Equal(t, obj, obj2)
+		rq.Clear(item.object)
+		assert.True(t, item.retryAt.Before(time.Now()), "expected item to be expired")
+		assert.Equal(t, item.object, obj2)
 	}
 
 	<-rq.Wait()
-	obj, retryAt, ok = rq.Top()
+	item, ok = rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		assert.True(t, retryAt.Before(time.Now()), "expected item to be expired")
-		assert.Equal(t, obj, obj3)
+		assert.True(t, item.retryAt.Before(time.Now()), "expected item to be expired")
+		assert.Equal(t, item.object, obj3)
 	}
 
 	// Retry 'obj3' and since it was added back without clearing it'll be retried
 	// later. Add obj1 and check that 'obj3' has later retry time.
-	rq.Add(obj3)
-	rq.Add(obj1)
+	rq.Add(obj3, 4, false)
+	rq.Add(obj1, 5, false)
 
 	<-rq.Wait()
-	obj, retryAt1, ok := rq.Top()
+	item, ok = rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		rq.Clear(obj)
-		assert.True(t, retryAt.Before(time.Now()), "expected item to be expired")
-		assert.Equal(t, obj, obj1)
+		rq.Clear(item.object)
+		assert.True(t, item.retryAt.Before(time.Now()), "expected item to be expired")
+		assert.Equal(t, item.object, obj1)
 	}
+	retryAt1 := item.retryAt
 
 	<-rq.Wait()
-	obj, retryAt, ok = rq.Top()
+	item, ok = rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		rq.Clear(obj)
-		assert.True(t, retryAt1.Before(retryAt), "expected obj1 before obj3")
-		assert.True(t, retryAt.Before(time.Now()), "expected item to be expired")
-		assert.Equal(t, obj, obj3)
+		rq.Clear(item.object)
+		assert.True(t, retryAt1.Before(item.retryAt), "expected obj1 before obj3")
+		assert.True(t, item.retryAt.Before(time.Now()), "expected item to be expired")
+		assert.Equal(t, item.object, obj3)
 	}
 
-	_, _, ok = rq.Top()
+	_, ok = rq.Top()
 	assert.False(t, ok)
 
 	// Test that object can be cleared from the queue without popping it.
-	rq.Add(obj1)
-	rq.Add(obj2)
-	rq.Add(obj3)
+	rq.Add(obj1, 6, false)
+	rq.Add(obj2, 7, false)
+	rq.Add(obj3, 8, false)
 	rq.Clear(obj1) // Remove obj1, testing that it'll fix the queue correctly.
 	rq.Pop()       // Pop and remove obj2 and clear it to test that Clear doesn't mess with queue
 	rq.Clear(obj2)
-	obj, _, ok = rq.Top()
+	item, ok = rq.Top()
 	if assert.True(t, ok) {
 		rq.Pop()
-		rq.Clear(obj)
-		assert.Equal(t, obj, obj3)
+		rq.Clear(item.object)
+		assert.Equal(t, item.object, obj3)
 	}
-	_, _, ok = rq.Top()
+	_, ok = rq.Top()
 	assert.False(t, ok)
 
 }
