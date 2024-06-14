@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/time/rate"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
@@ -116,35 +117,41 @@ var Hive = hive.New(
 
 			// Provide the Operations[*Memo] for reconciling Memos.
 			NewMemoOps,
-
-			// Construct the configuration for the memo reconciler.
-			NewReconcilerConfig,
 		),
 
-		// Create and register the reconciler for memos. This takes
-		// in Operations[*Memo] and Config[*Memo] and constructs a
-		// reconciler that will watch Table[*Memo] for changes and
-		// using Operations[*Memo] updates the memo files on disk.
-		cell.Invoke(reconciler.Register[*Memo]),
+		// Create and register the reconciler for memos.
+		// The reconciler watches Table[*Memo] for changes and
+		// updates the memo files on disk accordingly.
+		cell.Invoke(registerMemoReconciler),
 
 		cell.Invoke(registerHTTPServer),
 	),
 )
 
-func NewReconcilerConfig(ops reconciler.Operations[*Memo], tbl statedb.RWTable[*Memo], m *reconciler.ExpVarMetrics) reconciler.Config[*Memo] {
-	return reconciler.Config[*Memo]{
-		Table:                   tbl,
-		Metrics:                 m,
-		PruneInterval:           time.Minute,      // Prune unexpected memos from disk once a minute.
-		RefreshInterval:         10 * time.Second, // Force-refresh memos every 10 seconds.
-		RetryBackoffMinDuration: 100 * time.Millisecond,
-		RetryBackoffMaxDuration: 5 * time.Second,
-		IncrementalRoundSize:    100,
-		GetObjectStatus:         (*Memo).GetStatus,
-		SetObjectStatus:         (*Memo).SetStatus,
-		CloneObject:             (*Memo).Clone,
-		Operations:              ops,
-	}
+func registerMemoReconciler(
+	params reconciler.Params,
+	ops reconciler.Operations[*Memo],
+	tbl statedb.RWTable[*Memo],
+	m *reconciler.ExpVarMetrics) error {
+
+	// Create a new reconciler and register it to the lifecycle.
+	// We ignore the returned Reconciler[*Memo] as we don't use it.
+	_, err := reconciler.Register(
+		params,
+		tbl,
+		(*Memo).Clone,
+		(*Memo).SetStatus,
+		(*Memo).GetStatus,
+		ops,
+		nil, // no batch operations support
+
+		reconciler.WithMetrics(m),
+		// Prune unexpected memos from disk once a minute.
+		reconciler.WithPruning(time.Minute),
+		// Refresh the memos once a minute.
+		reconciler.WithRefreshing(time.Minute, rate.NewLimiter(100.0, 1)),
+	)
+	return err
 }
 
 func registerHTTPServer(

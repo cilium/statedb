@@ -5,7 +5,6 @@ package reconciler
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -16,7 +15,7 @@ import (
 type incrementalRound[Obj comparable] struct {
 	metrics        Metrics
 	moduleID       cell.FullModuleID
-	config         *Config[Obj]
+	config         *config[Obj]
 	retries        *retries
 	primaryIndexer statedb.Indexer[Obj]
 	db             *statedb.DB
@@ -48,20 +47,20 @@ type opResult struct {
 func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, changes statedb.ChangeIterator[Obj]) []error {
 	round := incrementalRound[Obj]{
 		moduleID:       r.ModuleID,
-		metrics:        r.Config.Metrics,
-		config:         &r.Config,
+		metrics:        r.config.Metrics,
+		config:         &r.config,
 		retries:        r.retries,
 		primaryIndexer: r.primaryIndexer,
 		db:             r.DB,
 		ctx:            ctx,
 		txn:            txn,
-		table:          r.Config.Table,
+		table:          r.config.Table,
 		results:        make(map[Obj]opResult),
 	}
 
 	// Reconcile new and changed objects using either Operations
 	// or BatchOperations.
-	if r.Config.BatchOperations != nil {
+	if r.config.BatchOperations != nil {
 		round.batch(changes)
 	} else {
 		round.single(changes)
@@ -247,8 +246,6 @@ func (round *incrementalRound[Obj]) commitStatus() (numErrors int) {
 			// successfully (object had not changed). Queue the retry for the object.
 			newRevision := round.table.Revision(wtxn)
 			round.retries.Add(result.original.(Obj), newRevision, false, result.err)
-		} else if result.err != nil && err != nil {
-			fmt.Printf("FAIL queued %v for retry due to %s ! %s\n", result.original, result.err, err)
 		}
 	}
 	return
