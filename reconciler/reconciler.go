@@ -13,7 +13,6 @@ import (
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
-	"golang.org/x/time/rate"
 )
 
 // Register creates a new reconciler and registers to the application
@@ -26,25 +25,16 @@ func Register[Obj comparable](cfg Config[Obj], params Params) error {
 
 // New creates and registers a new reconciler.
 func New[Obj comparable](cfg Config[Obj], p Params) (Reconciler[Obj], error) {
+	if cfg.Metrics == nil {
+		if p.DefaultMetrics == nil {
+			cfg.Metrics = NewUnpublishedExpVarMetrics()
+		} else {
+			cfg.Metrics = p.DefaultMetrics
+		}
+	}
+	cfg = mergeWithDefaults(cfg)
 	if err := cfg.validate(); err != nil {
 		return nil, err
-	}
-
-	if cfg.RateLimiter == nil {
-		cfg.RateLimiter = defaultRoundRateLimiter()
-	}
-
-	if cfg.RefreshRateLimiter == nil {
-		cfg.RefreshRateLimiter = defaultRoundRateLimiter()
-	}
-
-	metrics := cfg.Metrics
-	if metrics == nil {
-		if p.DefaultMetrics == nil {
-			metrics = NewUnpublishedExpVarMetrics()
-		} else {
-			metrics = p.DefaultMetrics
-		}
 	}
 
 	idx := cfg.Table.PrimaryIndexer()
@@ -54,7 +44,6 @@ func New[Obj comparable](cfg Config[Obj], p Params) (Reconciler[Obj], error) {
 	r := &reconciler[Obj]{
 		Params:               p,
 		Config:               cfg,
-		metrics:              metrics,
 		retries:              newRetries(cfg.RetryBackoffMinDuration, cfg.RetryBackoffMaxDuration, objectToKey),
 		externalPruneTrigger: make(chan struct{}, 1),
 		primaryIndexer:       idx,
@@ -86,7 +75,6 @@ type Params struct {
 type reconciler[Obj comparable] struct {
 	Params
 	Config               Config[Obj]
-	metrics              Metrics
 	retries              *retries
 	externalPruneTrigger chan struct{}
 	primaryIndexer       statedb.Indexer[Obj]
@@ -117,6 +105,9 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 	tableWatchChan := closedWatchChannel
 
+	tableInitialized := false
+	externalPrune := false
+
 	for {
 		// Throttle a bit before reconciliation to allow for a bigger batch to arrive and
 		// for objects to settle.
@@ -136,7 +127,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 		case <-pruneTickerChan:
 			prune = true
 		case <-r.externalPruneTrigger:
-			prune = true
+			externalPrune = true
 		}
 
 		// Grab a new snapshot and refresh the changes iterator to read
@@ -148,16 +139,28 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 		// objects.
 		errs := r.incremental(ctx, txn, changes)
 
-		// Prune objects if pruning is requested and table is fully initialized.
-		if prune && r.Config.Table.Initialized(txn) {
+		if !tableInitialized {
+			if r.Config.Table.Initialized(txn) {
+				tableInitialized = true
+
+				// Do an immediate pruning now as the table has finished
+				// initializing and pruning is enabled.
+				prune = r.Config.PruneInterval != 0
+			} else {
+				// Table not initialized yet, skip this pruning round.
+				prune = false
+			}
+		}
+		if prune || (tableInitialized && externalPrune) {
 			if err := r.prune(ctx, txn); err != nil {
 				errs = append(errs, err)
 			}
+			externalPrune = false
 		}
 
 		if len(errs) == 0 {
 			health.OK(
-				fmt.Sprintf("OK, %d objects", r.Config.Table.NumObjects(txn)))
+				fmt.Sprintf("OK, %d object(s)", r.Config.Table.NumObjects(txn)))
 		} else {
 			health.Degraded(
 				fmt.Sprintf("%d failure(s)", len(errs)),
@@ -172,11 +175,11 @@ func (r *reconciler[Obj]) prune(ctx context.Context, txn statedb.ReadTxn) error 
 	start := time.Now()
 	err := r.Config.Operations.Prune(ctx, txn, iter)
 	if err != nil {
-		err = fmt.Errorf("prune failed: %w", err)
+		r.Log.Warn("Reconciler: failed to prune objects", "error", err, "pruneInterval", r.Config.PruneInterval)
+		err = fmt.Errorf("prune: %w", err)
 	}
-	r.metrics.PruneDuration(r.ModuleID, time.Since(start))
-	r.metrics.PruneError(r.ModuleID, err)
-
+	r.Config.Metrics.PruneDuration(r.ModuleID, time.Since(start))
+	r.Config.Metrics.PruneError(r.ModuleID, err)
 	return err
 }
 
@@ -247,17 +250,4 @@ outer:
 		// RefreshInterval.
 		refreshTimer.Reset(r.Config.RefreshInterval)
 	}
-}
-
-func defaultRoundRateLimiter() *rate.Limiter {
-	// By default limit the rate of reconciliation rounds to 100 times per second.
-	// This enables the reconciler to operate on batches of objects at a time, which
-	// enables efficient use of the batch operations and amortizes the cost of WriteTxn.
-	return rate.NewLimiter(100.0, 1)
-}
-
-func defaultRefreshRateLimiter() *rate.Limiter {
-	// By default limit the object refresh rate to 100 objects per second. This avoids a
-	// stampade of refreshes that could delay normal updates.
-	return rate.NewLimiter(100.0, 1)
 }

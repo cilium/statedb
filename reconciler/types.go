@@ -26,9 +26,41 @@ type Reconciler[Obj any] interface {
 	Prune()
 }
 
+// Config for a reconciler.
+// The mandatory fields to fill in are:
+// Table, GetObjectStatus, SetObjectStatus, CloneObject and Operations.
 type Config[Obj any] struct {
-	// Table to reconcile.
+	// Table to reconcile. Mandatory.
 	Table statedb.RWTable[Obj]
+
+	// GetObjectStatus returns the reconciliation status for the object.
+	// Mandatory.
+	GetObjectStatus func(Obj) Status
+
+	// SetObjectStatus sets the reconciliation status for the object.
+	// This is called with a copy of the object returned by CloneObject.
+	// Mandatory.
+	SetObjectStatus func(Obj, Status) Obj
+
+	// CloneObject returns a shallow copy of the object. This is used to
+	// make it possible for the reconciliation operations to mutate
+	// the object (to for example provide additional information that the
+	// reconciliation produces) and to be able to set the reconciliation
+	// status after the reconciliation.
+	// Mandatory.
+	CloneObject func(Obj) Obj
+
+	// Operations defines how an object is reconciled. Mandatory.
+	Operations Operations[Obj]
+
+	//
+	// Fields below are optional and if left at zero value the defaults
+	// are used instead.
+	//
+
+	// BatchOperations is optional and if provided these are used instead of
+	// the single-object operations.
+	BatchOperations BatchOperations[Obj]
 
 	// Metrics to use with this reconciler. The metrics capture the duration
 	// of operations during incremental and full reconcilation and the errors
@@ -78,31 +110,10 @@ type Config[Obj any] struct {
 	// updates are not delayed too much. If in doubt, use a value between 100-1000.
 	IncrementalRoundSize int
 
-	// GetObjectStatus returns the reconciliation status for the object.
-	GetObjectStatus func(Obj) Status
-
-	// SetObjectStatus sets the reconciliation status for the object.
-	// This is called with a copy of the object returned by CloneObject.
-	SetObjectStatus func(Obj, Status) Obj
-
-	// CloneObject returns a shallow copy of the object. This is used to
-	// make it possible for the reconciliation operations to mutate
-	// the object (to for example provide additional information that the
-	// reconciliation produces) and to be able to set the reconciliation
-	// status after the reconciliation.
-	CloneObject func(Obj) Obj
-
 	// RateLimiter is optional and if set will use the limiter to wait between
 	// reconciliation rounds. This allows trading latency with throughput by
 	// waiting longer to collect a batch of objects to reconcile.
 	RateLimiter *rate.Limiter
-
-	// Operations defines how an object is reconciled.
-	Operations Operations[Obj]
-
-	// BatchOperations is optional and if provided these are used instead of
-	// the single-object operations.
-	BatchOperations BatchOperations[Obj]
 }
 
 func (cfg Config[Obj]) validate() error {
