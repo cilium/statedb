@@ -42,7 +42,7 @@ type incrementalRound[Obj comparable] struct {
 func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, changes statedb.ChangeIterator[Obj]) []error {
 	round := incrementalRound[Obj]{
 		moduleID:       r.ModuleID,
-		metrics:        r.metrics,
+		metrics:        r.Config.Metrics,
 		config:         &r.Config,
 		retries:        r.retries,
 		primaryIndexer: r.primaryIndexer,
@@ -67,7 +67,7 @@ func (r *reconciler[Obj]) incremental(ctx context.Context, txn statedb.ReadTxn, 
 	// Finally commit the status updates.
 	round.commitStatus()
 
-	r.metrics.ReconciliationErrors(r.ModuleID, round.errs)
+	round.metrics.ReconciliationErrors(r.ModuleID, round.errs)
 
 	return round.errs
 }

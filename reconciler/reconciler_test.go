@@ -63,12 +63,13 @@ func testReconciler(t *testing.T, batchOps bool) {
 		return -1
 	}
 
-	runTest := func(name string, refreshInterval time.Duration, run func(testHelper)) {
+	runTest := func(name string, modConfig func(*reconciler.Config[*testObject]), run func(testHelper)) {
 		var (
 			ops        = &mockOps{}
 			db         *statedb.DB
 			r          reconciler.Reconciler[*testObject]
 			fakeHealth *cell.SimpleHealth
+			markInit   func()
 		)
 
 		expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
@@ -98,16 +99,19 @@ func testReconciler(t *testing.T, batchOps bool) {
 					cfg := reconciler.Config[*testObject]{
 						Table:                   testObjects,
 						PruneInterval:           0,
-						RefreshInterval:         refreshInterval,
+						RefreshInterval:         0,
 						RetryBackoffMinDuration: time.Millisecond,
-						RetryBackoffMaxDuration: 10 * time.Millisecond,
+						RetryBackoffMaxDuration: time.Millisecond,
 						IncrementalRoundSize:    1000,
 						GetObjectStatus:         (*testObject).GetStatus,
 						SetObjectStatus:         (*testObject).SetStatus,
 						CloneObject:             (*testObject).Clone,
-						RateLimiter:             rate.NewLimiter(1000.0, 1),
-						RefreshRateLimiter:      rate.NewLimiter(1000.0, 1),
+						RateLimiter:             rate.NewLimiter(1000.0, 10),
+						RefreshRateLimiter:      rate.NewLimiter(1000.0, 10),
 						Operations:              ops,
+					}
+					if modConfig != nil {
+						modConfig(&cfg)
 					}
 					if batchOps {
 						cfg.BatchOperations = ops
@@ -119,6 +123,14 @@ func testReconciler(t *testing.T, batchOps bool) {
 				cell.Invoke(func(r_ reconciler.Reconciler[*testObject], h *cell.SimpleHealth) {
 					r = r_
 					fakeHealth = h
+					wtxn := db.WriteTxn(testObjects)
+					done := testObjects.RegisterInitializer(wtxn, "test")
+					wtxn.Commit()
+					markInit = func() {
+						wtxn := db.WriteTxn(testObjects)
+						done(wtxn)
+						wtxn.Commit()
+					}
 				}),
 			),
 		)
@@ -129,13 +141,14 @@ func testReconciler(t *testing.T, batchOps bool) {
 				assert.NoError(t, hive.Stop(context.TODO()), "Stop")
 			})
 			run(testHelper{
-				t:      t,
-				db:     db,
-				tbl:    testObjects,
-				ops:    ops,
-				r:      r,
-				health: fakeHealth,
-				m:      expVarMetrics,
+				t:        t,
+				db:       db,
+				tbl:      testObjects,
+				ops:      ops,
+				r:        r,
+				health:   fakeHealth,
+				m:        expVarMetrics,
+				markInit: markInit,
 			})
 
 		})
@@ -143,7 +156,8 @@ func testReconciler(t *testing.T, batchOps bool) {
 
 	numIterations := 3
 
-	runTest("incremental", 0, func(h testHelper) {
+	runTest("incremental", nil, func(h testHelper) {
+		h.markInitialized()
 		for i := 0; i < numIterations; i++ {
 			t.Logf("Iteration %d", i)
 
@@ -161,7 +175,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opUpdate(ID_3))
 			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
 
-			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
+			h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 			h.waitForReconciliation()
 
 			// Set one to be faulty => object will error
@@ -177,7 +191,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
 			h.expectOp(opUpdate(ID_1))
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
+			h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 
 			t.Log("Delete 1 & 2")
 			h.markForDelete(ID_1)
@@ -197,7 +211,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			t.Log("Set the target non-faulty to delete '3'")
 			h.setTargetFaulty(false)
 			h.expectOp(opDelete(3))
-			h.expectHealth(cell.StatusOK, "OK, 0 objects", "")
+			h.expectHealth(cell.StatusOK, "OK, 0 object(s)", "")
 
 			h.waitForReconciliation()
 
@@ -209,109 +223,146 @@ func testReconciler(t *testing.T, batchOps bool) {
 		}
 	})
 
-	runTest("pruning", 0, func(h testHelper) {
-		for i := 0; i < numIterations; i++ {
-			t.Logf("Iteration %d", i)
+	runTest("pruning", nil, func(h testHelper) {
+		// Without any objects, we should not be able to see a prune,
+		// even when triggered.
+		t.Log("Try to prune without objects and uninitialized table")
+		h.triggerPrune()
+		h.expectHealth(cell.StatusOK, "OK, 0 object(s)", "")
 
-			// Without any objects, we should only see prune.
-			t.Log("Pruning without objects")
-			h.triggerPrune()
-			h.expectOp(opPrune(0))
-			h.expectHealth(cell.StatusOK, "OK, 0 objects", "")
-
-			// Register a table initializer to prohibit pruning.
-			markInitialized := h.registerInitializer()
-
-			// With table not initialized, we should not see the prune.
-			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.triggerPrune()
-			h.expectOp(opUpdate(ID_1))
-			markInitialized()
-
-			// Add few objects and wait until incremental reconciliation is done.
-			t.Log("Insert test objects")
-			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.insert(ID_2, NonFaulty, reconciler.StatusPending())
-			h.insert(ID_3, NonFaulty, reconciler.StatusPending())
-			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
-			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
-			h.expectNumUpdates(ID_1, 1)
-			h.expectNumUpdates(ID_2, 1)
-			h.expectNumUpdates(ID_3, 1)
-			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
-
-			// Pruning with functioning ops.
-			t.Log("Prune with non-faulty ops")
-			h.triggerPrune()
-			h.expectOps(opPrune(3))
-			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
-
-			// Make the ops faulty and trigger the pruning.
-			t.Log("Prune with faulty ops")
-			h.setTargetFaulty(true)
-			h.triggerPrune()
-			h.expectOps(opPrune(3))
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "prune failed: prune fail")
-
-			// Make the ops healthy again and try pruning again.
-			t.Log("Prune again with non-faulty ops")
-			h.setTargetFaulty(false)
-			h.triggerPrune()
-			h.expectHealth(cell.StatusOK, "OK, 3 objects", "")
-
-			// Cleanup.
-			h.markForDelete(ID_1)
-			h.markForDelete(ID_2)
-			h.markForDelete(ID_3)
-			h.expectNotFound(ID_1)
-			h.expectNotFound(ID_2)
-			h.expectNotFound(ID_3)
-			h.triggerPrune()
-			h.expectOps(opDelete(1), opDelete(2), opDelete(3), opPrune(0))
-			h.waitForReconciliation()
-
-			// Validate metrics.
-			assert.Greater(t, getInt(h.m.PruneCountVar.Get("test")), int64(0), "PruneCount")
-			assert.Greater(t, getFloat(h.m.PruneDurationVar.Get("test")), float64(0), "PruneDuration")
-			assert.Equal(t, getInt(h.m.PruneCurrentErrorsVar.Get("test")), int64(0), "PruneCurrentErrors")
-
-		}
-	})
-
-	runTest("refreshing", 100*time.Millisecond /* refresh interval */, func(h testHelper) {
-		t.Logf("Inserting test object 1")
+		// With table not initialized, we should not see the prune even
+		// when triggered.
+		t.Log("Try to prune with object and uninitialized table")
 		h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+		h.triggerPrune()
 		h.expectOp(opUpdate(ID_1))
+		h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
+		h.markInitialized()
+
+		// After initialization we expect to see pruning immediately
+		// as soon as something changes. Marking the table initialized
+		// does not yet trigger the reconciler since it's waiting for
+		// objects to change.
+		h.insert(ID_2, NonFaulty, reconciler.StatusPending())
+		h.expectOps(opUpdate(ID_2), opPrune(2))
+		h.expectHealth(cell.StatusOK, "OK, 2 object(s)", "")
+
+		// Pruning can be now triggered at will.
+		h.triggerPrune()
+		h.expectOps(opUpdate(ID_2), opPrune(2), opPrune(2))
+
+		// Add few objects and wait until incremental reconciliation is done.
+		t.Log("Insert more objects")
+		h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+		h.insert(ID_2, NonFaulty, reconciler.StatusPending())
+		h.insert(ID_3, NonFaulty, reconciler.StatusPending())
 		h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+		h.expectStatus(ID_2, reconciler.StatusKindDone, "")
+		h.expectStatus(ID_3, reconciler.StatusKindDone, "")
+		h.expectNumUpdates(ID_1, 1)
+		h.expectNumUpdates(ID_2, 1)
+		h.expectNumUpdates(ID_3, 1)
+		h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 
-		t.Logf("Setting UpdatedAt to be in past to force refresh")
-		status := reconciler.StatusDone()
-		status.UpdatedAt = status.UpdatedAt.Add(-time.Minute)
-		h.insert(ID_1, NonFaulty, status)
+		// Pruning with functioning ops.
+		t.Log("Prune with non-faulty ops")
+		h.triggerPrune()
+		h.expectOps(opPrune(3))
+		h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 
-		h.expectOps(
-			opUpdate(ID_1),        // Initial insert
-			opUpdateRefresh(ID_1), // The refresh
-		)
-
-		t.Logf("Setting target faulty and forcing refresh")
+		// Make the ops faulty and trigger the pruning.
+		t.Log("Prune with faulty ops")
 		h.setTargetFaulty(true)
-		status.UpdatedAt = status.UpdatedAt.Add(-time.Minute)
-		h.insert(ID_1, NonFaulty, status)
-		h.expectOp(opFail(opUpdateRefresh(ID_1)))
-		h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
-		h.expectRetried(ID_1)
-		h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
+		h.triggerPrune()
+		h.expectOps(opPrune(3))
+		h.expectHealth(cell.StatusDegraded, "1 failure(s)", "prune: prune fail")
 
-		t.Logf("Setting target healthy")
+		// Make the ops healthy again and try pruning again.
+		t.Log("Prune again with non-faulty ops")
 		h.setTargetFaulty(false)
-		h.expectOp(opUpdate(ID_1))
-		h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-		h.expectHealth(cell.StatusOK, "OK, 1 objects", "")
+		h.triggerPrune()
+		h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 
+		// Cleanup.
+		h.markForDelete(ID_1)
+		h.markForDelete(ID_2)
+		h.markForDelete(ID_3)
+		h.expectNotFound(ID_1)
+		h.expectNotFound(ID_2)
+		h.expectNotFound(ID_3)
+		h.triggerPrune()
+		h.expectOps(opDelete(1), opDelete(2), opDelete(3), opPrune(0))
+		h.waitForReconciliation()
+
+		// Validate metrics.
+		assert.Greater(t, getInt(h.m.PruneCountVar.Get("test")), int64(0), "PruneCount")
+		assert.Greater(t, getFloat(h.m.PruneDurationVar.Get("test")), float64(0), "PruneDuration")
+		assert.Equal(t, getInt(h.m.PruneCurrentErrorsVar.Get("test")), int64(0), "PruneCurrentErrors")
 	})
 
+	runTest("refreshing",
+		func(cfg *reconciler.Config[*testObject]) {
+			cfg.PruneInterval = 0
+			cfg.RefreshInterval = 500 * time.Millisecond
+		},
+		func(h testHelper) {
+			t.Logf("Inserting test object 1")
+			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+			h.expectOp(opUpdate(ID_1))
+			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+
+			t.Logf("Setting UpdatedAt to be in past to force refresh")
+			status := reconciler.StatusDone()
+			status.UpdatedAt = status.UpdatedAt.Add(-2 * time.Minute)
+			h.insert(ID_1, NonFaulty, status)
+
+			h.expectOps(
+				opUpdate(ID_1),        // Initial insert
+				opUpdateRefresh(ID_1), // The refresh
+			)
+
+			t.Logf("Setting target faulty and forcing refresh")
+			h.setTargetFaulty(true)
+			status.UpdatedAt = status.UpdatedAt.Add(-time.Minute)
+			h.insert(ID_1, NonFaulty, status)
+			h.expectOp(opFail(opUpdateRefresh(ID_1)))
+			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
+			h.expectRetried(ID_1)
+			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
+
+			t.Logf("Setting target healthy")
+			h.setTargetFaulty(false)
+			h.insert(ID_1, NonFaulty, status)
+			h.expectOp(opUpdate(ID_1))
+			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+			h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
+
+		})
+
+	runTest("defaultConfig",
+		func(cfg *reconciler.Config[*testObject]) {
+			// Only set the mandatory fields leaving everything else zero'd.
+			*cfg = reconciler.Config[*testObject]{
+				Table:           cfg.Table,
+				GetObjectStatus: cfg.GetObjectStatus,
+				SetObjectStatus: cfg.SetObjectStatus,
+				CloneObject:     cfg.CloneObject,
+				Operations:      cfg.Operations,
+			}
+		},
+		func(h testHelper) {
+			t.Logf("Inserting faulty object")
+			h.insert(ID_1, Faulty, reconciler.StatusPending())
+			h.expectOp(opFail(opUpdate(ID_1)))
+			h.expectRetried(ID_1)
+			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
+			//h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
+
+			t.Logf("Updating object to healthy")
+			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+			h.expectOp(opUpdate(ID_1))
+			h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
+		})
 }
 
 type testObject struct {
@@ -482,13 +533,14 @@ var _ reconciler.BatchOperations[*testObject] = &mockOps{}
 
 // testHelper defines a sort of mini-language for writing the test steps.
 type testHelper struct {
-	t      testing.TB
-	db     *statedb.DB
-	tbl    statedb.RWTable[*testObject]
-	ops    *mockOps
-	r      reconciler.Reconciler[*testObject]
-	health *cell.SimpleHealth
-	m      *reconciler.ExpVarMetrics
+	t        testing.TB
+	db       *statedb.DB
+	tbl      statedb.RWTable[*testObject]
+	ops      *mockOps
+	r        reconciler.Reconciler[*testObject]
+	health   *cell.SimpleHealth
+	m        *reconciler.ExpVarMetrics
+	markInit func()
 }
 
 const (
@@ -496,15 +548,9 @@ const (
 	NonFaulty = false
 )
 
-func (h testHelper) registerInitializer() func() {
-	wtxn := h.db.WriteTxn(h.tbl)
-	done := h.tbl.RegisterInitializer(wtxn, "test")
-	wtxn.Commit()
-	return func() {
-		wtxn := h.db.WriteTxn(h.tbl)
-		done(wtxn)
-		wtxn.Commit()
-	}
+func (h testHelper) markInitialized() {
+	h.markInit()
+	h.markInit = nil
 }
 
 func (h testHelper) insert(id uint64, faulty bool, status reconciler.Status) {
