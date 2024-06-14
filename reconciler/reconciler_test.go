@@ -63,7 +63,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 		return -1
 	}
 
-	runTest := func(name string, modConfig func(*reconciler.Config[*testObject]), run func(testHelper)) {
+	runTest := func(name string, opts []reconciler.Option, run func(testHelper)) {
 		var (
 			ops        = &mockOps{}
 			db         *statedb.DB
@@ -95,30 +95,30 @@ func testReconciler(t *testing.T, batchOps bool) {
 					db = db_
 					return db.RegisterTable(testObjects)
 				}),
-				cell.Provide(func() reconciler.Config[*testObject] {
-					cfg := reconciler.Config[*testObject]{
-						Table:                   testObjects,
-						PruneInterval:           0,
-						RefreshInterval:         0,
-						RetryBackoffMinDuration: time.Millisecond,
-						RetryBackoffMaxDuration: time.Millisecond,
-						IncrementalRoundSize:    1000,
-						GetObjectStatus:         (*testObject).GetStatus,
-						SetObjectStatus:         (*testObject).SetStatus,
-						CloneObject:             (*testObject).Clone,
-						RateLimiter:             rate.NewLimiter(1000.0, 10),
-						RefreshRateLimiter:      rate.NewLimiter(1000.0, 10),
-						Operations:              ops,
-					}
-					if modConfig != nil {
-						modConfig(&cfg)
-					}
+				cell.Provide(func(p reconciler.Params) (reconciler.Reconciler[*testObject], error) {
+					var bops reconciler.BatchOperations[*testObject]
 					if batchOps {
-						cfg.BatchOperations = ops
+						bops = ops
 					}
-					return cfg
+					return reconciler.Register(
+						p,
+						testObjects,
+						(*testObject).Clone,
+						(*testObject).SetStatus,
+						(*testObject).GetStatus,
+						ops,
+						bops,
+						append(
+							[]reconciler.Option{
+								// Speed things up a bit.
+								reconciler.WithRetry(5*time.Millisecond, 5*time.Millisecond),
+								reconciler.WithRoundLimits(1000, rate.NewLimiter(1000.0, 10)),
+							},
+							// Add the override options last.
+							opts...,
+						)...,
+					)
 				}),
-				cell.Provide(reconciler.New[*testObject]),
 
 				cell.Invoke(func(r_ reconciler.Reconciler[*testObject], h *cell.SimpleHealth) {
 					r = r_
@@ -156,72 +156,76 @@ func testReconciler(t *testing.T, batchOps bool) {
 
 	numIterations := 3
 
-	runTest("incremental", nil, func(h testHelper) {
-		h.markInitialized()
-		for i := 0; i < numIterations; i++ {
-			t.Logf("Iteration %d", i)
+	runTest("incremental",
+		[]reconciler.Option{
+			reconciler.WithPruning(0), // Disable
+		},
+		func(h testHelper) {
+			h.markInitialized()
+			for i := 0; i < numIterations; i++ {
+				t.Logf("Iteration %d", i)
 
-			// Insert some test objects and check that they're reconciled
-			t.Logf("Inserting test objects 1, 2 & 3")
-			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.expectOp(opUpdate(ID_1))
-			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+				// Insert some test objects and check that they're reconciled
+				t.Logf("Inserting test objects 1, 2 & 3")
+				h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+				h.expectOp(opUpdate(ID_1))
+				h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 
-			h.insert(ID_2, NonFaulty, reconciler.StatusPending())
-			h.expectOp(opUpdate(ID_2))
-			h.expectStatus(ID_2, reconciler.StatusKindDone, "")
+				h.insert(ID_2, NonFaulty, reconciler.StatusPending())
+				h.expectOp(opUpdate(ID_2))
+				h.expectStatus(ID_2, reconciler.StatusKindDone, "")
 
-			h.insert(ID_3, NonFaulty, reconciler.StatusPending())
-			h.expectOp(opUpdate(ID_3))
-			h.expectStatus(ID_3, reconciler.StatusKindDone, "")
+				h.insert(ID_3, NonFaulty, reconciler.StatusPending())
+				h.expectOp(opUpdate(ID_3))
+				h.expectStatus(ID_3, reconciler.StatusKindDone, "")
 
-			h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
-			h.waitForReconciliation()
+				h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
+				h.waitForReconciliation()
 
-			// Set one to be faulty => object will error
-			t.Log("Setting '1' faulty")
-			h.insert(ID_1, Faulty, reconciler.StatusPending())
-			h.expectOp(opFail(opUpdate(ID_1)))
-			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
-			h.expectRetried(ID_1)
-			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
+				// Set one to be faulty => object will error
+				t.Log("Setting '1' faulty")
+				h.insert(ID_1, Faulty, reconciler.StatusPending())
+				h.expectOp(opFail(opUpdate(ID_1)))
+				h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
+				h.expectRetried(ID_1)
+				h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
 
-			// Fix the object => object will reconcile again.
-			t.Log("Setting '1' non-faulty")
-			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.expectOp(opUpdate(ID_1))
-			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
-			h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
+				// Fix the object => object will reconcile again.
+				t.Log("Setting '1' non-faulty")
+				h.insert(ID_1, NonFaulty, reconciler.StatusPending())
+				h.expectOp(opUpdate(ID_1))
+				h.expectStatus(ID_1, reconciler.StatusKindDone, "")
+				h.expectHealth(cell.StatusOK, "OK, 3 object(s)", "")
 
-			t.Log("Delete 1 & 2")
-			h.markForDelete(ID_1)
-			h.expectOp(opDelete(1))
-			h.expectNotFound(ID_1)
+				t.Log("Delete 1 & 2")
+				h.markForDelete(ID_1)
+				h.expectOp(opDelete(1))
+				h.expectNotFound(ID_1)
 
-			h.markForDelete(ID_2)
-			h.expectOp(opDelete(2))
-			h.expectNotFound(ID_2)
+				h.markForDelete(ID_2)
+				h.expectOp(opDelete(2))
+				h.expectNotFound(ID_2)
 
-			t.Log("Try to delete '3' with faulty ops")
-			h.setTargetFaulty(true)
-			h.markForDelete(ID_3)
-			h.expectOp(opFail(opDelete(3)))
-			h.expectHealth(cell.StatusDegraded, "1 error(s)", "delete fail")
+				t.Log("Try to delete '3' with faulty ops")
+				h.setTargetFaulty(true)
+				h.markForDelete(ID_3)
+				h.expectOp(opFail(opDelete(3)))
+				h.expectHealth(cell.StatusDegraded, "1 error(s)", "delete fail")
 
-			t.Log("Set the target non-faulty to delete '3'")
-			h.setTargetFaulty(false)
-			h.expectOp(opDelete(3))
-			h.expectHealth(cell.StatusOK, "OK, 0 object(s)", "")
+				t.Log("Set the target non-faulty to delete '3'")
+				h.setTargetFaulty(false)
+				h.expectOp(opDelete(3))
+				h.expectHealth(cell.StatusOK, "OK, 0 object(s)", "")
 
-			h.waitForReconciliation()
+				h.waitForReconciliation()
 
-			assert.Greater(t, getInt(h.m.ReconciliationCountVar.Get("test")), int64(0), "ReconciliationCount")
-			assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/update")), float64(0), "ReconciliationDuration/update")
-			assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/delete")), float64(0), "ReconciliationDuration/delete")
-			assert.Greater(t, getInt(h.m.ReconciliationTotalErrorsVar.Get("test")), int64(0), "ReconciliationTotalErrors")
-			assert.Equal(t, getInt(h.m.ReconciliationCurrentErrorsVar.Get("test")), int64(0), "ReconciliationCurrentErrors")
-		}
-	})
+				assert.Greater(t, getInt(h.m.ReconciliationCountVar.Get("test")), int64(0), "ReconciliationCount")
+				assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/update")), float64(0), "ReconciliationDuration/update")
+				assert.Greater(t, getFloat(h.m.ReconciliationDurationVar.Get("test/delete")), float64(0), "ReconciliationDuration/delete")
+				assert.Greater(t, getInt(h.m.ReconciliationTotalErrorsVar.Get("test")), int64(0), "ReconciliationTotalErrors")
+				assert.Equal(t, getInt(h.m.ReconciliationCurrentErrorsVar.Get("test")), int64(0), "ReconciliationCurrentErrors")
+			}
+		})
 
 	runTest("pruning", nil, func(h testHelper) {
 		// Without any objects, we should not be able to see a prune,
@@ -301,9 +305,9 @@ func testReconciler(t *testing.T, batchOps bool) {
 	})
 
 	runTest("refreshing",
-		func(cfg *reconciler.Config[*testObject]) {
-			cfg.PruneInterval = 0
-			cfg.RefreshInterval = 500 * time.Millisecond
+		[]reconciler.Option{
+			reconciler.WithPruning(0), // Disable
+			reconciler.WithRefreshing(500*time.Millisecond, rate.NewLimiter(100.0, 1)),
 		},
 		func(h testHelper) {
 			t.Logf("Inserting test object 1")
@@ -337,31 +341,6 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 			h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
 
-		})
-
-	runTest("defaultConfig",
-		func(cfg *reconciler.Config[*testObject]) {
-			// Only set the mandatory fields leaving everything else zero'd.
-			*cfg = reconciler.Config[*testObject]{
-				Table:           cfg.Table,
-				GetObjectStatus: cfg.GetObjectStatus,
-				SetObjectStatus: cfg.SetObjectStatus,
-				CloneObject:     cfg.CloneObject,
-				Operations:      cfg.Operations,
-			}
-		},
-		func(h testHelper) {
-			t.Logf("Inserting faulty object")
-			h.insert(ID_1, Faulty, reconciler.StatusPending())
-			h.expectOp(opFail(opUpdate(ID_1)))
-			h.expectRetried(ID_1)
-			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
-			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
-
-			t.Logf("Updating object to healthy")
-			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
-			h.expectOp(opUpdate(ID_1))
-			h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
 		})
 }
 

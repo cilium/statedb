@@ -107,7 +107,7 @@ func main() {
 		db *statedb.DB
 	)
 
-	testObjects, err := statedb.NewTable[*testObject]("test-objects", idIndex)
+	testObjects, err := statedb.NewTable("test-objects", idIndex)
 	if err != nil {
 		panic(err)
 	}
@@ -132,25 +132,24 @@ func main() {
 					return mt, mt
 				},
 			),
-			cell.Provide(func() reconciler.Config[*testObject] {
-				return reconciler.Config[*testObject]{
-					Table:                   testObjects,
-					PruneInterval:           0, // No pruning
-					RefreshInterval:         0, // No refreshing
-					RetryBackoffMinDuration: time.Millisecond,
-					RetryBackoffMaxDuration: 10 * time.Millisecond,
-					IncrementalRoundSize:    *incrBatchSize,
-					GetObjectStatus:         (*testObject).GetStatus,
-					SetObjectStatus:         (*testObject).SetStatus,
-					CloneObject:             (*testObject).Clone,
-					Operations:              mt,
+			cell.Invoke(func(params reconciler.Params) error {
+				_, err := reconciler.Register(
+					params,
 
-					// Run 1k rounds per second. With batch size of 1k this limits the
-					// benchmark to 1M objects per second.
-					RateLimiter: rate.NewLimiter(1000.0, 10),
-				}
+					testObjects,
+					(*testObject).Clone,
+					(*testObject).SetStatus,
+					(*testObject).GetStatus,
+					mt,
+					nil,
+
+					reconciler.WithRoundLimits(
+						*incrBatchSize,
+						rate.NewLimiter(1000.0, 10),
+					),
+				)
+				return err
 			}),
-			cell.Invoke(reconciler.Register[*testObject]),
 		),
 	)
 
