@@ -150,7 +150,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opFail(opUpdate(ID_1)))
 			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
 			h.expectRetried(ID_1)
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
 
 			// Fix the object => object will reconcile again.
 			t.Log("Setting '1' non-faulty")
@@ -172,7 +172,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.setTargetFaulty(true)
 			h.markForDelete(ID_3)
 			h.expectOp(opFail(opDelete(3)))
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "delete fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "delete fail")
 
 			t.Log("Set the target non-faulty to delete '3'")
 			h.setTargetFaulty(false)
@@ -239,7 +239,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 				opFail(opUpdate(ID_2)),
 				opFail(opUpdate(ID_3)),
 			)
-			h.expectHealth(cell.StatusDegraded, "3 failure(s)", "update fail")
+			h.expectHealth(cell.StatusDegraded, "3 error(s)", "update fail")
 
 			// Expect the objects to be retried also after the full reconciliation.
 			h.expectRetried(ID_1)

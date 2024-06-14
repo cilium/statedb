@@ -51,6 +51,14 @@ type retries struct {
 	waitChan    chan struct{}
 }
 
+func (rq *retries) errors() []error {
+	errs := make([]error, 0, len(rq.items))
+	for _, item := range rq.items {
+		errs = append(errs, item.lastError)
+	}
+	return errs
+}
+
 type retryItem struct {
 	object any // the object that is being retried. 'any' to avoid specializing this internal code.
 	rev    statedb.Revision
@@ -59,6 +67,7 @@ type retryItem struct {
 	index      int       // item's index in the priority queue
 	retryAt    time.Time // time at which to retry
 	numRetries int       // number of retries attempted (for calculating backoff)
+	lastError  error
 }
 
 // Wait returns a channel that is closed when there is an item to retry.
@@ -101,7 +110,7 @@ func (rq *retries) resetTimer() {
 	}
 }
 
-func (rq *retries) Add(obj any, rev statedb.Revision, delete bool) {
+func (rq *retries) Add(obj any, rev statedb.Revision, delete bool, lastError error) {
 	var (
 		item *retryItem
 		ok   bool
@@ -117,6 +126,7 @@ func (rq *retries) Add(obj any, rev statedb.Revision, delete bool) {
 	item.rev = rev
 	item.delete = delete
 	item.numRetries += 1
+	item.lastError = lastError
 	duration := rq.backoff.Duration(item.numRetries)
 	item.retryAt = time.Now().Add(duration)
 	heap.Push(&rq.queue, item)
