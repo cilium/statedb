@@ -163,7 +163,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 				fmt.Sprintf("OK, %d object(s)", r.Config.Table.NumObjects(txn)))
 		} else {
 			health.Degraded(
-				fmt.Sprintf("%d failure(s)", len(errs)),
+				fmt.Sprintf("%d error(s)", len(errs)),
 				joinErrors(errs))
 		}
 	}

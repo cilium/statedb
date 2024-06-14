@@ -186,6 +186,8 @@ type BatchEntry[Obj any] struct {
 	Object   Obj
 	Revision statedb.Revision
 	Result   error
+
+	original Obj
 }
 
 type BatchOperations[Obj any] interface {
@@ -306,10 +308,4 @@ func StatusError(err error) Status {
 		UpdatedAt: time.Now(),
 		Error:     err.Error(),
 	}
-}
-
-// opResult is the outcome from reconciling a single object
-type opResult struct {
-	rev    statedb.Revision // revision of the object
-	status Status           // the status to commit
 }

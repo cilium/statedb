@@ -4,6 +4,7 @@
 package reconciler
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -22,9 +23,14 @@ func TestRetries(t *testing.T) {
 
 	// Add objects to be retried in order. We assume here that 'time.Time' has
 	// enough granularity for these to be added with rising retryAt times.
-	rq.Add(obj1, 1, false)
-	rq.Add(obj2, 2, false)
-	rq.Add(obj3, 3, false)
+	err := errors.New("some error")
+	rq.Add(obj1, 1, false, err)
+	rq.Add(obj2, 2, false, err)
+	rq.Add(obj3, 3, false, err)
+
+	errs := rq.errors()
+	assert.Len(t, errs, 3)
+	assert.Equal(t, err, errs[0])
 
 	<-rq.Wait()
 	item, ok := rq.Top()
@@ -54,8 +60,8 @@ func TestRetries(t *testing.T) {
 
 	// Retry 'obj3' and since it was added back without clearing it'll be retried
 	// later. Add obj1 and check that 'obj3' has later retry time.
-	rq.Add(obj3, 4, false)
-	rq.Add(obj1, 5, false)
+	rq.Add(obj3, 4, false, err)
+	rq.Add(obj1, 5, false, err)
 
 	<-rq.Wait()
 	item, ok = rq.Top()
@@ -81,9 +87,10 @@ func TestRetries(t *testing.T) {
 	assert.False(t, ok)
 
 	// Test that object can be cleared from the queue without popping it.
-	rq.Add(obj1, 6, false)
-	rq.Add(obj2, 7, false)
-	rq.Add(obj3, 8, false)
+	rq.Add(obj1, 6, false, err)
+	rq.Add(obj2, 7, false, err)
+	rq.Add(obj3, 8, false, err)
+
 	rq.Clear(obj1) // Remove obj1, testing that it'll fix the queue correctly.
 	rq.Pop()       // Pop and remove obj2 and clear it to test that Clear doesn't mess with queue
 	rq.Clear(obj2)
