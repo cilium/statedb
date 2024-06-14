@@ -12,7 +12,7 @@ import (
 
 type Metrics interface {
 	ReconciliationDuration(moduleID cell.FullModuleID, operation string, duration time.Duration)
-	ReconciliationErrors(moduleID cell.FullModuleID, errs []error)
+	ReconciliationErrors(moduleID cell.FullModuleID, new, current int)
 
 	PruneError(moduleID cell.FullModuleID, err error)
 	PruneDuration(moduleID cell.FullModuleID, duration time.Duration)
@@ -54,12 +54,12 @@ func (m *ExpVarMetrics) ReconciliationDuration(moduleID cell.FullModuleID, opera
 	m.ReconciliationDurationVar.AddFloat(moduleID.String()+"/"+operation, duration.Seconds())
 }
 
-func (m *ExpVarMetrics) ReconciliationErrors(moduleID cell.FullModuleID, errs []error) {
+func (m *ExpVarMetrics) ReconciliationErrors(moduleID cell.FullModuleID, new, current int) {
 	m.ReconciliationCountVar.Add(moduleID.String(), 1)
-	m.ReconciliationTotalErrorsVar.Add(moduleID.String(), int64(len(errs)))
+	m.ReconciliationTotalErrorsVar.Add(moduleID.String(), int64(new))
 
 	var intVar expvar.Int
-	intVar.Set(int64(len(errs)))
+	intVar.Set(int64(current))
 	m.ReconciliationCurrentErrorsVar.Set(moduleID.String(), &intVar)
 }
 

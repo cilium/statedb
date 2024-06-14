@@ -184,7 +184,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opFail(opUpdate(ID_1)))
 			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
 			h.expectRetried(ID_1)
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
 
 			// Fix the object => object will reconcile again.
 			t.Log("Setting '1' non-faulty")
@@ -206,7 +206,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.setTargetFaulty(true)
 			h.markForDelete(ID_3)
 			h.expectOp(opFail(opDelete(3)))
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "delete fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "delete fail")
 
 			t.Log("Set the target non-faulty to delete '3'")
 			h.setTargetFaulty(false)
@@ -275,7 +275,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 		h.setTargetFaulty(true)
 		h.triggerPrune()
 		h.expectOps(opPrune(3))
-		h.expectHealth(cell.StatusDegraded, "1 failure(s)", "prune: prune fail")
+		h.expectHealth(cell.StatusDegraded, "1 error(s)", "prune: prune fail")
 
 		// Make the ops healthy again and try pruning again.
 		t.Log("Prune again with non-faulty ops")
@@ -328,12 +328,12 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opFail(opUpdateRefresh(ID_1)))
 			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
 			h.expectRetried(ID_1)
-			h.expectHealth(cell.StatusDegraded, "1 failure(s)", "update fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
 
 			t.Logf("Setting target healthy")
 			h.setTargetFaulty(false)
 			h.insert(ID_1, NonFaulty, status)
-			h.expectOp(opUpdate(ID_1))
+			h.expectOp(opUpdateRefresh(ID_1))
 			h.expectStatus(ID_1, reconciler.StatusKindDone, "")
 			h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
 
@@ -356,7 +356,7 @@ func testReconciler(t *testing.T, batchOps bool) {
 			h.expectOp(opFail(opUpdate(ID_1)))
 			h.expectRetried(ID_1)
 			h.expectStatus(ID_1, reconciler.StatusKindError, "update fail")
-			//h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
+			h.expectHealth(cell.StatusDegraded, "1 error(s)", "update fail")
 
 			t.Logf("Updating object to healthy")
 			h.insert(ID_1, NonFaulty, reconciler.StatusPending())
