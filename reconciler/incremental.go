@@ -146,7 +146,7 @@ func (round *incrementalRound[Obj]) batch(changes statedb.ChangeIterator[Obj]) {
 			if entry.Result != nil {
 				// Delete failed, queue a retry for it.
 				round.errs = append(round.errs, entry.Result)
-				round.retries.Add(entry.Object)
+				round.retries.Add(entry.Object, entry.Revision, true)
 			}
 		}
 	}
@@ -177,23 +177,13 @@ func (round *incrementalRound[Obj]) batch(changes statedb.ChangeIterator[Obj]) {
 func (round *incrementalRound[Obj]) processRetries() {
 	now := time.Now()
 	for round.numReconciled < round.config.IncrementalRoundSize {
-		robj, retryAt, ok := round.retries.Top()
-		if !ok || retryAt.After(now) {
+		item, ok := round.retries.Top()
+		if !ok || item.retryAt.After(now) {
 			break
 		}
 		round.retries.Pop()
 
-		obj, rev, found := round.table.Get(round.txn, round.primaryIndexer.QueryFromObject(robj.(Obj)))
-		if found {
-			status := round.config.GetObjectStatus(obj)
-			if status.Kind != StatusKindError {
-				continue
-			}
-		} else {
-			obj = robj.(Obj)
-		}
-
-		err := round.processSingle(obj, rev, !found)
+		err := round.processSingle(item.object.(Obj), item.rev, item.delete)
 		if err != nil {
 			round.errs = append(round.errs, err)
 		}
@@ -214,7 +204,7 @@ func (round *incrementalRound[Obj]) processSingle(obj Obj, rev statedb.Revision,
 		err = round.config.Operations.Delete(round.ctx, round.txn, obj)
 		if err != nil {
 			// Deletion failed. Retry again later.
-			round.retries.Add(obj)
+			round.retries.Add(obj, rev, true)
 		}
 	} else {
 		// Clone the object so it can be mutated by Update()
@@ -257,7 +247,7 @@ func (round *incrementalRound[Obj]) commitStatus() {
 		if result.status.Kind == StatusKindError {
 			// Reconciling the object failed, so add it to be retried now that its
 			// status is updated.
-			round.retries.Add(obj)
+			round.retries.Add(obj, result.rev, false)
 		}
 	}
 }

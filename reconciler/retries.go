@@ -8,6 +8,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
 )
 
@@ -51,7 +52,10 @@ type retries struct {
 }
 
 type retryItem struct {
-	object     any       // the object that is being retried. 'any' to avoid specializing this internal code.
+	object any // the object that is being retried. 'any' to avoid specializing this internal code.
+	rev    statedb.Revision
+	delete bool
+
 	index      int       // item's index in the priority queue
 	retryAt    time.Time // time at which to retry
 	numRetries int       // number of retries attempted (for calculating backoff)
@@ -63,12 +67,11 @@ func (rq *retries) Wait() <-chan struct{} {
 	return rq.waitChan
 }
 
-func (rq *retries) Top() (object any, retryAt time.Time, ok bool) {
+func (rq *retries) Top() (*retryItem, bool) {
 	if rq.queue.Len() == 0 {
-		return
+		return nil, false
 	}
-	item := rq.queue[0]
-	return item.object, item.retryAt, true
+	return rq.queue[0], true
 }
 
 func (rq *retries) Pop() {
@@ -98,7 +101,7 @@ func (rq *retries) resetTimer() {
 	}
 }
 
-func (rq *retries) Add(obj any) {
+func (rq *retries) Add(obj any, rev statedb.Revision, delete bool) {
 	var (
 		item *retryItem
 		ok   bool
@@ -111,6 +114,8 @@ func (rq *retries) Add(obj any) {
 		rq.items[string(key)] = item
 	}
 	item.object = obj
+	item.rev = rev
+	item.delete = delete
 	item.numRetries += 1
 	duration := rq.backoff.Duration(item.numRetries)
 	item.retryAt = time.Now().Add(duration)
