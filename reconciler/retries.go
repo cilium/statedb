@@ -86,6 +86,7 @@ func (rq *retries) Top() (*retryItem, bool) {
 func (rq *retries) Pop() {
 	// Pop the object from the queue, but leave it into the map until
 	// the object is cleared or re-added.
+	rq.queue[0].index = -1
 	heap.Pop(&rq.queue)
 
 	rq.resetTimer()
@@ -119,6 +120,7 @@ func (rq *retries) Add(obj any, rev statedb.Revision, delete bool, lastError err
 	if item, ok = rq.items[string(key)]; !ok {
 		item = &retryItem{
 			numRetries: 0,
+			index:      -1,
 		}
 		rq.items[string(key)] = item
 	}
@@ -129,10 +131,18 @@ func (rq *retries) Add(obj any, rev statedb.Revision, delete bool, lastError err
 	item.lastError = lastError
 	duration := rq.backoff.Duration(item.numRetries)
 	item.retryAt = time.Now().Add(duration)
-	heap.Push(&rq.queue, item)
 
-	// New item is at the top of the queue, reset the timer.
-	rq.resetTimer()
+	if item.index >= 0 {
+		// The item was already in the queue, fix up its position.
+		heap.Fix(&rq.queue, item.index)
+	} else {
+		heap.Push(&rq.queue, item)
+	}
+
+	// Item is at the head of the queue, reset the timer.
+	if item.index == 0 {
+		rq.resetTimer()
+	}
 }
 
 func (rq *retries) Clear(obj any) {
