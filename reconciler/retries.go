@@ -18,11 +18,11 @@ type exponentialBackoff struct {
 }
 
 func (e *exponentialBackoff) Duration(attempt int) time.Duration {
-	dur := time.Duration(float64(e.min) * math.Pow(2, float64(attempt)))
-	if dur > e.max {
-		dur = e.max
+	dur := float64(e.min) * math.Pow(2, float64(attempt))
+	if dur > float64(e.max) {
+		return e.max
 	}
-	return dur
+	return time.Duration(dur)
 }
 
 func newRetries(minDuration, maxDuration time.Duration, objectToKey func(any) index.Key) *retries {
