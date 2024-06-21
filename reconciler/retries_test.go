@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/statedb/index"
 )
@@ -102,5 +103,18 @@ func TestRetries(t *testing.T) {
 	}
 	_, ok = rq.Top()
 	assert.False(t, ok)
+}
 
+func TestExponentialBackoff(t *testing.T) {
+	backoff := exponentialBackoff{
+		min: time.Millisecond,
+		max: time.Second,
+	}
+
+	for i := 0; i < 1000; i++ {
+		dur := backoff.Duration(i)
+		require.GreaterOrEqual(t, dur, backoff.min)
+		require.LessOrEqual(t, dur, backoff.max)
+	}
+	require.Equal(t, backoff.Duration(0)*2, backoff.Duration(1))
 }
