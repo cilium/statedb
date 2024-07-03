@@ -594,6 +594,32 @@ func Test_prefix(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func Test_deleteEmptyKey(t *testing.T) {
+	tree := New[string]()
+
+	_, _, tree = tree.Insert([]byte{}, "x")
+
+	v, watch, ok := tree.Get([]byte{})
+	assert.True(t, ok)
+	assert.Equal(t, "x", v)
+	select {
+	case <-watch:
+		t.Fatalf("channel closed")
+	default:
+	}
+
+	_, _, tree = tree.Delete([]byte{})
+
+	_, _, ok = tree.Get([]byte{})
+	assert.False(t, ok)
+
+	select {
+	case <-watch:
+	default:
+		t.Fatalf("channel not closed")
+	}
+}
+
 func Test_txn(t *testing.T) {
 	tree := New[uint64]()
 	ins := func(n uint64) { _, _, tree = tree.Insert(uint64Key(n), n) }
