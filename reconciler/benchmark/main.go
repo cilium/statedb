@@ -205,7 +205,7 @@ func main() {
 	}
 
 	// Check that all statuses are correctly set.
-	iter, _ := testObjects.All(db.ReadTxn())
+	iter := testObjects.All(db.ReadTxn())
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 		if obj.status.Kind != reconciler.StatusKindDone {
 			log.Fatalf("Object with unexpected status: %#v", obj)

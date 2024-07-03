@@ -38,7 +38,7 @@ func TestFilter(t *testing.T) {
 	table.Insert(txn, &testObject{ID: 5})
 	txn.Commit()
 
-	iter, _ := table.All(db.ReadTxn())
+	iter := table.All(db.ReadTxn())
 	filtered := Collect(
 		Map(
 			Filter(

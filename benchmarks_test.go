@@ -342,7 +342,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		txn := db.ReadTxn()
-		iter, _ := table.All(txn)
+		iter := table.All(txn)
 		i := uint64(0)
 		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 			if obj.ID != i {
@@ -449,11 +449,11 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 
 		// Grab a watch channel on the second table
 		txn := db.ReadTxn()
-		_, watch2 := table2.All(txn)
+		_, watch2 := table2.AllWatch(txn)
 
 		// Propagate the batch from first table to the second table
 		var iter Iterator[testObject]
-		iter, watch1 = table1.LowerBound(txn, ByRevision[testObject](revision))
+		iter, watch1 = table1.LowerBoundWatch(txn, ByRevision[testObject](revision))
 		wtxn = db.WriteTxn(table2)
 		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 			table2.Insert(wtxn, testObject2(obj))

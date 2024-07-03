@@ -106,8 +106,7 @@ func TestDerive(t *testing.T) {
 
 	getDerived := func() []derived {
 		txn := db.ReadTxn()
-		iter, _ := outTable.All(txn)
-		objs := Collect(iter)
+		objs := Collect(outTable.All(txn))
 		// Log so we can trace the failed eventually calls
 		t.Logf("derived: %+v", objs)
 		return objs

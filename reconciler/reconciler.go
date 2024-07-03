@@ -111,7 +111,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 // prune performs the Prune operation to delete unexpected objects in the target system.
 func (r *reconciler[Obj]) prune(ctx context.Context, txn statedb.ReadTxn) error {
-	iter, _ := r.config.Table.All(txn)
+	iter := r.config.Table.All(txn)
 	start := time.Now()
 	err := r.config.Operations.Prune(ctx, txn, iter)
 	if err != nil {
@@ -145,7 +145,7 @@ outer:
 		// Iterate over the objects in revision order, e.g. oldest modification first.
 		// We look for objects that are older than [RefreshInterval] and mark them for
 		// pending in order for them to be reconciled again.
-		iter, _ := r.config.Table.LowerBound(r.DB.ReadTxn(), statedb.ByRevision[Obj](lastRevision+1))
+		iter := r.config.Table.LowerBound(r.DB.ReadTxn(), statedb.ByRevision[Obj](lastRevision+1))
 		indexer := r.config.Table.PrimaryIndexer()
 		for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
 			status := r.config.GetObjectStatus(obj)
