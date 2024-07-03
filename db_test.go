@@ -169,7 +169,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	txn := db.ReadTxn()
 
-	iter, watch := table.LowerBound(txn, ByRevision[testObject](0))
+	iter, watch := table.LowerBoundWatch(txn, ByRevision[testObject](0))
 	obj, rev, ok := iter.Next()
 	require.True(t, ok, "expected ByRevision(rev1) to return results")
 	require.EqualValues(t, 42, obj.ID)
@@ -181,7 +181,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 	_, _, ok = iter.Next()
 	require.False(t, ok)
 
-	iter, _ = table.LowerBound(txn, ByRevision[testObject](prevRev+1))
+	iter, _ = table.LowerBoundWatch(txn, ByRevision[testObject](prevRev+1))
 	obj, _, ok = iter.Next()
 	require.True(t, ok, "expected ByRevision(rev2) to return results")
 	require.EqualValues(t, 71, obj.ID)
@@ -208,7 +208,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 	}
 
 	txn = db.ReadTxn()
-	iter, _ = table.LowerBound(txn, ByRevision[testObject](rev+1))
+	iter, _ = table.LowerBoundWatch(txn, ByRevision[testObject](rev+1))
 	obj, _, ok = iter.Next()
 	require.True(t, ok, "expected ByRevision(rev2+1) to return results")
 	require.EqualValues(t, 71, obj.ID)
@@ -234,7 +234,7 @@ func TestDB_Prefix(t *testing.T) {
 
 	txn := db.ReadTxn()
 
-	iter, watch := table.Prefix(txn, tagsIndex.Query("ab"))
+	iter, watch := table.PrefixWatch(txn, tagsIndex.Query("ab"))
 	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82})
 
 	select {
@@ -270,7 +270,7 @@ func TestDB_Prefix(t *testing.T) {
 	}
 
 	txn = db.ReadTxn()
-	iter, _ = table.Prefix(txn, tagsIndex.Query("ab"))
+	iter = table.Prefix(txn, tagsIndex.Query("ab"))
 	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82, 99})
 }
 
@@ -332,7 +332,7 @@ func TestDB_EventIterator(t *testing.T) {
 
 	// 1 object should exist.
 	txn := db.ReadTxn()
-	iterAll, _ := table.All(txn)
+	iterAll := table.All(txn)
 	objs := Collect(iterAll)
 	require.Len(t, objs, 1)
 
@@ -539,7 +539,7 @@ func TestDB_All(t *testing.T) {
 		require.NoError(t, err, "Insert failed")
 		_, _, err = table.Insert(txn, testObject{ID: uint64(3)})
 		require.NoError(t, err, "Insert failed")
-		iter, _ := table.All(txn)
+		iter := table.All(txn)
 		objs := Collect(iter)
 		require.Len(t, objs, 3)
 		require.EqualValues(t, 1, objs[0].ID)
@@ -549,7 +549,7 @@ func TestDB_All(t *testing.T) {
 	}
 
 	txn := db.ReadTxn()
-	iter, watch := table.All(txn)
+	iter, watch := table.AllWatch(txn)
 	objs := Collect(iter)
 	require.Len(t, objs, 3)
 	require.EqualValues(t, 1, objs[0].ID)
@@ -571,7 +571,7 @@ func TestDB_All(t *testing.T) {
 	}
 
 	// Prior read transaction not affected by delete.
-	iter, _ = table.All(txn)
+	iter = table.All(txn)
 	objs = Collect(iter)
 	require.Len(t, objs, 3)
 
@@ -764,7 +764,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 		require.ErrorIs(t, ErrObjectNotFound, err)
 		require.False(t, hadOld)
 
-		objs, _ := table.All(wtxn)
+		objs := table.All(wtxn)
 		require.Len(t, Collect(objs), 0)
 
 		wtxn.Abort()
@@ -852,29 +852,24 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 
 	txn := db.WriteTxn(table)
 
-	iter, _ := table.All(txn)
-	require.Len(t, Collect(iter), 0)
+	require.Len(t, Collect(table.All(txn)), 0)
 
 	_, _, err := table.Insert(txn, testObject{ID: 1})
 	require.NoError(t, err, "Insert failed")
 
-	iter, _ = table.All(txn)
-	require.Len(t, Collect(iter), 1)
+	require.Len(t, Collect(table.All(txn)), 1)
 
 	_, hadOld, _ := table.Delete(txn, testObject{ID: 1})
 	require.True(t, hadOld)
-	iter, _ = table.All(txn)
-	require.Len(t, Collect(iter), 0)
+	require.Len(t, Collect(table.All(txn)), 0)
 
 	_, _, err = table.Insert(txn, testObject{ID: 2})
 	require.NoError(t, err, "Insert failed")
-	iter, _ = table.All(txn)
-	require.Len(t, Collect(iter), 1)
+	require.Len(t, Collect(table.All(txn)), 1)
 
 	txn.Commit()
 
-	iter, _ = table.All(db.ReadTxn())
-	require.Len(t, Collect(iter), 1)
+	require.Len(t, Collect(table.All(db.ReadTxn())), 1)
 }
 
 func TestDB_Initialization(t *testing.T) {

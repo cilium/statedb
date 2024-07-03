@@ -140,7 +140,7 @@ func (a *realActionLog) validateTable(txn statedb.ReadTxn, table statedb.Table[f
 	// Since everything was deleted we can clear the log entries for this table now
 	a.log[table.Name()] = nil
 
-	iter, _ := table.All(txn)
+	iter := table.All(txn)
 	actual := map[string]struct{}{}
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 		actual[obj.id] = struct{}{}
@@ -247,7 +247,7 @@ func deleteManyAction(ctx actionContext) {
 	// nothing bad happens when the iterator is used while deleting.
 	toDelete := ctx.table.NumObjects(ctx.txn) / 3
 
-	iter, _ := ctx.table.All(ctx.txn)
+	iter := ctx.table.All(ctx.txn)
 	n := 0
 	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
 		ctx.log.log("%s: DeleteMany %s (%d/%d)", ctx.table.Name(), obj.id, n+1, toDelete)
@@ -267,7 +267,7 @@ func deleteManyAction(ctx actionContext) {
 }
 
 func allAction(ctx actionContext) {
-	iter, _ := ctx.table.All(ctx.txn)
+	iter := ctx.table.All(ctx.txn)
 	ctx.log.log("%s: All => %d found", ctx.table.Name(), len(statedb.Collect(iter)))
 }
 
@@ -319,13 +319,13 @@ func getAction(ctx actionContext) {
 
 func lowerboundAction(ctx actionContext) {
 	id := mkID()
-	iter, _ := ctx.table.LowerBound(ctx.txn, idIndex.Query(id))
+	iter, _ := ctx.table.LowerBoundWatch(ctx.txn, idIndex.Query(id))
 	ctx.log.log("%s: LowerBound(%s) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
 func prefixAction(ctx actionContext) {
 	id := mkID()
-	iter, _ := ctx.table.Prefix(ctx.txn, idIndex.Query(id))
+	iter := ctx.table.Prefix(ctx.txn, idIndex.Query(id))
 	ctx.log.log("%s: Prefix(%s) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
@@ -417,7 +417,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			// Validate that the observed changes match with the database state at this
 			// snapshot.
 			state2 := maps.Clone(state)
-			iterAll, _ := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](0))
+			iterAll := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](0))
 			for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
 				change, found := state[obj.id]
 				if !found {
