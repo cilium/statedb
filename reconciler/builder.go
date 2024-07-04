@@ -48,6 +48,7 @@ func Register[Obj comparable](
 		SetObjectStatus: setStatus,
 		CloneObject:     clone,
 		Operations:      ops,
+		BatchOperations: batchOps,
 		options:         defaultOptions(),
 	}
 	for _, opt := range options {
