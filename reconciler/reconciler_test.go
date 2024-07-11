@@ -8,6 +8,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -18,7 +19,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
-	"golang.org/x/exp/slices"
 	"golang.org/x/time/rate"
 
 	"github.com/cilium/hive"
