@@ -57,6 +57,11 @@ func TestStringMap(t *testing.T) {
 		"3_three": 3,
 	})
 
+	// Setting on a copy doeen't affect original
+	m.Set("4_four", 4)
+	_, ok = m.Get("4_four")
+	assert.False(t, ok, "Get non-existing")
+
 	// Getting a non-existing value still does the same.
 	v, ok = m.Get("nonexisting")
 	assert.False(t, ok, "Get non-existing")
@@ -98,8 +103,15 @@ func TestStringMap(t *testing.T) {
 
 	assert.Equal(t, 3, m.Len())
 
+	mOld := m
 	m = m.Delete(kvs[0].k)
 	_, ok = m.Get(kvs[0].k)
+	assert.False(t, ok, "Get after Delete")
+
+	_, ok = mOld.Get(kvs[0].k)
+	assert.True(t, ok, "Original modified by Delete")
+	mOld = mOld.Delete(kvs[0].k)
+	_, ok = mOld.Get(kvs[0].k)
 	assert.False(t, ok, "Get after Delete")
 
 	assert.Equal(t, 2, m.Len())

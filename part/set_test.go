@@ -39,12 +39,18 @@ func TestStringSet(t *testing.T) {
 
 	assert.Equal(t, 2, s3.Len())
 
-	s3 = s3.Delete("foo")
-	assert.False(t, s3.Has("foo"), "s3 has no foo")
+	s5 := s3.Delete("foo")
+	assert.True(t, s3.Has("foo"), "s3 has foo")
+	assert.False(t, s5.Has("foo"), "s3 has no foo")
 
-	assert.Equal(t, 1, s3.Len())
+	// Deleting again does the same.
+	s5 = s3.Delete("foo")
+	assert.False(t, s5.Has("foo"), "s3 has no foo")
 
-	xs := s3.Slice()
+	assert.Equal(t, 2, s3.Len())
+	assert.Equal(t, 1, s5.Len())
+
+	xs := s5.Slice()
 	assert.Len(t, xs, 1)
 	assert.Equal(t, "bar", xs[0])
 }
