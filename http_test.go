@@ -151,11 +151,18 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 	require.NoError(t, <-errs, "LowerBound(0)")
 	require.Len(t, items, 4)
 
-	changeIter, errs := remoteTable.Changes(ctx)
+	changes, errs := remoteTable.Changes(ctx)
+	// Consume the changes via a channel so it is easier to assert.
+	changesChan := make(chan Change[testObject], 1)
+	go func() {
+		defer close(changesChan)
+		for change := range changes {
+			changesChan <- change
+		}
+	}()
+
 	for _, item := range items {
-		change, rev, ok := changeIter.Next()
-		require.True(t, ok)
-		assert.NotZero(t, rev)
+		change := <-changesChan
 		assert.NotZero(t, change.Revision)
 		assert.False(t, change.Deleted)
 		assert.Equal(t, item.ID, change.Object.ID)
@@ -168,23 +175,19 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 	require.NoError(t, err, "Delete")
 	wtxn.Commit()
 
-	change, rev, ok := changeIter.Next()
-	require.True(t, ok)
-	assert.NotZero(t, rev)
+	change := <-changesChan
 	assert.NotZero(t, change.Revision)
 	assert.False(t, change.Deleted)
 	assert.EqualValues(t, 5, change.Object.ID)
 
-	change, rev, ok = changeIter.Next()
-	require.True(t, ok)
-	assert.NotZero(t, rev)
+	change = <-changesChan
 	assert.NotZero(t, change.Revision)
 	assert.True(t, change.Deleted)
 	assert.EqualValues(t, 1, change.Object.ID)
 
 	cancel()
 
-	change, _, ok = changeIter.Next()
+	change, ok := <-changesChan
 	assert.False(t, ok)
 
 	err = <-errs

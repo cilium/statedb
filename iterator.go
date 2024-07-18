@@ -4,29 +4,114 @@
 package statedb
 
 import (
-	"bytes"
 	"fmt"
+	"iter"
+	"slices"
+
+	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/part"
 )
 
 // Collect creates a slice of objects out of the iterator.
 // The iterator is consumed in the process.
-func Collect[Obj any](iter Iterator[Obj]) []Obj {
-	objs := []Obj{}
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
-		objs = append(objs, obj)
-	}
-	return objs
+func Collect[Obj any](seq iter.Seq2[Obj, Revision]) []Obj {
+	return slices.Collect(ToSeq(seq))
 }
 
-// ProcessEach invokes the given function for each object provided by the iterator.
-func ProcessEach[Obj any, It Iterator[Obj]](iter It, fn func(Obj, Revision) error) (err error) {
-	for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
-		err = fn(obj, rev)
-		if err != nil {
-			return
+// Map a function over a sequence of objects returned by
+// a query.
+func Map[In, Out any](seq iter.Seq2[In, Revision], fn func(In) Out) iter.Seq2[Out, Revision] {
+	return func(yield func(Out, Revision) bool) {
+		for obj, rev := range seq {
+			if !yield(fn(obj), rev) {
+				break
+			}
 		}
 	}
-	return
+}
+
+func Filter[Obj any](seq iter.Seq2[Obj, Revision], keep func(Obj) bool) iter.Seq2[Obj, Revision] {
+	return func(yield func(Obj, Revision) bool) {
+		for obj, rev := range seq {
+			if keep(obj) {
+				if !yield(obj, rev) {
+					break
+				}
+			}
+		}
+	}
+}
+
+// ToSeq takes a Seq2 and produces a Seq with the first element of the pair.
+func ToSeq[A, B any](seq iter.Seq2[A, B]) iter.Seq[A] {
+	return func(yield func(A) bool) {
+		for x, _ := range seq {
+			if !yield(x) {
+				break
+			}
+		}
+	}
+}
+
+// partSeq returns a sequence of objects from a part Iterator.
+func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
+	return func(yield func(Obj, Revision) bool) {
+		// Iterate over a clone of the original iterator to allow the sequence to be iterated
+		// from scratch multiple times.
+		it := iter.Clone()
+		for {
+			_, iobj, ok := it.Next()
+			if !ok {
+				break
+			}
+			if !yield(iobj.data.(Obj), iobj.revision) {
+				break
+			}
+		}
+	}
+}
+
+// nonUniqueSeq returns a sequence of objects for a non-unique index.
+// Non-unique indexes work by concatenating the secondary key with the
+// primary key and then prefix searching for the items:
+//
+//	<secondary><primary><secondary length>
+//	^^^^^^^^^^^
+//
+// Since the primary key can be of any length and we're prefix searching,
+// we need to iterate over all objects matching the prefix and only emitting
+// those which have the correct secondary key length.
+// For example if we search for the key "aaaa", then we might have the following
+// matches (_ is just delimiting, not part of the key):
+//
+//	aaaa_bbb4
+//	aaa_abab3
+//	aaaa_ccc4
+//
+// We yield "aaaa_bbb4", skip "aaa_abab3" and yield "aaaa_ccc4".
+func nonUniqueSeq[Obj any](iter *part.Iterator[object], searchKey []byte) iter.Seq2[Obj, Revision] {
+	return func(yield func(Obj, Revision) bool) {
+		// Clone the iterator to allow multiple iterations over the sequence.
+		it := iter.Clone()
+		for {
+			key, iobj, ok := it.Next()
+			if !ok {
+				break
+			}
+
+			_, secondary := decodeNonUniqueKey(key)
+
+			// The secondary key doesn't match the search key. Since the primary
+			// key length can vary, we need to continue the prefix search.
+			if len(secondary) != len(searchKey) {
+				continue
+			}
+
+			if !yield(iobj.data.(Obj), iobj.revision) {
+				break
+			}
+		}
+	}
 }
 
 // iterator adapts the "any" object iterator to a typed object.
@@ -36,111 +121,6 @@ type iterator[Obj any] struct {
 
 func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 	_, iobj, ok := it.iter.Next()
-	if ok {
-		obj = iobj.data.(Obj)
-		revision = iobj.revision
-	}
-	return
-}
-
-// Map applies a function to transform every object returned by the iterator
-func Map[In, Out any, It Iterator[In]](iter It, transform func(In) Out) Iterator[Out] {
-	return &mapIterator[In, Out]{
-		iter:      iter,
-		transform: transform,
-	}
-}
-
-type mapIterator[In, Out any] struct {
-	iter      Iterator[In]
-	transform func(In) Out
-}
-
-func (it *mapIterator[In, Out]) Next() (out Out, revision Revision, ok bool) {
-	obj, rev, ok := it.iter.Next()
-	if ok {
-		return it.transform(obj), rev, true
-	}
-	return
-}
-
-// Filter includes objects for which the supplied predicate returns true
-func Filter[Obj any, It Iterator[Obj]](iter It, pred func(Obj) bool) Iterator[Obj] {
-	return &filterIterator[Obj]{
-		iter: iter,
-		pred: pred,
-	}
-}
-
-type filterIterator[Obj any] struct {
-	iter Iterator[Obj]
-	pred func(Obj) bool
-}
-
-func (it *filterIterator[Obj]) Next() (out Obj, revision Revision, ok bool) {
-	for {
-		out, revision, ok = it.iter.Next()
-		if !ok {
-			break
-		}
-		if it.pred(out) {
-			return out, revision, true
-		}
-	}
-	return
-}
-
-// uniqueIterator iterates over objects in a unique index. Since
-// we find the node by prefix search, we may see a key that shares
-// the search prefix but is longer. We skip those objects.
-type uniqueIterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
-	key  []byte
-}
-
-func (it *uniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
-	var iobj object
-	for {
-		var key []byte
-		key, iobj, ok = it.iter.Next()
-		if !ok || bytes.Equal(key, it.key) {
-			break
-		}
-	}
-	if ok {
-		obj = iobj.data.(Obj)
-		revision = iobj.revision
-	}
-	return
-}
-
-// nonUniqueIterator iterates over a non-unique index. Since we seek by prefix and don't
-// require that indexers terminate the keys, the iterator checks that the prefix
-// has the right length.
-type nonUniqueIterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
-	key  []byte
-}
-
-func (it *nonUniqueIterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
-	var iobj object
-	for {
-		var key []byte
-		key, iobj, ok = it.iter.Next()
-		if !ok {
-			return
-		}
-		_, secondary := decodeNonUniqueKey(key)
-
-		// Equal length implies equal key since we got here via
-		// prefix search and all child nodes share the same prefix.
-		if len(secondary) == len(it.key) {
-			break
-		}
-
-		// This node has a longer secondary key that shares our search
-		// prefix, skip it.
-	}
 	if ok {
 		obj = iobj.data.(Obj)
 		revision = iobj.revision
@@ -215,34 +195,54 @@ type changeIterator[Obj any] struct {
 	watch    <-chan struct{}
 }
 
-func (it *changeIterator[Obj]) Next() (ev Change[Obj], revision uint64, ok bool) {
-	if it.iter == nil {
-		return
-	}
-	ev.Object, revision, ev.Deleted, ok = it.iter.Next()
-	if !ok {
+func (it *changeIterator[Obj]) refresh(txn ReadTxn, updateRevision, deleteRevision Revision) {
+	indexTxn := txn.getTxn().mustIndexReadTxn(it.table, RevisionIndexPos)
+	updateIter := &iterator[Obj]{indexTxn.LowerBound(index.Uint64(updateRevision))}
+	deleteIter := it.dt.deleted(txn, deleteRevision)
+	it.iter = NewDualIterator(deleteIter, updateIter)
+
+	// It is enough to watch the revision index and not the graveyard since
+	// any object that is inserted into the graveyard will be deleted from
+	// the revision index.
+	it.watch = indexTxn.RootWatch()
+}
+
+func (it *changeIterator[Obj]) Changes() iter.Seq2[Change[Obj], Revision] {
+	return func(yield func(Change[Obj], Revision) bool) {
+		if it.iter == nil {
+			return
+		}
+		for obj, rev, deleted, ok := it.iter.Next(); ok; obj, rev, deleted, ok = it.iter.Next() {
+			it.revision = rev
+			if deleted {
+				it.dt.mark(rev)
+			}
+			change := Change[Obj]{
+				Object:   obj,
+				Revision: rev,
+				Deleted:  deleted,
+			}
+			if !yield(change, rev) {
+				return
+			}
+		}
 		it.iter = nil
-		return
 	}
-	ev.Revision = revision
-	it.revision = revision
-	if ev.Deleted {
-		it.dt.mark(revision)
-	}
-	return
 }
 
 // nextAny is for implementing the /changes HTTP API where the concrete object
 // type is not known.
-func (it *changeIterator[Obj]) nextAny() (ev Change[any], revision uint64, ok bool) {
-	var evTyped Change[Obj]
-	evTyped, revision, ok = it.Next()
-	ev = Change[any]{
-		Object:   evTyped.Object,
-		Revision: evTyped.Revision,
-		Deleted:  evTyped.Deleted,
+func (it *changeIterator[Obj]) changesAny() iter.Seq2[Change[any], Revision] {
+	return func(yield func(Change[any], Revision) bool) {
+		it.Changes()(
+			func(change Change[Obj], rev Revision) bool {
+				return yield(Change[any]{
+					Object:   change.Object,
+					Revision: change.Revision,
+					Deleted:  change.Deleted,
+				}, rev)
+			})
 	}
-	return
 }
 
 func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
@@ -257,20 +257,13 @@ func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
 			return it.watch
 		}
 
-		updateIter, watch := it.table.LowerBoundWatch(txn, ByRevision[Obj](it.revision+1))
-		deleteIter := it.dt.deleted(txn, it.revision+1)
-		it.iter = NewDualIterator(deleteIter, updateIter)
-
-		// It is enough to watch the revision index and not the graveyard since
-		// any object that is inserted into the graveyard will be deleted from
-		// the revision index.
-		it.watch = watch
-
-		// Return a closed watch channel to immediately trigger iteration.
-		return closedWatchChannel
+		// Watch channel has closed so something has changed. Refresh
+		// the iterator to pull in the new changes.
+		newRev := it.revision + 1
+		it.refresh(txn, newRev, newRev)
 	}
 
-	// Iterator not consumed yet, return a closed channel to trigger iteration.
+	// Iterator not exhausted yet, return a closed channel.
 	return closedWatchChannel
 }
 
@@ -282,7 +275,7 @@ func (it *changeIterator[Obj]) Close() {
 }
 
 type anyChangeIterator interface {
-	nextAny() (ev Change[any], revision uint64, ok bool)
+	changesAny() iter.Seq2[Change[any], Revision]
 	Watch(ReadTxn) <-chan struct{}
 	Close()
 }

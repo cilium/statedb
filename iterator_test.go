@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestFilter(t *testing.T) {
+func TestCollectFilterMapToSeq(t *testing.T) {
 	type testObject struct {
 		ID int
 	}
@@ -54,4 +54,12 @@ func TestFilter(t *testing.T) {
 	)
 	assert.Len(t, filtered, 2)
 	assert.Equal(t, []int{2, 4}, filtered)
+
+	count := 0
+	for obj := range ToSeq(iter) {
+		assert.Greater(t, obj.ID, 0)
+		count++
+	}
+	assert.Equal(t, 5, count)
+
 }

@@ -1,6 +1,6 @@
 module github.com/cilium/statedb
 
-go 1.22.0
+go 1.23
 
 require (
 	github.com/cilium/hive v0.0.0-20240209163124-bd6ebb4ec11d

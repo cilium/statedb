@@ -6,6 +6,7 @@ package reconciler_test
 import (
 	"context"
 	"errors"
+	"iter"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func (m *multiMockOps) Delete(context.Context, statedb.ReadTxn, *multiStatusObje
 }
 
 // Prune implements reconciler.Operations.
-func (m *multiMockOps) Prune(context.Context, statedb.ReadTxn, statedb.Iterator[*multiStatusObject]) error {
+func (m *multiMockOps) Prune(context.Context, statedb.ReadTxn, iter.Seq2[*multiStatusObject, statedb.Revision]) error {
 	return nil
 }
 

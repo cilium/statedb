@@ -7,6 +7,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"iter"
 	"log"
 	"log/slog"
 	"os"
@@ -64,7 +65,7 @@ func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, obj *testObj
 }
 
 // Prune implements reconciler.Operations.
-func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*testObject]) error {
+func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter.Seq2[*testObject, statedb.Revision]) error {
 	return nil
 }
 
@@ -205,8 +206,7 @@ func main() {
 	}
 
 	// Check that all statuses are correctly set.
-	iter := testObjects.All(db.ReadTxn())
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+	for obj := range testObjects.All(db.ReadTxn()) {
 		if obj.status.Kind != reconciler.StatusKindDone {
 			log.Fatalf("Object with unexpected status: %#v", obj)
 		}
