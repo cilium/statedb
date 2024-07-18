@@ -5,12 +5,23 @@ package part
 
 import (
 	"bytes"
+	"slices"
 	"sort"
 )
 
 // Iterator for key and value pairs where value is of type T
 type Iterator[T any] struct {
 	next [][]*header[T] // sets of edges to explore
+}
+
+// Clone returns a copy of the iterator, allowing restarting
+// the iterator from scratch.
+func (it *Iterator[T]) Clone() *Iterator[T] {
+	next := make([][]*header[T], len(it.next))
+	for i := range next {
+		next[i] = slices.Clone(it.next[i])
+	}
+	return &Iterator[T]{next}
 }
 
 // Next returns the next key, value and true if the value exists,

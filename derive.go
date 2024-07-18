@@ -79,8 +79,8 @@ func (d derive[In, Out]) loop(ctx context.Context, _ cell.Health) error {
 	defer iter.Close()
 	for {
 		wtxn := d.DB.WriteTxn(out)
-		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-			outObj, result := d.transform(ev.Object, ev.Deleted)
+		for change := range iter.Changes() {
+			outObj, result := d.transform(change.Object, change.Deleted)
 			switch result {
 			case DeriveInsert:
 				_, _, err = out.Insert(wtxn, outObj)

@@ -36,10 +36,12 @@ func (to *observable[Obj]) Observe(ctx context.Context, next func(Change[Obj]), 
 		defer complete(nil)
 
 		for {
-			for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-				next(ev)
+			for change := range iter.Changes() {
+				if ctx.Err() != nil {
+					break
+				}
+				next(change)
 			}
-
 			select {
 			case <-ctx.Done():
 				return

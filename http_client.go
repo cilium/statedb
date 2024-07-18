@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
 	"net/http"
 	"net/url"
 )
@@ -43,7 +44,7 @@ func (t *RemoteTable[Obj]) SetTransport(tr *http.Transport) {
 	t.client.Transport = tr
 }
 
-func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[Obj]) (iter Iterator[Obj], errChan <-chan error) {
+func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[Obj]) (seq iter.Seq2[Obj, Revision], errChan <-chan error) {
 	// Use a channel to return errors so we can use the same Iterator[Obj] interface as StateDB does.
 	errChanSend := make(chan error, 1)
 	errChan = errChanSend
@@ -75,13 +76,14 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 		errChanSend <- err
 		return
 	}
-	return &remoteGetIterator[Obj]{json.NewDecoder(resp.Body), errChanSend}, errChan
+	return remoteGetSeq[Obj](json.NewDecoder(resp.Body), errChanSend), errChan
 }
-func (t *RemoteTable[Obj]) Get(ctx context.Context, q Query[Obj]) (Iterator[Obj], <-chan error) {
+
+func (t *RemoteTable[Obj]) Get(ctx context.Context, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan error) {
 	return t.query(ctx, false, q)
 }
 
-func (t *RemoteTable[Obj]) LowerBound(ctx context.Context, q Query[Obj]) (Iterator[Obj], <-chan error) {
+func (t *RemoteTable[Obj]) LowerBound(ctx context.Context, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan error) {
 	return t.query(ctx, true, q)
 }
 
@@ -124,4 +126,31 @@ func (it *remoteGetIterator[Obj]) Next() (obj Obj, revision Revision, ok bool) {
 	revision = resp.Rev
 	ok = true
 	return
+}
+
+func remoteGetSeq[Obj any](dec *json.Decoder, errChan chan error) iter.Seq2[Obj, Revision] {
+	return func(yield func(Obj, Revision) bool) {
+		for {
+			var resp responseObject[Obj]
+			err := dec.Decode(&resp)
+			errString := ""
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					close(errChan)
+					break
+				}
+				errString = "Decode error: " + err.Error()
+			} else {
+				errString = resp.Err
+			}
+			if errString != "" {
+				errChan <- errors.New(errString)
+				break
+			}
+			if !yield(resp.Obj, resp.Rev) {
+				break
+			}
+		}
+	}
+
 }
