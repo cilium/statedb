@@ -169,24 +169,28 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 
 	txn := db.ReadTxn()
 
-	iter, watch := table.LowerBoundWatch(txn, ByRevision[testObject](0))
-	obj, rev, ok := iter.Next()
-	require.True(t, ok, "expected ByRevision(rev1) to return results")
-	require.EqualValues(t, 42, obj.ID)
-	prevRev := rev
-	obj, rev, ok = iter.Next()
-	require.True(t, ok)
-	require.EqualValues(t, 71, obj.ID)
-	require.Greater(t, rev, prevRev)
-	_, _, ok = iter.Next()
-	require.False(t, ok)
+	seq, watch := table.LowerBoundWatch(txn, ByRevision[testObject](0))
+	expected := []uint64{42, 71}
+	revs := map[uint64]Revision{}
+	var prevRev Revision
+	for obj, rev := range seq {
+		require.NotEmpty(t, expected)
+		require.EqualValues(t, expected[0], obj.ID)
+		require.Greater(t, rev, prevRev)
+		expected = expected[1:]
+		prevRev = rev
+		revs[obj.ID] = rev
+	}
 
-	iter, _ = table.LowerBoundWatch(txn, ByRevision[testObject](prevRev+1))
-	obj, _, ok = iter.Next()
-	require.True(t, ok, "expected ByRevision(rev2) to return results")
-	require.EqualValues(t, 71, obj.ID)
-	_, _, ok = iter.Next()
-	require.False(t, ok)
+	expected = []uint64{71}
+	seq = table.LowerBound(txn, ByRevision[testObject](revs[42]+1))
+	for obj, rev := range seq {
+		require.NotEmpty(t, expected)
+		require.EqualValues(t, expected[0], obj.ID)
+		require.EqualValues(t, revs[obj.ID], rev)
+		expected = expected[1:]
+	}
+	require.Empty(t, expected)
 
 	select {
 	case <-watch:
@@ -208,12 +212,14 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 	}
 
 	txn = db.ReadTxn()
-	iter, _ = table.LowerBoundWatch(txn, ByRevision[testObject](rev+1))
-	obj, _, ok = iter.Next()
-	require.True(t, ok, "expected ByRevision(rev2+1) to return results")
-	require.EqualValues(t, 71, obj.ID)
-	_, _, ok = iter.Next()
-	require.False(t, ok)
+	seq = table.LowerBound(txn, ByRevision[testObject](revs[42]+1))
+	expected = []uint64{71}
+	for obj, _ := range seq {
+		require.NotEmpty(t, expected)
+		require.EqualValues(t, expected[0], obj.ID)
+		expected = expected[1:]
+	}
+	require.Empty(t, expected)
 }
 
 func TestDB_Prefix(t *testing.T) {
@@ -347,8 +353,8 @@ func TestDB_Changes(t *testing.T) {
 	nDeleted := 0
 
 	// Observe the objects that existed when the tracker was created.
-	for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-		if ev.Deleted {
+	for change := range iter.Changes() {
+		if change.Deleted {
 			nDeleted++
 		} else {
 			nExist++
@@ -359,8 +365,9 @@ func TestDB_Changes(t *testing.T) {
 
 	// Wait for the new changes.
 	<-iter.Watch(txn)
-	for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-		if ev.Deleted {
+
+	for change := range iter.Changes() {
+		if change.Deleted {
 			nDeleted++
 			nExist--
 		} else {
@@ -378,8 +385,8 @@ func TestDB_Changes(t *testing.T) {
 	nExist = 0
 	nDeleted = 0
 
-	for ev, _, ok := iter2.Next(); ok; ev, _, ok = iter2.Next() {
-		if ev.Deleted {
+	for change := range iter2.Changes() {
+		if change.Deleted {
 			nDeleted++
 		} else {
 			nExist++
@@ -387,8 +394,8 @@ func TestDB_Changes(t *testing.T) {
 	}
 	<-iter2.Watch(txn)
 
-	for ev, _, ok := iter2.Next(); ok; ev, _, ok = iter2.Next() {
-		if ev.Deleted {
+	for change := range iter2.Changes() {
+		if change.Deleted {
 			nDeleted++
 			nExist--
 		} else {
@@ -418,21 +425,18 @@ func TestDB_Changes(t *testing.T) {
 	<-iter.Watch(txn)
 	<-iter2.Watch(txn)
 
-	ev, _, ok := iter.Next()
-	assert.True(t, ok)
-	assert.EqualValues(t, 88, ev.Object.ID)
-	assert.False(t, ev.Deleted)
+	changes := Collect(iter.Changes())
+	changes2 := Collect(iter2.Changes())
+	assert.Equal(t, len(changes), len(changes2), "expected same number of changes from both iterators")
 
-	ev, _, ok = iter2.Next()
-	assert.True(t, ok)
-	assert.EqualValues(t, 88, ev.Object.ID)
-	assert.False(t, ev.Deleted)
-
-	ev, _, ok = iter.Next()
-	assert.False(t, ok)
-
-	ev, _, ok = iter2.Next()
-	assert.False(t, ok)
+	if assert.Len(t, changes, 1, "expected one change") {
+		change := changes[0]
+		change2 := changes2[0]
+		assert.EqualValues(t, 88, change.Object.ID)
+		assert.EqualValues(t, 88, change2.Object.ID)
+		assert.False(t, change.Deleted)
+		assert.False(t, change2.Deleted)
+	}
 
 	// After closing the first iterator, deletes are still tracked for second one.
 	// Delete the remaining objects.
@@ -452,16 +456,12 @@ func TestDB_Changes(t *testing.T) {
 	txn = db.ReadTxn()
 	<-iter2.Watch(txn)
 
-	ev, _, ok = iter2.Next()
-	assert.True(t, ok)
-	assert.True(t, ev.Deleted)
-
-	ev, _, ok = iter2.Next()
-	assert.True(t, ok)
-	assert.True(t, ev.Deleted)
-
-	ev, _, ok = iter2.Next()
-	assert.False(t, ok)
+	count := 0
+	for change := range iter2.Changes() {
+		count++
+		assert.True(t, change.Deleted, "expected object %d to be deleted", change.Object.ID)
+	}
+	assert.Equal(t, 2, count)
 
 	eventuallyGraveyardIsEmpty(t, db)
 

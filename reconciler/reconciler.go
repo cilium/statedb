@@ -87,7 +87,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 		// Perform incremental reconciliation and retries of previously failed
 		// objects.
-		errs := r.incremental(ctx, txn, changes)
+		errs := r.incremental(ctx, txn, changes.Changes())
 
 		if tableInitialized && (prune || externalPrune) {
 			if err := r.prune(ctx, txn); err != nil {
@@ -141,9 +141,10 @@ func (r *reconciler[Obj]) refreshLoop(ctx context.Context, health cell.Health) e
 		// Iterate over the objects in revision order, e.g. oldest modification first.
 		// We look for objects that are older than [RefreshInterval] and mark them for
 		// refresh in order for them to be reconciled again.
-		iter := r.config.Table.LowerBound(r.DB.ReadTxn(), statedb.ByRevision[Obj](lastRevision+1))
+		seq := r.config.Table.LowerBound(r.DB.ReadTxn(), statedb.ByRevision[Obj](lastRevision+1))
 		indexer := r.config.Table.PrimaryIndexer()
-		for obj, rev, ok := iter.Next(); ok; obj, rev, ok = iter.Next() {
+
+		for obj, rev := range seq {
 			status := r.config.GetObjectStatus(obj)
 
 			// The duration elapsed since this object was last updated.

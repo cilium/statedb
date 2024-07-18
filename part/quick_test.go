@@ -1,6 +1,7 @@
 package part_test
 
 import (
+	"slices"
 	"testing"
 	"testing/quick"
 
@@ -28,6 +29,54 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 
 	require.NoError(t,
 		quick.CheckEqual(insert, get, nil),
+	)
+}
+
+func TestQuick_IteratorReuse(t *testing.T) {
+	tree := part.New[string]()
+
+	iterate := func(key, value string, cloneFirst bool) bool {
+		_, _, tree = tree.Insert([]byte(key), value)
+		v, _, ok := tree.Get([]byte(key))
+		if !ok || value != v {
+			return false
+		}
+
+		prefixIter, _ := tree.Prefix([]byte(key))
+		iterators := []*part.Iterator[string]{
+			tree.LowerBound([]byte(key)),
+			prefixIter,
+			tree.Iterator(),
+		}
+
+		for _, iter := range iterators {
+			iter2 := iter.Clone()
+
+			collect := func(it *part.Iterator[string]) (out []string) {
+				for k, v, ok := it.Next(); ok; k, v, ok = it.Next() {
+					out = append(out, string(k)+"="+v)
+				}
+				return
+			}
+
+			var fst, snd []string
+			if cloneFirst {
+				snd = collect(iter2)
+				fst = collect(iter)
+			} else {
+				fst = collect(iter)
+				snd = collect(iter2)
+			}
+
+			if !slices.Equal(fst, snd) {
+				return false
+			}
+		}
+		return true
+	}
+
+	require.NoError(t,
+		quick.Check(iterate, nil),
 	)
 }
 

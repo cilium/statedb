@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"iter"
 	"math/rand"
 	"sort"
 	"testing"
@@ -270,17 +271,18 @@ func BenchmarkDB_Changes(b *testing.B) {
 		txn.Commit()
 
 		// Iterator created before insertions should be empty.
-		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-			b.Fatalf("did not expect change: %v", ev)
+		for change := range iter.Changes() {
+			b.Fatalf("did not expect change: %v", change)
 		}
 
 		// Refresh to observe the insertions.
 		<-iter.Watch(db.ReadTxn())
 		nDeleted := 0
 		nExists := 0
-		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-			if ev.Deleted {
-				b.Fatalf("expected create for %v", ev)
+
+		for change := range iter.Changes() {
+			if change.Deleted {
+				b.Fatalf("expected create for %v", change)
 			}
 			nExists++
 		}
@@ -293,12 +295,12 @@ func BenchmarkDB_Changes(b *testing.B) {
 
 		// Refresh to observe the deletions.
 		<-iter.Watch(db.ReadTxn())
-		for ev, _, ok := iter.Next(); ok; ev, _, ok = iter.Next() {
-			if ev.Deleted {
+		for change := range iter.Changes() {
+			if change.Deleted {
 				nDeleted++
 				nExists--
 			} else {
-				b.Fatalf("expected deleted for %v", ev)
+				b.Fatalf("expected deleted for %v", change)
 			}
 		}
 		require.EqualValues(b, numObjectsToInsert, nDeleted)
@@ -378,9 +380,8 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		txn := db.ReadTxn()
-		iter := table.All(txn)
 		i := uint64(0)
-		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+		for obj := range table.All(txn) {
 			if obj.ID != i {
 				b.Fatalf("expected ID %d, got %d", i, obj.ID)
 			}
@@ -488,10 +489,10 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		_, watch2 := table2.AllWatch(txn)
 
 		// Propagate the batch from first table to the second table
-		var iter Iterator[testObject]
-		iter, watch1 = table1.LowerBoundWatch(txn, ByRevision[testObject](revision))
+		var seq iter.Seq2[testObject, Revision]
+		seq, watch1 = table1.LowerBoundWatch(txn, ByRevision[testObject](revision))
 		wtxn = db.WriteTxn(table2)
-		for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+		for obj := range seq {
 			table2.Insert(wtxn, testObject2(obj))
 		}
 		wtxn.Commit()

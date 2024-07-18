@@ -187,7 +187,7 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 
 	for {
-		for change, _, ok := changeIter.nextAny(); ok; change, _, ok = changeIter.nextAny() {
+		for change := range changeIter.changesAny() {
 			err := enc.Encode(change)
 			if err != nil {
 				panic(err)

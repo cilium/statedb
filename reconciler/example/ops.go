@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"iter"
 	"log/slog"
 	"os"
 	"path"
@@ -42,9 +43,10 @@ func (ops *MemoOps) Delete(ctx context.Context, txn statedb.ReadTxn, memo *Memo)
 }
 
 // Prune unexpected memos.
-func (ops *MemoOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*Memo]) error {
+func (ops *MemoOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter.Seq2[*Memo, statedb.Revision]) error {
 	expected := map[string]struct{}{}
-	for memo, _, ok := iter.Next(); ok; memo, _, ok = iter.Next() {
+
+	for memo := range objects {
 		expected[memo.Name] = struct{}{}
 	}
 

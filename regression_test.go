@@ -88,8 +88,9 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	wtxn.Commit()
 
 	n := 0
-	_, _, ok := changes.Next()
-	require.False(t, ok, "expected no changes")
+	for change := range changes.Changes() {
+		t.Fatalf("did not expect changes, got: %v", change)
+	}
 
 	// On first call to Watch() the iterator is refreshed and a closed watch channel
 	// is returned.
@@ -114,7 +115,7 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	}
 	watch = changes.Watch(db.ReadTxn())
 	n = 0
-	for change, _, ok := changes.Next(); ok; change, _, ok = changes.Next() {
+	for change := range changes.Changes() {
 		require.False(t, change.Deleted, "not deleted")
 		n++
 	}
@@ -128,9 +129,10 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	// Partially observe the changes
 	<-watch
 	changes.Watch(db.ReadTxn())
-	change, _, ok := changes.Next()
-	require.True(t, ok)
-	require.True(t, change.Deleted, "expected Deleted")
+	for change := range changes.Changes() {
+		require.True(t, change.Deleted, "expected Deleted")
+		break
+	}
 
 	// Calling Watch again after partially consuming the iterator
 	// should return a closed watch channel.
@@ -142,7 +144,7 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 
 	// Consume the rest of the deletions.
 	n = 1
-	for change, _, ok := changes.Next(); ok; change, _, ok = changes.Next() {
+	for change := range changes.Changes() {
 		require.True(t, change.Deleted, "expected Deleted")
 		n++
 	}

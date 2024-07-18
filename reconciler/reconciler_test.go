@@ -8,6 +8,7 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"iter"
 	"slices"
 	"sort"
 	"strings"
@@ -492,11 +493,11 @@ func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, obj *testObj
 }
 
 // Prune implements reconciler.Operations.
-func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, iter statedb.Iterator[*testObject]) error {
+func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter.Seq2[*testObject, statedb.Revision]) error {
 	if mt.faulty.Load() {
 		return errors.New("prune fail")
 	}
-	objs := statedb.Collect(iter)
+	objs := statedb.Collect(objects)
 	mt.history.add(opPrune(len(objs)))
 	return nil
 }

@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"fmt"
+	"iter"
 	"slices"
 	"strings"
 	"sync"
@@ -283,55 +284,67 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 	return
 }
 
-func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) Iterator[Obj] {
+func (t *genTable[Obj]) LowerBound(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.LowerBoundWatch(txn, q)
 	return iter
 }
 
-func (t *genTable[Obj]) LowerBoundWatch(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
+func (t *genTable[Obj]) LowerBoundWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
 	// Since LowerBound query may be invalidated by changes in another branch
 	// of the tree, we cannot just simply watch the node we seeked to. Instead
 	// we watch the whole table for changes.
 	watch := indexTxn.RootWatch()
 	iter := indexTxn.LowerBound(q.key)
-	return &iterator[Obj]{iter}, watch
+	return partSeq[Obj](iter), watch
 }
 
-func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) Iterator[Obj] {
+func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.PrefixWatch(txn, q)
 	return iter
 }
 
-func (t *genTable[Obj]) PrefixWatch(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
+func (t *genTable[Obj]) PrefixWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.Prefix(q.key)
-	return &iterator[Obj]{iter}, watch
+	return partSeq[Obj](iter), watch
 }
 
-func (t *genTable[Obj]) All(txn ReadTxn) Iterator[Obj] {
+func (t *genTable[Obj]) All(txn ReadTxn) iter.Seq2[Obj, Revision] {
 	iter, _ := t.AllWatch(txn)
 	return iter
 }
 
-func (t *genTable[Obj]) AllWatch(txn ReadTxn) (Iterator[Obj], <-chan struct{}) {
+func (t *genTable[Obj]) AllWatch(txn ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, PrimaryIndexPos)
-	watch := indexTxn.RootWatch()
-	return &iterator[Obj]{indexTxn.Iterator()}, watch
+	return partSeq[Obj](indexTxn.Iterator()), indexTxn.RootWatch()
 }
 
-func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) Iterator[Obj] {
+func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.ListWatch(txn, q)
 	return iter
 }
 
-func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (Iterator[Obj], <-chan struct{}) {
+func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
-	iter, watch := indexTxn.Prefix(q.key)
 	if indexTxn.unique {
-		return &uniqueIterator[Obj]{iter, q.key}, watch
+		// Unique index means that there can be only a single matching object.
+		// Doing a Get() is more efficient than constructing an iterator.
+		value, watch, ok := indexTxn.Get(q.key)
+		seq := func(yield func(Obj, Revision) bool) {
+			if ok {
+				yield(value.data.(Obj), value.revision)
+			}
+		}
+		return seq, watch
 	}
-	return &nonUniqueIterator[Obj]{iter, q.key}, watch
+
+	// For a non-unique index we do a prefix search. The keys are of
+	// form <secondary key><primary key><secondary key length>, and thus the
+	// iteration will continue until key length mismatches, e.g. we hit a
+	// longer key sharing the same prefix.
+	iter, watch := indexTxn.Prefix(q.key)
+	return nonUniqueSeq[Obj](iter, q.key), watch
 }
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
@@ -383,9 +396,8 @@ func (t *genTable[Obj]) CompareAndDelete(txn WriteTxn, rev Revision, obj Obj) (o
 }
 
 func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
-	iter := t.All(txn)
 	itxn := txn.getTxn()
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+	for obj := range t.All(txn) {
 		_, _, err := itxn.delete(t, Revision(0), obj)
 		if err != nil {
 			return err
@@ -414,10 +426,15 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	}
 
 	// Prepare the iterator
-	updateIter, watch := t.LowerBoundWatch(txn, ByRevision[Obj](0)) // observe all current objects
-	deleteIter := iter.dt.deleted(txn, iter.dt.getRevision())       // only observe new deletions
-	iter.iter = NewDualIterator(deleteIter, updateIter)
-	iter.watch = watch
+	iter.refresh(
+		txn,
+
+		// iterate over all existing objects by starting from rev 0
+		0,
+
+		// don't iterate over objects deleted in the past.
+		iter.dt.getRevision(),
+	)
 
 	return iter, nil
 }
