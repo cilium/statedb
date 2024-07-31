@@ -68,6 +68,9 @@ func (txn *txn) getRevision(meta TableMeta) Revision {
 // indexReadTxn returns a transaction to read from the specific index.
 // If the table or index is not found this returns nil & error.
 func (txn *txn) indexReadTxn(meta TableMeta, indexPos int) (indexReadTxn, error) {
+	if meta.tablePos() < 0 {
+		return indexReadTxn{}, tableError(meta.Name(), ErrTableNotRegistered)
+	}
 	if txn.modifiedTables != nil {
 		entry := txn.modifiedTables[meta.tablePos()]
 		if entry != nil {
