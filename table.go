@@ -48,6 +48,7 @@ func NewTable[Obj any](
 		primaryIndexer:       primaryIndexer,
 		secondaryAnyIndexers: make(map[string]anyIndexer, len(secondaryIndexers)),
 		indexPositions:       make(map[string]int),
+		pos:                  -1,
 	}
 
 	table.indexPositions[primaryIndexer.indexName()] = PrimaryIndexPos
