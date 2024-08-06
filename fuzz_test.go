@@ -140,9 +140,8 @@ func (a *realActionLog) validateTable(txn statedb.ReadTxn, table statedb.Table[f
 	// Since everything was deleted we can clear the log entries for this table now
 	a.log[table.Name()] = nil
 
-	iter := table.All(txn)
 	actual := map[string]struct{}{}
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+	for obj := range table.All(txn) {
 		actual[obj.id] = struct{}{}
 	}
 	diff := setSymmetricDifference(actual, alive)
@@ -247,9 +246,8 @@ func deleteManyAction(ctx actionContext) {
 	// nothing bad happens when the iterator is used while deleting.
 	toDelete := ctx.table.NumObjects(ctx.txn) / 3
 
-	iter := ctx.table.All(ctx.txn)
 	n := 0
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+	for obj := range ctx.table.All(ctx.txn) {
 		ctx.log.log("%s: DeleteMany %s (%d/%d)", ctx.table.Name(), obj.id, n+1, toDelete)
 		_, hadOld, _ := ctx.table.Delete(ctx.txn, obj)
 		if !hadOld {
@@ -273,24 +271,19 @@ func allAction(ctx actionContext) {
 
 func listAction(ctx actionContext) {
 	value := mkValue()
-	iter := ctx.table.List(ctx.txn, valueIndex.Query(value))
-	ctx.log.log("%s: Get(%d)", ctx.table.Name(), value)
-	for obj, _, ok := iter.Next(); ok; obj, _, ok = iter.Next() {
+	values := ctx.table.List(ctx.txn, valueIndex.Query(value))
+	ctx.log.log("%s: List(%d)", ctx.table.Name(), value)
+	for obj := range values {
 		if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), obj.id}]; ok2 {
 			if e.act == actInsert {
-				if !ok {
-					panic("Get() returned not found, expected last inserted value")
-				}
 				if e.value != obj.value {
-					panic("Get() did not return the last write")
+					panic("List() did not return the last write")
 				}
 				if obj.value != value {
 					panic(fmt.Sprintf("Get() returned object with wrong value, expected %d, got %d", value, obj.value))
 				}
 			} else if e.act == actDelete {
-				if ok {
-					panic("Get() returned value even though it was deleted")
-				}
+				panic("List() returned value even though it was deleted")
 			}
 		}
 	}
@@ -388,7 +381,7 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	var prevRev statedb.Revision
 	for {
 		newChanges := false
-		for change, rev, ok := iter.Next(); ok; change, rev, ok = iter.Next() {
+		for change, rev := range iter.Changes() {
 			newChanges = true
 			log.log("%d: %v", rev, change)
 
@@ -417,8 +410,8 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			// Validate that the observed changes match with the database state at this
 			// snapshot.
 			state2 := maps.Clone(state)
-			iterAll := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](0))
-			for obj, rev, ok := iterAll.Next(); ok; obj, rev, ok = iterAll.Next() {
+			allObjects := tableFuzz1.LowerBound(txn, statedb.ByRevision[fuzzObj](0))
+			for obj, rev := range allObjects {
 				change, found := state[obj.id]
 				if !found {
 					panic(fmt.Sprintf("trackerWorker: object %s not found from state", obj.id))
