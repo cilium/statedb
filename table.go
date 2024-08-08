@@ -173,7 +173,7 @@ func (t *genTable[Obj]) Initialized(txn ReadTxn) bool {
 	return len(t.PendingInitializers(txn)) == 0
 }
 func (t *genTable[Obj]) PendingInitializers(txn ReadTxn) []string {
-	return txn.getTxn().root[t.pos].pendingInitializers
+	return txn.getTxn().getTableEntry(t).pendingInitializers
 }
 
 func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(WriteTxn) {
@@ -201,12 +201,12 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 }
 
 func (t *genTable[Obj]) Revision(txn ReadTxn) Revision {
-	return txn.getTxn().getRevision(t)
+	return txn.getTxn().getTableEntry(t).revision
 }
 
 func (t *genTable[Obj]) NumObjects(txn ReadTxn) int {
-	table := &txn.getTxn().root[t.tablePos()]
-	return table.indexes[PrimaryIndexPos].tree.Len()
+	table := txn.getTxn().getTableEntry(t)
+	return table.numObjects()
 }
 
 func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
