@@ -526,6 +526,29 @@ func TestDB_Observable(t *testing.T) {
 	require.False(t, ok, "expected channel to close, got event: %+v", ev)
 }
 
+func TestDB_NumObjects(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t)
+	rtxn := db.ReadTxn()
+	assert.Equal(t, 0, table.NumObjects(rtxn))
+
+	txn := db.WriteTxn(table)
+	assert.Equal(t, 0, table.NumObjects(txn))
+	table.Insert(txn, testObject{ID: uint64(1)})
+	assert.Equal(t, 1, table.NumObjects(txn))
+	table.Insert(txn, testObject{ID: uint64(1)})
+	table.Insert(txn, testObject{ID: uint64(2)})
+	assert.Equal(t, 2, table.NumObjects(txn))
+
+	assert.Equal(t, 0, table.NumObjects(rtxn))
+	txn.Commit()
+	assert.Equal(t, 0, table.NumObjects(rtxn))
+
+	rtxn = db.ReadTxn()
+	assert.Equal(t, 2, table.NumObjects(rtxn))
+}
+
 func TestDB_All(t *testing.T) {
 	t.Parallel()
 
@@ -888,6 +911,7 @@ func TestDB_Initialization(t *testing.T) {
 
 	wtxn = db.WriteTxn(table)
 	done1(wtxn)
+	require.False(t, table.Initialized(txn), "Initialized should be false")
 	wtxn.Commit()
 
 	// Old read transaction unaffected.
@@ -900,10 +924,11 @@ func TestDB_Initialization(t *testing.T) {
 
 	wtxn = db.WriteTxn(table)
 	done2(wtxn)
+	assert.True(t, table.Initialized(wtxn), "Initialized should be true")
 	wtxn.Commit()
 
 	txn = db.ReadTxn()
-	require.True(t, table.Initialized(txn), "Initialized should be false")
+	require.True(t, table.Initialized(txn), "Initialized should be true")
 	require.Empty(t, table.PendingInitializers(txn), "There should be no pending initializers")
 }
 
