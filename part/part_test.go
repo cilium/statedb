@@ -472,6 +472,30 @@ func Test_insert(t *testing.T) {
 	}
 }
 
+func Test_modify(t *testing.T) {
+	tree := New[int]()
+	key := []byte{1}
+
+	// Modify without the value existing inserts it.
+	_, _, tree = tree.Modify(key, func(x int) int { return 1 })
+
+	v, _, ok := tree.Get(key)
+	require.True(t, ok)
+	require.Equal(t, 1, v)
+
+	txn := tree.Txn()
+	for i := range 10000 {
+		old, hadOld := txn.Modify(key, func(x int) int { return x + 1 })
+		require.True(t, hadOld)
+		require.Equal(t, i+1, old)
+	}
+	tree = txn.Commit()
+
+	v, _, ok = tree.Get(key)
+	require.True(t, ok)
+	require.Equal(t, 10001, v)
+}
+
 func Test_replaceRoot(t *testing.T) {
 	tree := New[int]()
 	keyA := []byte{'a'}
@@ -996,6 +1020,38 @@ func benchmark_Insert(b *testing.B, opts ...Option) {
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
+	tree := New[int](RootOnlyWatch)
+	keys := [][]byte{}
+	for i := 0; i < numObjectsToInsert; i++ {
+		key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
+		_, _, tree = tree.Insert(key, numObjectsToInsert+i)
+		keys = append(keys, key)
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		txn := tree.Txn()
+		for _, key := range keys {
+			if doGetInsert {
+				v, _, _ := txn.Get(key)
+				txn.Insert(key, v)
+			} else {
+				txn.Modify(key, func(x int) int { return x })
+			}
+		}
+		tree = txn.Commit()
+	}
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Modify(b *testing.B) {
+	benchmark_Modify_vs_GetInsert(b, false)
+}
+
+func Benchmark_GetInsert(b *testing.B) {
+	benchmark_Modify_vs_GetInsert(b, true)
 }
 
 func Benchmark_Replace(b *testing.B) {
