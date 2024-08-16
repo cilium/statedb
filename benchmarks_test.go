@@ -104,6 +104,55 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_Modify(b *testing.B) {
+	benchmarkDB_Modify_vs_GetInsert(b, false)
+}
+
+func BenchmarkDB_GetInsert(b *testing.B) {
+	benchmarkDB_Modify_vs_GetInsert(b, true)
+}
+
+func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+
+	ids := []uint64{}
+	for i := 0; i < numObjectsToInsert; i++ {
+		ids = append(ids, uint64(i))
+	}
+	rand.Shuffle(numObjectsToInsert, func(i, j int) {
+		ids[i], ids[j] = ids[j], ids[i]
+	})
+	txn := db.WriteTxn(table)
+	for _, id := range ids {
+		_, _, err := table.Insert(txn, testObject{ID: id})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+	}
+	txn.Commit()
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		txn := db.WriteTxn(table)
+		for _, id := range ids {
+			if doGetInsert {
+				old, _, _ := table.Get(txn, idIndex.Query(id))
+				table.Insert(txn, old)
+			} else {
+				table.Modify(
+					txn,
+					testObject{ID: id},
+					func(old testObject, new testObject) testObject {
+						return new
+					})
+			}
+		}
+		txn.Commit()
+	}
+	b.ReportMetric(float64(b.N*len(ids))/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_RandomInsert(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	ids := []uint64{}

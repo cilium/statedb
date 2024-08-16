@@ -311,6 +311,18 @@ func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, 
 	return
 }
 
+func (t *genTable[Obj]) Modify(txn WriteTxn, obj Obj, merge func(old, new Obj) Obj) (oldObj Obj, hadOld bool, err error) {
+	var old object
+	old, hadOld, err = txn.getTxn().modify(t, Revision(0), obj,
+		func(old any) any {
+			return merge(old.(Obj), obj)
+		})
+	if hadOld {
+		oldObj = old.data.(Obj)
+	}
+	return
+}
+
 func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	var old object
 	old, hadOld, err = txn.getTxn().insert(t, rev, obj)

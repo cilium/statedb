@@ -605,6 +605,44 @@ func TestDB_All(t *testing.T) {
 	}
 }
 
+func TestDB_Modify(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	txn := db.WriteTxn(table)
+
+	// Modifying a non-existing object is effectively an Insert.
+	_, hadOld, err := table.Modify(txn, testObject{ID: uint64(1), Tags: part.NewSet("foo")}, func(old, new testObject) testObject {
+		t.Fatalf("merge unepectedly called")
+		return new
+	})
+	require.NoError(t, err, "Modify failed")
+	require.False(t, hadOld, "expected hadOld to be false")
+
+	mergeCalled := false
+	_, hadOld, err = table.Modify(txn, testObject{ID: uint64(1)}, func(old, new testObject) testObject {
+		mergeCalled = true
+		// Merge the old and new tags.
+		new.Tags = old.Tags.Set("bar")
+		return new
+	})
+	require.NoError(t, err, "Modify failed")
+	require.True(t, hadOld, "expected hadOld to be true")
+	require.True(t, mergeCalled, "expected merge() to be called")
+
+	obj, _, found := table.Get(txn, idIndex.Query(1))
+	require.True(t, found)
+	require.True(t, obj.Tags.Has("foo"))
+	require.True(t, obj.Tags.Has("bar"))
+
+	txn.Commit()
+
+	objs := Collect(table.All(db.ReadTxn()))
+	require.Len(t, objs, 1)
+	require.EqualValues(t, 1, objs[0].ID)
+}
+
 func TestDB_Revision(t *testing.T) {
 	t.Parallel()
 
