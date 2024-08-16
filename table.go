@@ -215,11 +215,32 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64
 }
 
 func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
+	// Since we're not returning an iterator here we can optimize and not use
+	// indexReadTxn which clones if this is a WriteTxn (to avoid invalidating iterators).
+	indexPos := t.indexPos(q.index)
+	itxn := txn.getTxn()
+	var (
+		ops    part.Ops[object]
+		unique bool
+	)
+	if itxn.modifiedTables != nil && itxn.modifiedTables[t.tablePos()] != nil {
+		var err error
+		iwtxn, err := itxn.indexWriteTxn(t, indexPos)
+		if err != nil {
+			panic(err)
+		}
+		ops = iwtxn.Txn
+		unique = iwtxn.unique
+	} else {
+		entry := itxn.root[t.tablePos()].indexes[indexPos]
+		ops = entry.tree
+		unique = entry.unique
+	}
+
 	var iobj object
-	if indexTxn.unique {
+	if unique {
 		// On a unique index we can do a direct get rather than a prefix search.
-		iobj, watch, ok = indexTxn.Get(q.key)
+		iobj, watch, ok = ops.Get(q.key)
 		if !ok {
 			return
 		}
@@ -229,7 +250,7 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 	}
 
 	// For a non-unique index we need to do a prefix search.
-	iter, watch := indexTxn.Prefix(q.key)
+	iter, watch := ops.Prefix(q.key)
 	for {
 		var key []byte
 		key, iobj, ok = iter.Next()
