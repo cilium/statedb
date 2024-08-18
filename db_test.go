@@ -274,7 +274,7 @@ func TestDB_Prefix(t *testing.T) {
 	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82, 99})
 }
 
-func TestDB_EventIterator(t *testing.T) {
+func TestDB_Changes(t *testing.T) {
 	t.Parallel()
 
 	db, table, metrics := newTestDB(t, tagsIndex)
@@ -303,6 +303,9 @@ func TestDB_EventIterator(t *testing.T) {
 	wtxn.Commit()
 
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
+
+	// The initial watch channel is closed, so users can either iterate first or watch first.
+	<-iter.Watch(db.ReadTxn())
 
 	// Delete 2/3 objects
 	{
