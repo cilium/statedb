@@ -52,51 +52,42 @@ func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	n := b.N
 	b.ResetTimer()
+
 	for n > 0 {
 		txn := db.WriteTxn(table)
-		for j := 0; j < batchSize; j++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(j)})
+		toWrite := min(n, batchSize)
+		for i := range toWrite {
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
 		}
 		txn.Commit()
-		n -= batchSize
+		n -= toWrite
 	}
-	txn := db.WriteTxn(table)
-	for j := 0; j < n; j++ {
-		_, _, err := table.Insert(txn, testObject{ID: uint64(j)})
-		if err != nil {
-			b.Fatalf("Insert error: %s", err)
-		}
-	}
-	txn.Commit()
+
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	batchSize := 100
 	n := b.N
-	tags := []string{"test"}
+	tagSet := part.NewSet("test")
+
 	for n > 0 {
 		txn := db.WriteTxn(table)
-		for j := 0; j < 100; j++ {
-			_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewSet(tags...)})
+		toWrite := min(n, batchSize)
+		for i := range toWrite {
+			_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: tagSet})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
 			}
 		}
 		txn.Commit()
-		n -= 100
+		n -= toWrite
 	}
-	txn := db.WriteTxn(table)
-	for j := 0; j < n; j++ {
-		_, _, err := table.Insert(txn, testObject{ID: uint64(j), Tags: part.NewSet(tags...)})
-		if err != nil {
-			b.Fatalf("Insert error: %s", err)
-		}
-	}
-	txn.Commit()
+
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
