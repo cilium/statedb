@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -68,12 +69,12 @@ func TestDerive(t *testing.T) {
 	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
 		t.Logf("transform(%v, %v)", obj, deleted)
 
-		tag, _ := obj.Tags.All().Next()
-		if obj.Tags.Len() > 0 && tag == "skip" {
+		tags := slices.Collect(obj.Tags.All())
+		if obj.Tags.Len() > 0 && tags[0] == "skip" {
 			return derived{}, DeriveSkip
 		}
 		if deleted {
-			if obj.Tags.Len() > 0 && tag == "delete" {
+			if obj.Tags.Len() > 0 && tags[0] == "delete" {
 				return derived{ID: obj.ID}, DeriveDelete
 			}
 			return derived{ID: obj.ID, Deleted: true}, DeriveUpdate

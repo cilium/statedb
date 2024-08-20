@@ -597,6 +597,7 @@ func Test_prefix(t *testing.T) {
 	ins("ab")
 	ins("abc")
 	ins("abcd")
+	ins("bc")
 
 	iter, _ := tree.Prefix([]byte("ab"))
 	k, v, ok := iter.Next()
