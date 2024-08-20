@@ -5,6 +5,7 @@ package part_test
 
 import (
 	"encoding/json"
+	"iter"
 	"math/rand/v2"
 	"testing"
 
@@ -24,12 +25,11 @@ func TestStringMap(t *testing.T) {
 	assert.False(t, ok, "Get non-existing")
 	assert.Equal(t, 0, v)
 
-	assertIterEmpty := func(iter part.MapIterator[string, int]) {
+	assertIterEmpty := func(it iter.Seq2[string, int]) {
 		t.Helper()
-		k, v, ok := iter.Next()
-		assert.False(t, ok, "expected empty iterator")
-		assert.Empty(t, k, "empty key")
-		assert.Equal(t, 0, v)
+		for range it {
+			t.Fatalf("expected empty iterator")
+		}
 	}
 	assertIterEmpty(m.LowerBound(""))
 	assertIterEmpty(m.Prefix(""))
@@ -73,33 +73,32 @@ func TestStringMap(t *testing.T) {
 		assert.Equal(t, v, kv.v)
 	}
 
-	iter := m.All()
-	for _, kv := range kvs {
-		k, v, ok := iter.Next()
-		assert.True(t, ok, "All.Next %d", kv.v)
+	expected := kvs
+	for k, v := range m.All() {
+		kv := expected[0]
+		expected = expected[1:]
 		assert.EqualValues(t, kv.k, k)
 		assert.EqualValues(t, kv.v, v)
 	}
-	assert.False(t, ok, "All.Next")
+	assert.Empty(t, expected)
 
-	iter = m.LowerBound("2")
-	for _, kv := range kvs[1:] {
-		k, v, ok := iter.Next()
-		assert.True(t, ok, "LowerBound.Next %d", kv.v)
+	expected = kvs[1:]
+	for k, v := range m.LowerBound("2") {
+		kv := expected[0]
+		expected = expected[1:]
 		assert.EqualValues(t, kv.k, k)
 		assert.EqualValues(t, kv.v, v)
 	}
-	_, _, ok = iter.Next()
-	assert.False(t, ok, "LowerBound.Next")
+	assert.Empty(t, expected)
 
-	iter = m.Prefix("3")
-	for _, kv := range kvs[2:] {
-		k, v, ok := iter.Next()
-		assert.True(t, ok, "Prefix.Next %d", kv.v)
+	expected = kvs[1:2]
+	for k, v := range m.Prefix("2") {
+		kv := expected[0]
+		expected = expected[1:]
 		assert.EqualValues(t, kv.k, k)
 		assert.EqualValues(t, kv.v, v)
 	}
-	assert.False(t, ok, "Prefix.Next")
+	assert.Empty(t, expected)
 
 	assert.Equal(t, 3, m.Len())
 
@@ -129,19 +128,16 @@ func TestUint64Map(t *testing.T) {
 	assert.True(t, ok, "Get 42")
 	assert.Equal(t, 42, v)
 
-	iter := m.LowerBound(55)
-	k, v, ok := iter.Next()
-	assert.True(t, ok, "Next")
-	assert.EqualValues(t, 55, k)
-	assert.EqualValues(t, 55, v)
-
-	k, v, ok = iter.Next()
-	assert.True(t, ok, "Next")
-	assert.EqualValues(t, 72, k)
-	assert.EqualValues(t, 72, v)
-
-	_, _, ok = iter.Next()
-	assert.False(t, ok)
+	count := 0
+	expected := []uint64{55, 72}
+	for k, v := range m.LowerBound(55) {
+		kv := expected[0]
+		expected = expected[1:]
+		assert.EqualValues(t, kv, k)
+		assert.EqualValues(t, kv, v)
+		count++
+	}
+	assert.Equal(t, 2, count)
 }
 
 func TestRegisterKeyType(t *testing.T) {
@@ -157,15 +153,10 @@ func TestRegisterKeyType(t *testing.T) {
 	assert.True(t, ok, "Get 'hello'")
 	assert.Equal(t, 123, v)
 
-	iter := m.All()
-	k, v, ok := iter.Next()
-	assert.True(t, ok, "Next")
-	assert.Equal(t, testKey{"hello"}, k)
-	assert.Equal(t, 123, v)
-
-	_, _, ok = iter.Next()
-	assert.False(t, ok, "Next")
-
+	for k, v := range m.All() {
+		assert.Equal(t, testKey{"hello"}, k)
+		assert.Equal(t, 123, v)
+	}
 }
 
 func TestMapJSON(t *testing.T) {

@@ -2,6 +2,7 @@ package part_test
 
 import (
 	"encoding/json"
+	"slices"
 	"testing"
 
 	"github.com/cilium/statedb/part"
@@ -17,13 +18,12 @@ func TestStringSet(t *testing.T) {
 	s = s.Set("foo")
 	assert.True(t, s.Has("foo"), "Has foo")
 
-	iter := s.All()
-	v, ok := iter.Next()
-	assert.True(t, ok, "Next")
-	assert.Equal(t, "foo", v)
-	v, ok = iter.Next()
-	assert.False(t, ok, "Next")
-	assert.Equal(t, "", v)
+	count := 0
+	for v := range s.All() {
+		assert.Equal(t, "foo", v)
+		count++
+	}
+	assert.Equal(t, 1, count)
 
 	s2 := part.NewSet("bar")
 
@@ -32,6 +32,9 @@ func TestStringSet(t *testing.T) {
 	assert.False(t, s2.Has("foo"), "s2 has no foo")
 	assert.True(t, s3.Has("foo"), "s3 has foo")
 	assert.True(t, s3.Has("bar"), "s3 has bar")
+
+	values := slices.Collect(s3.All())
+	assert.ElementsMatch(t, []string{"foo", "bar"}, values)
 
 	s4 := s3.Difference(s2)
 	assert.False(t, s4.Has("bar"), "s4 has no bar")
@@ -49,10 +52,6 @@ func TestStringSet(t *testing.T) {
 
 	assert.Equal(t, 2, s3.Len())
 	assert.Equal(t, 1, s5.Len())
-
-	xs := s5.Slice()
-	assert.Len(t, xs, 1)
-	assert.Equal(t, "bar", xs[0])
 }
 
 func TestSetJSON(t *testing.T) {

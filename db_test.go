@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -763,7 +764,7 @@ func TestDB_GetList(t *testing.T) {
 	obj, rev, _, ok = table.GetWatch(txn, tagsIndex.Query("even"))
 	require.True(t, ok, "expected Get(even) to return result")
 	require.NotZero(t, rev, "expected non-zero revision")
-	require.ElementsMatch(t, obj.Tags.Slice(), []string{"even", "modified"})
+	require.ElementsMatch(t, slices.Collect(obj.Tags.All()), []string{"even", "modified"})
 	require.EqualValues(t, 2, obj.ID)
 
 	iter = table.List(txn, tagsIndex.Query("odd"))
@@ -856,7 +857,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	obj, _, ok = table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
-	v, _ := obj.Tags.All().Next()
+	v := slices.Collect(obj.Tags.All())[0]
 	require.Equal(t, "updated", v)
 
 	// Updating an object with mismatching revision number fails
@@ -871,7 +872,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	obj, _, ok = table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
-	v, _ = obj.Tags.All().Next()
+	v = slices.Collect(obj.Tags.All())[0]
 	require.Equal(t, "updated", v)
 
 	// Deleting an object with mismatching revision number fails
@@ -886,7 +887,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	obj, rev2, ok := table.Get(db.ReadTxn(), idIndex.Query(1))
 	require.True(t, ok)
 	require.Equal(t, 1, obj.Tags.Len())
-	v, _ = obj.Tags.All().Next()
+	v = slices.Collect(obj.Tags.All())[0]
 	require.Equal(t, "updated", v)
 
 	// Deleting with matching revision number works

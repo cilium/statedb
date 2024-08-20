@@ -9,6 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var quickConfig = &quick.Config{
+	// Use a higher count in order to hit the Node256 cases.
+	MaxCount: 2000,
+}
+
 func TestQuick_InsertGetPrefix(t *testing.T) {
 	tree := part.New[string]()
 	insert := func(key, value string) any {
@@ -28,7 +33,7 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 	}
 
 	require.NoError(t,
-		quick.CheckEqual(insert, get, nil),
+		quick.CheckEqual(insert, get, quickConfig),
 	)
 }
 
@@ -46,7 +51,6 @@ func TestQuick_IteratorReuse(t *testing.T) {
 		iterators := []*part.Iterator[string]{
 			tree.LowerBound([]byte(key)),
 			prefixIter,
-			tree.Iterator(),
 		}
 
 		for _, iter := range iterators {
@@ -76,7 +80,7 @@ func TestQuick_IteratorReuse(t *testing.T) {
 	}
 
 	require.NoError(t,
-		quick.Check(iterate, nil),
+		quick.Check(iterate, quickConfig),
 	)
 }
 
@@ -117,7 +121,7 @@ func TestQuick_Delete(t *testing.T) {
 		return true
 	}
 
-	require.NoError(t, quick.Check(do, nil))
+	require.NoError(t, quick.Check(do, quickConfig))
 }
 
 func TestQuick_ClosedWatch(t *testing.T) {
@@ -165,5 +169,5 @@ func TestQuick_ClosedWatch(t *testing.T) {
 		return true
 	}
 
-	require.NoError(t, quick.Check(insert, nil))
+	require.NoError(t, quick.Check(insert, quickConfig))
 }
