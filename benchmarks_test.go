@@ -48,10 +48,6 @@ func BenchmarkDB_WriteTxn_1000(b *testing.B) {
 	benchmarkDB_WriteTxn_batch(b, 1000)
 }
 
-func BenchmarkDB_WriteTxn_10000(b *testing.B) {
-	benchmarkDB_WriteTxn_batch(b, 10000)
-}
-
 func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	n := b.N

@@ -1095,14 +1095,6 @@ func Benchmark_txn_1000(b *testing.B) {
 	benchmark_txn_batch(b, 1000)
 }
 
-func Benchmark_txn_10000(b *testing.B) {
-	benchmark_txn_batch(b, 10000)
-}
-
-func Benchmark_txn_100000(b *testing.B) {
-	benchmark_txn_batch(b, 100000)
-}
-
 func benchmark_txn_batch(b *testing.B, batchSize int) {
 	tree := New[int](RootOnlyWatch)
 	n := b.N
@@ -1136,14 +1128,6 @@ func Benchmark_txn_delete_100(b *testing.B) {
 
 func Benchmark_txn_delete_1000(b *testing.B) {
 	benchmark_txn_delete_batch(b, 1000)
-}
-
-func Benchmark_txn_delete_10000(b *testing.B) {
-	benchmark_txn_delete_batch(b, 10000)
-}
-
-func Benchmark_txn_delete_100000(b *testing.B) {
-	benchmark_txn_delete_batch(b, 100000)
 }
 
 func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
