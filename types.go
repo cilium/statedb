@@ -31,8 +31,9 @@ type Table[Obj any] interface {
 	NumObjects(ReadTxn) int
 
 	// Initialized returns true if in this ReadTxn (snapshot of the database)
-	// the registered initializers have all been completed.
-	Initialized(ReadTxn) bool
+	// the registered initializers have all been completed. The returned
+	// watch channel will be closed when the table becomes initialized.
+	Initialized(ReadTxn) (bool, <-chan struct{})
 
 	// PendingInitializers returns the set of pending initializers that
 	// have not yet completed.
@@ -397,6 +398,8 @@ type tableEntry struct {
 	deleteTrackers      *part.Tree[anyDeleteTracker]
 	revision            uint64
 	pendingInitializers []string
+	initialized         bool
+	initWatchChan       chan struct{}
 }
 
 func (t *tableEntry) numObjects() int {
