@@ -117,6 +117,7 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	var entry tableEntry
 	entry.meta = t
 	entry.deleteTrackers = part.New[anyDeleteTracker]()
+	entry.initWatchChan = make(chan struct{})
 	entry.indexes = make([]indexEntry, len(t.indexPositions))
 	entry.indexes[t.indexPositions[t.primaryIndexer.indexName()]] = indexEntry{part.New[object](), nil, true}
 
@@ -127,6 +128,7 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	entry.indexes[t.indexPositions[RevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
 	entry.indexes[t.indexPositions[GraveyardRevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
 	entry.indexes[t.indexPositions[GraveyardIndex]] = indexEntry{part.New[object](), nil, true}
+
 	return entry
 }
 
@@ -169,9 +171,14 @@ func (t *genTable[Obj]) ToTable() Table[Obj] {
 	return t
 }
 
-func (t *genTable[Obj]) Initialized(txn ReadTxn) bool {
-	return len(t.PendingInitializers(txn)) == 0
+func (t *genTable[Obj]) Initialized(txn ReadTxn) (bool, <-chan struct{}) {
+	table := txn.getTxn().getTableEntry(t)
+	if len(table.pendingInitializers) == 0 {
+		return true, closedWatchChannel
+	}
+	return false, table.initWatchChan
 }
+
 func (t *genTable[Obj]) PendingInitializers(txn ReadTxn) []string {
 	return txn.getTxn().getTableEntry(t).pendingInitializers
 }
@@ -192,6 +199,10 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 						slices.Clone(table.pendingInitializers),
 						func(n string) bool { return n == name },
 					)
+					if !table.initialized && len(table.pendingInitializers) == 0 {
+						close(table.initWatchChan)
+						table.initialized = true
+					}
 				}
 			})
 		}

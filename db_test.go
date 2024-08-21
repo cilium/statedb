@@ -941,36 +941,58 @@ func TestDB_Initialization(t *testing.T) {
 
 	db, table, _ := newTestDB(t, tagsIndex)
 
+	// Using Initialized() before any initializers are registered
+	// will return true and a closed channel.
+	init, initWatch := table.Initialized(db.ReadTxn())
+	require.True(t, init, "Initialized should be true")
+	select {
+	case <-initWatch:
+	default:
+		t.Fatalf("Initialized watch channel should be closed")
+	}
+
 	wtxn := db.WriteTxn(table)
 	done1 := table.RegisterInitializer(wtxn, "test1")
 	done2 := table.RegisterInitializer(wtxn, "test2")
 	wtxn.Commit()
 
 	txn := db.ReadTxn()
-	require.False(t, table.Initialized(txn), "Initialized should be false")
+	init, initWatch = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
 	require.Equal(t, []string{"test1", "test2"}, table.PendingInitializers(txn), "test1, test2 should be pending")
 
 	wtxn = db.WriteTxn(table)
 	done1(wtxn)
-	require.False(t, table.Initialized(txn), "Initialized should be false")
+	init, _ = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
 	wtxn.Commit()
 
 	// Old read transaction unaffected.
-	require.False(t, table.Initialized(txn), "Initialized should be false")
+	init, _ = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
 	require.Equal(t, []string{"test1", "test2"}, table.PendingInitializers(txn), "test1, test2 should be pending")
 
 	txn = db.ReadTxn()
-	require.False(t, table.Initialized(txn), "Initialized should be false")
+	init, _ = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
 	require.Equal(t, []string{"test2"}, table.PendingInitializers(txn), "test2 should be pending")
 
 	wtxn = db.WriteTxn(table)
 	done2(wtxn)
-	assert.True(t, table.Initialized(wtxn), "Initialized should be true")
+	init, _ = table.Initialized(wtxn)
+	assert.True(t, init, "Initialized should be true")
 	wtxn.Commit()
 
 	txn = db.ReadTxn()
-	require.True(t, table.Initialized(txn), "Initialized should be true")
+	init, _ = table.Initialized(txn)
+	require.True(t, init, "Initialized should be true")
 	require.Empty(t, table.PendingInitializers(txn), "There should be no pending initializers")
+
+	select {
+	case <-initWatch:
+	default:
+		t.Fatalf("Initialized() watch channel was not closed")
+	}
 }
 
 func TestWriteJSON(t *testing.T) {

@@ -241,19 +241,18 @@ func testReconciler(t *testing.T, batchOps bool) {
 		h.triggerPrune()
 		h.expectOp(opUpdate(ID_1))
 		h.expectHealth(cell.StatusOK, "OK, 1 object(s)", "")
-		h.markInitialized()
 
-		// After initialization we expect to see pruning immediately
-		// as soon as something changes. Marking the table initialized
-		// does not yet trigger the reconciler since it's waiting for
-		// objects to change.
+		// Marking the table initialized prunes immediately.
+		h.markInitialized()
+		h.expectOps(opPrune(1), opUpdate(ID_1))
+
 		h.insert(ID_2, NonFaulty, reconciler.StatusPending())
-		h.expectOps(opUpdate(ID_2), opPrune(2))
+		h.expectOp(opUpdate(ID_2))
 		h.expectHealth(cell.StatusOK, "OK, 2 object(s)", "")
 
 		// Pruning can be now triggered at will.
 		h.triggerPrune()
-		h.expectOps(opUpdate(ID_2), opPrune(2), opPrune(2))
+		h.expectOp(opPrune(2))
 
 		// Add few objects and wait until incremental reconciliation is done.
 		t.Log("Insert more objects")
@@ -303,6 +302,19 @@ func testReconciler(t *testing.T, batchOps bool) {
 		assert.Greater(t, getFloat(h.m.PruneDurationVar.Get("test")), float64(0), "PruneDuration")
 		assert.Equal(t, getInt(h.m.PruneCurrentErrorsVar.Get("test")), int64(0), "PruneCurrentErrors")
 	})
+
+	runTest("pruning-empty-table",
+		[]reconciler.Option{
+			reconciler.WithPruning(100 * time.Millisecond),
+		},
+		func(h testHelper) {
+			// Mark the table initialized. This should trigger the pruning
+			// even when there are no objects.
+			h.markInitialized()
+
+			// Expect to see the initial pruning and then periodic pruning.
+			h.expectOps(opPrune(0), opPrune(0))
+		})
 
 	runTest("refreshing",
 		[]reconciler.Option{
