@@ -265,9 +265,6 @@ func (txn *txn) addDeleteTracker(meta TableMeta, trackerName string, dt anyDelet
 	_, _, table.deleteTrackers = table.deleteTrackers.Insert([]byte(trackerName), dt)
 	txn.db.metrics.DeleteTrackerCount(meta.Name(), table.deleteTrackers.Len())
 
-	// Add a finalizer to make sure delete trackers are always closed.
-	runtime.SetFinalizer(dt, func(dt anyDeleteTracker) { dt.close() })
-
 	return nil
 }
 

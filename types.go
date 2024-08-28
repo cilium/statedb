@@ -105,21 +105,20 @@ type Change[Obj any] struct {
 }
 
 type ChangeIterator[Obj any] interface {
-	// Changes returns the sequence of changes in the current snapshot. The
-	// snapshot can be refreshed with Watch to obtain the next sequence of changes.
+	// Next returns the sequence of unobserved changes up to the given ReadTxn (snapshot) and
+	// a watch channel.
+	//
+	// If changes are available Next returns a closed watch channel. Only once there are no further
+	// changes available will a proper watch channel be returned.
+	//
+	// Next can be called again without fully consuming the sequence to pull in new changes.
+	//
 	// The returned sequence is a single-use sequence and subsequent calls will return
 	// an empty sequence.
-	Changes() iter.Seq2[Change[Obj], Revision]
-
-	// Watch refreshes the iteration with a new query and returns a watch channel to wait
-	// for new changes after Next() has returned false.
-	Watch(ReadTxn) <-chan struct{}
-
-	// Close closes the iterator. This must be called when one is done using
-	// the iterator as a tracker is created for deleted objects and the
-	// deleted objects are held onto until all event iterators have observed
-	// the deletion.
-	Close()
+	//
+	// If the transaction given to Next is a WriteTxn the modifications made in the
+	// transaction are not observed, that is, only committed changes can be observed.
+	Next(ReadTxn) (iter.Seq2[Change[Obj], Revision], <-chan struct{})
 }
 
 // RWTable provides methods for modifying the table under a write transaction

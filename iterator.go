@@ -188,17 +188,24 @@ func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool
 }
 
 type changeIterator[Obj any] struct {
-	table    Table[Obj]
-	revision Revision
-	dt       *deleteTracker[Obj]
-	iter     *DualIterator[Obj]
-	watch    <-chan struct{}
+	table          Table[Obj]
+	revision       Revision
+	deleteRevision Revision
+	dt             *deleteTracker[Obj]
+	iter           *DualIterator[Obj]
+	watch          <-chan struct{}
 }
 
-func (it *changeIterator[Obj]) refresh(txn ReadTxn, updateRevision, deleteRevision Revision) {
-	indexTxn := txn.getTxn().mustIndexReadTxn(it.table, RevisionIndexPos)
-	updateIter := &iterator[Obj]{indexTxn.LowerBound(index.Uint64(updateRevision))}
-	deleteIter := it.dt.deleted(txn, deleteRevision)
+func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
+	// Instead of indexReadTxn() we look up directly here so we don't
+	// refresh from mutated indexes in case [txn] is a WriteTxn. This
+	// is important as the WriteTxn may be aborted and thus revisions will
+	// reset back and watermarks bumped from here would be invalid.
+	itxn := txn.getTxn()
+	indexEntry := itxn.root[it.table.tablePos()].indexes[RevisionIndexPos]
+	indexTxn := indexReadTxn{indexEntry.tree, indexEntry.unique}
+	updateIter := &iterator[Obj]{indexTxn.LowerBound(index.Uint64(it.revision + 1))}
+	deleteIter := it.dt.deleted(itxn, it.deleteRevision+1)
 	it.iter = NewDualIterator(deleteIter, updateIter)
 
 	// It is enough to watch the revision index and not the graveyard since
@@ -207,15 +214,40 @@ func (it *changeIterator[Obj]) refresh(txn ReadTxn, updateRevision, deleteRevisi
 	it.watch = indexTxn.RootWatch()
 }
 
-func (it *changeIterator[Obj]) Changes() iter.Seq2[Change[Obj], Revision] {
-	return func(yield func(Change[Obj], Revision) bool) {
+func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Revision], watch <-chan struct{}) {
+	if it.iter == nil {
+		// Iterator has been exhausted, check if we need to requery
+		// or whether we need to wait for changes first.
+		select {
+		case <-it.watch:
+			// Watch channel closed, so new changes await
+		default:
+			// Watch channel for the query not closed yet, so return it to allow
+			// caller to wait for the new changes.
+			watch = it.watch
+			seq = func(yield func(Change[Obj], Revision) bool) {}
+			return
+		}
+	}
+
+	// Refresh the iterator regardless if it was fully consumed or not to
+	// pull in new changes. We keep returning a closed channel until the
+	// iterator has been fully consumed. This does mean there's an extra
+	// Next() call to get a proper watch channel, but it does make this
+	// API much safer to use even when only partially consuming the
+	// sequence.
+	it.refresh(txn)
+	watch = closedWatchChannel
+	seq = func(yield func(Change[Obj], Revision) bool) {
 		if it.iter == nil {
 			return
 		}
 		for obj, rev, deleted, ok := it.iter.Next(); ok; obj, rev, deleted, ok = it.iter.Next() {
-			it.revision = rev
 			if deleted {
+				it.deleteRevision = rev
 				it.dt.mark(rev)
+			} else {
+				it.revision = rev
 			}
 			change := Change[Obj]{
 				Object:   obj,
@@ -228,54 +260,35 @@ func (it *changeIterator[Obj]) Changes() iter.Seq2[Change[Obj], Revision] {
 		}
 		it.iter = nil
 	}
+	return
 }
 
-// nextAny is for implementing the /changes HTTP API where the concrete object
+// changesAny is for implementing the /changes HTTP API where the concrete object
 // type is not known.
-func (it *changeIterator[Obj]) changesAny() iter.Seq2[Change[any], Revision] {
+func (it *changeIterator[Obj]) nextAny(txn ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{}) {
+	seq, watch := it.Next(txn)
+
 	return func(yield func(Change[any], Revision) bool) {
-		it.Changes()(
-			func(change Change[Obj], rev Revision) bool {
-				return yield(Change[any]{
-					Object:   change.Object,
-					Revision: change.Revision,
-					Deleted:  change.Deleted,
-				}, rev)
-			})
-	}
-}
-
-func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
-	if it.iter == nil {
-		// Iterator has been exhausted, check if we need to requery
-		// or whether we need to wait for changes first.
-		select {
-		case <-it.watch:
-		default:
-			// Watch channel not closed yet, so return the same watch
-			// channel.
-			return it.watch
+		for change, rev := range seq {
+			ok := yield(Change[any]{
+				Object:   change.Object,
+				Revision: change.Revision,
+				Deleted:  change.Deleted,
+			}, rev)
+			if !ok {
+				break
+			}
 		}
-
-		// Watch channel has closed so something has changed. Refresh
-		// the iterator to pull in the new changes.
-		newRev := it.revision + 1
-		it.refresh(txn, newRev, newRev)
-	}
-
-	// Iterator not exhausted yet, return a closed channel.
-	return closedWatchChannel
+	}, watch
 }
 
-func (it *changeIterator[Obj]) Close() {
+func (it *changeIterator[Obj]) close() {
 	if it.dt != nil {
 		it.dt.close()
 	}
-	*it = changeIterator[Obj]{}
+	it.dt = nil
 }
 
 type anyChangeIterator interface {
-	changesAny() iter.Seq2[Change[any], Revision]
-	Watch(ReadTxn) <-chan struct{}
-	Close()
+	nextAny(ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{})
 }

@@ -252,14 +252,16 @@ func BenchmarkDB_Changes_Baseline(b *testing.B) {
 
 func BenchmarkDB_Changes(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+
+	// Create the change iterator.
+	txn := db.WriteTxn(table)
+	require.Zero(b, table.NumObjects(txn))
+	iter, err := table.Changes(txn)
+	txn.Commit()
+	require.NoError(b, err)
+
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		// Create the change iterator.
-		txn := db.WriteTxn(table)
-		iter, err := table.Changes(txn)
-		txn.Commit()
-		require.NoError(b, err)
-
 		// Create objects
 		txn = db.WriteTxn(table)
 		for i := 0; i < numObjectsToInsert; i++ {
@@ -270,32 +272,32 @@ func BenchmarkDB_Changes(b *testing.B) {
 		}
 		txn.Commit()
 
-		// Iterator created before insertions should be empty.
-		for change := range iter.Changes() {
-			b.Fatalf("did not expect change: %v", change)
-		}
-
-		// Refresh to observe the insertions.
-		<-iter.Watch(db.ReadTxn())
+		// Observe the creations.
+		changes, watch := iter.Next(db.ReadTxn())
 		nDeleted := 0
 		nExists := 0
 
-		for change := range iter.Changes() {
+		for change := range changes {
 			if change.Deleted {
 				b.Fatalf("expected create for %v", change)
 			}
 			nExists++
 		}
-		require.EqualValues(b, numObjectsToInsert, nExists)
+		if numObjectsToInsert != nExists {
+			b.Fatalf("expected to observe %d, got %d", numObjectsToInsert, nExists)
+		}
 
 		// Delete all objects to time the cost for deletion tracking.
 		txn = db.WriteTxn(table)
 		table.DeleteAll(txn)
 		txn.Commit()
 
-		// Refresh to observe the deletions.
-		<-iter.Watch(db.ReadTxn())
-		for change := range iter.Changes() {
+		// Watch channel should be closed now.
+		<-watch
+
+		// Observe the deletions.
+		changes, watch = iter.Next(db.ReadTxn())
+		for change := range changes {
 			if change.Deleted {
 				nDeleted++
 				nExists--
@@ -303,9 +305,9 @@ func BenchmarkDB_Changes(b *testing.B) {
 				b.Fatalf("expected deleted for %v", change)
 			}
 		}
-		require.EqualValues(b, numObjectsToInsert, nDeleted)
-		require.EqualValues(b, 0, nExists)
-		iter.Close()
+		if numObjectsToInsert != nDeleted {
+			b.Fatalf("expected to see %d deleted, got %d", numObjectsToInsert, nDeleted)
+		}
 	}
 	b.StopTimer()
 	eventuallyGraveyardIsEmpty(b, db)

@@ -6,6 +6,7 @@ package statedb
 import (
 	"fmt"
 	"iter"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -409,32 +410,34 @@ func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
 func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	iter := &changeIterator[Obj]{
 		revision: 0,
-		table:    t,
+
+		// Don't observe any past deletions.
+		deleteRevision: t.Revision(txn),
+		table:          t,
+		watch:          closedWatchChannel,
 	}
+	// Set a finalizer to unregister the delete tracker when the iterator
+	// is dropped.
+	runtime.SetFinalizer(iter, func(iter *changeIterator[Obj]) {
+		iter.close()
+	})
 
 	itxn := txn.getTxn()
-	name := fmt.Sprintf("iterator-%p", iter)
+	name := fmt.Sprintf("changes-%p", iter)
 	iter.dt = &deleteTracker[Obj]{
 		db:          itxn.db,
 		trackerName: name,
 		table:       t,
 	}
-	iter.dt.setRevision(t.Revision(txn) + 1)
+
+	iter.dt.setRevision(iter.deleteRevision)
 	err := itxn.addDeleteTracker(t, name, iter.dt)
 	if err != nil {
 		return nil, err
 	}
 
-	// Prepare the iterator
-	iter.refresh(
-		txn,
-
-		// iterate over all existing objects by starting from rev 0
-		0,
-
-		// don't iterate over objects deleted in the past.
-		iter.dt.getRevision(),
-	)
+	// Prime it.
+	iter.refresh(txn)
 
 	return iter, nil
 }

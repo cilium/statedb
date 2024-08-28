@@ -83,21 +83,34 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	db, table, _ := newTestDB(t)
 
 	wtxn := db.WriteTxn(table)
-	changes, err := table.Changes(wtxn)
+	changeIter, err := table.Changes(wtxn)
 	require.NoError(t, err, "Changes")
 	wtxn.Commit()
 
 	n := 0
-	for change := range changes.Changes() {
+	changes, watch := changeIter.Next(db.ReadTxn())
+	for change := range changes {
 		t.Fatalf("did not expect changes, got: %v", change)
 	}
 
-	// On first call to Watch() the iterator is refreshed and a closed watch channel
-	// is returned.
-	watch := changes.Watch(db.ReadTxn())
+	// The returned watch channel is closed on the first call to Next()
+	// as there may have been changes to iterate and we want it to be
+	// safe to either partially consume the changes or even block first
+	// on the watch channel and only then consume.
 	select {
 	case <-watch:
-		t.Fatalf("Changes() watch channel closed, expected it to block until commit")
+	default:
+		t.Fatalf("Changes() watch channel not closed")
+	}
+
+	// Calling Next() again now will get a proper non-closed watch channel.
+	changes, watch = changeIter.Next(db.ReadTxn())
+	for change := range changes {
+		t.Fatalf("did not expect changes, got: %v", change)
+	}
+	select {
+	case <-watch:
+		t.Fatalf("Changes() watch channel unexpectedly closed")
 	default:
 	}
 
@@ -113,9 +126,10 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatalf("Changes() watch channel not closed after inserts")
 	}
-	watch = changes.Watch(db.ReadTxn())
+
+	changes, watch = changeIter.Next(db.ReadTxn())
 	n = 0
-	for change := range changes.Changes() {
+	for change := range changes {
 		require.False(t, change.Deleted, "not deleted")
 		n++
 	}
@@ -128,23 +142,24 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 
 	// Partially observe the changes
 	<-watch
-	changes.Watch(db.ReadTxn())
-	for change := range changes.Changes() {
+	changes, watch = changeIter.Next(db.ReadTxn())
+	for change := range changes {
 		require.True(t, change.Deleted, "expected Deleted")
 		break
 	}
 
-	// Calling Watch again after partially consuming the iterator
+	// Calling Next again after partially consuming the iterator
 	// should return a closed watch channel.
+	changes, watch = changeIter.Next(db.ReadTxn())
 	select {
-	case <-changes.Watch(db.ReadTxn()):
+	case <-watch:
 	case <-time.After(time.Second):
 		t.Fatalf("Changes() watch channel not closed!")
 	}
 
 	// Consume the rest of the deletions.
 	n = 1
-	for change := range changes.Changes() {
+	for change := range changes {
 		require.True(t, change.Deleted, "expected Deleted")
 		n++
 	}
