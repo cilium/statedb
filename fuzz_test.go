@@ -372,7 +372,6 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	if err != nil {
 		panic(err)
 	}
-	defer iter.Close()
 
 	// Keep track of what state the changes lead us to in order to validate it.
 	state := map[string]*statedb.Change[fuzzObj]{}
@@ -381,7 +380,9 @@ func trackerWorker(i int, stop <-chan struct{}) {
 	var prevRev statedb.Revision
 	for {
 		newChanges := false
-		for change, rev := range iter.Changes() {
+		txn = fuzzDB.ReadTxn()
+		changes, watch := iter.Next(txn)
+		for change, rev := range changes {
 			newChanges = true
 			log.log("%d: %v", rev, change)
 
@@ -435,9 +436,8 @@ func trackerWorker(i int, stop <-chan struct{}) {
 			}
 		}
 
-		txn = fuzzDB.ReadTxn()
 		select {
-		case <-iter.Watch(txn):
+		case <-watch:
 		case <-stop:
 			log.log("final object count %d", len(state))
 			return

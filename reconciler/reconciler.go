@@ -6,6 +6,7 @@ package reconciler
 import (
 	"context"
 	"fmt"
+	"iter"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -37,7 +38,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 	// Create the change iterator to watch for inserts and deletes to the table.
 	wtxn := r.DB.WriteTxn(r.config.Table)
-	changes, err := r.config.Table.Changes(wtxn)
+	changeIterator, err := r.config.Table.Changes(wtxn)
 	txn := wtxn.Commit()
 	if err != nil {
 		return fmt.Errorf("watching for changes failed: %w", err)
@@ -83,11 +84,12 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 		// Grab a new snapshot and refresh the changes iterator to read
 		// in the new changes.
 		txn = r.DB.ReadTxn()
-		tableWatchChan = changes.Watch(txn)
+		var changes iter.Seq2[statedb.Change[Obj], statedb.Revision]
+		changes, tableWatchChan = changeIterator.Next(txn)
 
 		// Perform incremental reconciliation and retries of previously failed
 		// objects.
-		errs := r.incremental(ctx, txn, changes.Changes())
+		errs := r.incremental(ctx, txn, changes)
 
 		if tableInitialized && (prune || externalPrune) {
 			if err := r.prune(ctx, txn); err != nil {

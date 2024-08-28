@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -307,12 +308,12 @@ func TestDB_Changes(t *testing.T) {
 	require.NoError(t, err, "failed to create ChangeIterator")
 	iter2, err := table.Changes(wtxn)
 	require.NoError(t, err, "failed to create ChangeIterator")
-	wtxn.Commit()
+	txn0 := wtxn.Commit()
 
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
 
 	// The initial watch channel is closed, so users can either iterate first or watch first.
-	<-iter.Watch(db.ReadTxn())
+	changes, watch := iter.Next(db.ReadTxn())
 
 	// Delete 2/3 objects
 	{
@@ -354,7 +355,9 @@ func TestDB_Changes(t *testing.T) {
 	nDeleted := 0
 
 	// Observe the objects that existed when the tracker was created.
-	for change := range iter.Changes() {
+	<-watch
+	changes, watch = iter.Next(txn0)
+	for change := range changes {
 		if change.Deleted {
 			nDeleted++
 		} else {
@@ -365,9 +368,25 @@ func TestDB_Changes(t *testing.T) {
 	assert.Equal(t, 3, nExist)
 
 	// Wait for the new changes.
-	<-iter.Watch(txn)
+	<-watch
 
-	for change := range iter.Changes() {
+	changes, watch = iter.Next(txn)
+
+	// Consume one change, leaving a partially consumed sequence.
+	for change := range changes {
+		if change.Deleted {
+			nDeleted++
+			nExist--
+		} else {
+			nExist++
+		}
+		break
+	}
+
+	// The iterator can be refreshed with new snapshot without having consumed
+	// the previous sequence fully. No changes are missed.
+	changes, watch = iter.Next(db.ReadTxn())
+	for change := range changes {
 		if change.Deleted {
 			nDeleted++
 			nExist--
@@ -375,6 +394,7 @@ func TestDB_Changes(t *testing.T) {
 			nExist++
 		}
 	}
+
 	assert.Equal(t, 2, nDeleted)
 	assert.Equal(t, 1, nExist)
 
@@ -386,19 +406,10 @@ func TestDB_Changes(t *testing.T) {
 	nExist = 0
 	nDeleted = 0
 
-	for change := range iter2.Changes() {
+	changes, watch = iter2.Next(txn)
+	for change := range changes {
 		if change.Deleted {
 			nDeleted++
-		} else {
-			nExist++
-		}
-	}
-	<-iter2.Watch(txn)
-
-	for change := range iter2.Changes() {
-		if change.Deleted {
-			nDeleted++
-			nExist--
 		} else {
 			nExist++
 		}
@@ -406,6 +417,12 @@ func TestDB_Changes(t *testing.T) {
 
 	assert.Equal(t, 1, nExist)
 	assert.Equal(t, 2, nDeleted)
+
+	// Refreshing with the same snapshot yields no new changes.
+	changes, watch = iter2.Next(txn)
+	for change := range changes {
+		t.Fatalf("unexpected change: %v", change)
+	}
 
 	// Graveyard will now be GCd.
 	eventuallyGraveyardIsEmpty(t, db)
@@ -422,16 +439,19 @@ func TestDB_Changes(t *testing.T) {
 		wtxn.Commit()
 	}
 
+	<-watch
+
 	txn = db.ReadTxn()
-	<-iter.Watch(txn)
-	<-iter2.Watch(txn)
+	changes, watch = iter.Next(txn)
+	changes1 := Collect(changes)
+	changes, _ = iter2.Next(txn)
+	changes2 := Collect(changes)
 
-	changes := Collect(iter.Changes())
-	changes2 := Collect(iter2.Changes())
-	assert.Equal(t, len(changes), len(changes2), "expected same number of changes from both iterators")
+	assert.Equal(t, len(changes1), len(changes2),
+		"expected same number of changes from both iterators")
 
-	if assert.Len(t, changes, 1, "expected one change") {
-		change := changes[0]
+	if assert.Len(t, changes1, 1, "expected one change") {
+		change := changes1[0]
 		change2 := changes2[0]
 		assert.EqualValues(t, 88, change.Object.ID)
 		assert.EqualValues(t, 88, change2.Object.ID)
@@ -439,15 +459,15 @@ func TestDB_Changes(t *testing.T) {
 		assert.False(t, change2.Deleted)
 	}
 
-	// After closing the first iterator, deletes are still tracked for second one.
+	// After dropping the first iterator, deletes are still tracked for second one.
 	// Delete the remaining objects.
-	iter.Close()
-
+	iter = nil
 	{
 		txn := db.WriteTxn(table)
 		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
+
 	require.False(t, db.graveyardIsEmpty())
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
@@ -455,10 +475,12 @@ func TestDB_Changes(t *testing.T) {
 
 	// Consume the deletions using the second iterator.
 	txn = db.ReadTxn()
-	<-iter2.Watch(txn)
+
+	<-watch
+	changes, watch = iter2.Next(txn)
 
 	count := 0
-	for change := range iter2.Changes() {
+	for change := range changes {
 		count++
 		assert.True(t, change.Deleted, "expected object %d to be deleted", change.Object.ID)
 	}
@@ -469,8 +491,8 @@ func TestDB_Changes(t *testing.T) {
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	// After closing the second iterator the deletions no longer go into graveyard.
-	iter2.Close()
+	// After dropping the second iterator the deletions no longer go into graveyard.
+	iter2 = nil
 	{
 		txn := db.WriteTxn(table)
 		_, _, err := table.Insert(txn, testObject{ID: 78, Tags: part.NewSet("world")})
@@ -480,10 +502,33 @@ func TestDB_Changes(t *testing.T) {
 		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
-	require.True(t, db.graveyardIsEmpty())
+	// Eventually GC drops the second iterator and the delete tracker is closed.
+	eventuallyGraveyardIsEmpty(t, db)
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
+
+	// Create another iterator and test observing changes using a WriteTxn
+	// that is mutating the table.
+	wtxn = db.WriteTxn(table)
+	iter3, err := table.Changes(wtxn)
+	require.NoError(t, err, "failed to create ChangeIterator")
+	_, _, err = table.Insert(wtxn, testObject{ID: 1})
+	require.NoError(t, err, "Insert failed")
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, testObject{ID: 2})
+	require.NoError(t, err, "Insert failed")
+	changes, _ = iter3.Next(wtxn)
+	// We don't observe the insert of ID 2
+	count = 0
+	for change := range changes {
+		require.EqualValues(t, 1, change.Object.ID)
+		count++
+	}
+	require.Equal(t, 1, count)
+	wtxn.Abort()
 }
 
 func TestDB_Observable(t *testing.T) {
@@ -1041,7 +1086,10 @@ func Test_nonUniqueKey(t *testing.T) {
 
 func eventuallyGraveyardIsEmpty(t testing.TB, db *DB) {
 	require.Eventually(t,
-		db.graveyardIsEmpty,
+		func() bool {
+			runtime.GC() // force changeIterator finalizers
+			return db.graveyardIsEmpty()
+		},
 		5*time.Second,
 		100*time.Millisecond,
 		"graveyard not garbage collected")

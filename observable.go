@@ -32,11 +32,11 @@ func (to *observable[Obj]) Observe(ctx context.Context, next func(Change[Obj]), 
 			complete(err)
 			return
 		}
-		defer iter.Close()
 		defer complete(nil)
 
 		for {
-			for change := range iter.Changes() {
+			changes, watch := iter.Next(to.db.ReadTxn())
+			for change := range changes {
 				if ctx.Err() != nil {
 					break
 				}
@@ -45,7 +45,7 @@ func (to *observable[Obj]) Observe(ctx context.Context, next func(Change[Obj]), 
 			select {
 			case <-ctx.Done():
 				return
-			case <-iter.Watch(to.db.ReadTxn()):
+			case <-watch:
 			}
 		}
 	}()
