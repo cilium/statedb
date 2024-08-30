@@ -422,6 +422,17 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	return iter, nil
 }
 
+// anyChanges returns the anyChangeIterator. Used for implementing the /changes HTTP
+// API where we can't work with concrete object types as they're not known and thus
+// uninstantiatable.
+func (t *genTable[Obj]) anyChanges(txn WriteTxn) (anyChangeIterator, error) {
+	iter, err := t.Changes(txn)
+	if err != nil {
+		return nil, err
+	}
+	return iter.(*changeIterator[Obj]), err
+}
+
 func (t *genTable[Obj]) sortableMutex() internal.SortableMutex {
 	return t.smu
 }
