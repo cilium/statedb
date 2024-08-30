@@ -19,7 +19,7 @@ import (
 	"github.com/cilium/statedb/part"
 )
 
-func httpFixture(t *testing.T) (*DB, Table[testObject], *httptest.Server) {
+func httpFixture(t *testing.T) (*DB, RWTable[testObject], *httptest.Server) {
 	db, table, _ := newTestDB(t, tagsIndex)
 
 	ts := httptest.NewServer(db.HTTPHandler())
@@ -110,7 +110,7 @@ func Test_http_runQuery(t *testing.T) {
 	}
 }
 
-func Test_http_RemoteTable(t *testing.T) {
+func Test_http_RemoteTable_Get_LowerBound(t *testing.T) {
 	ctx := context.TODO()
 	_, table, ts := httpFixture(t)
 
@@ -135,4 +135,58 @@ func Test_http_RemoteTable(t *testing.T) {
 		assert.EqualValues(t, 3, items[2].ID)
 		assert.EqualValues(t, 4, items[3].ID)
 	}
+}
+
+func Test_http_RemoteTable_Changes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.TODO())
+	db, table, ts := httpFixture(t)
+
+	base, err := url.Parse(ts.URL)
+	require.NoError(t, err, "ParseURL")
+
+	remoteTable := NewRemoteTable[testObject](base, table.Name())
+
+	iter, errs := remoteTable.LowerBound(ctx, idIndex.Query(0))
+	items := Collect(iter)
+	require.NoError(t, <-errs, "LowerBound(0)")
+	require.Len(t, items, 4)
+
+	changeIter, errs := remoteTable.Changes(ctx)
+	for _, item := range items {
+		change, rev, ok := changeIter.Next()
+		require.True(t, ok)
+		assert.NotZero(t, rev)
+		assert.NotZero(t, change.Revision)
+		assert.False(t, change.Deleted)
+		assert.Equal(t, item.ID, change.Object.ID)
+	}
+
+	wtxn := db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, testObject{ID: 5})
+	require.NoError(t, err, "Insert")
+	_, _, err = table.Delete(wtxn, testObject{ID: 1})
+	require.NoError(t, err, "Delete")
+	wtxn.Commit()
+
+	change, rev, ok := changeIter.Next()
+	require.True(t, ok)
+	assert.NotZero(t, rev)
+	assert.NotZero(t, change.Revision)
+	assert.False(t, change.Deleted)
+	assert.EqualValues(t, 5, change.Object.ID)
+
+	change, rev, ok = changeIter.Next()
+	require.True(t, ok)
+	assert.NotZero(t, rev)
+	assert.NotZero(t, change.Revision)
+	assert.True(t, change.Deleted)
+	assert.EqualValues(t, 1, change.Object.ID)
+
+	cancel()
+
+	change, _, ok = changeIter.Next()
+	assert.False(t, ok)
+
+	err = <-errs
+	require.ErrorIs(t, err, context.Canceled)
 }
