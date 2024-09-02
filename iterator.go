@@ -256,7 +256,9 @@ func (it *changeIterator[Obj]) Watch(txn ReadTxn) <-chan struct{} {
 		// Return a closed watch channel to immediately trigger iteration.
 		return closedWatchChannel
 	}
-	return it.watch
+
+	// Iterator not consumed yet, return a closed channel to trigger iteration.
+	return closedWatchChannel
 }
 
 func (it *changeIterator[Obj]) Close() {
