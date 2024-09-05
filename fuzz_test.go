@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"maps"
 	"math/rand"
 	"os"
 	"runtime"
@@ -18,7 +19,6 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/exp/maps"
 )
 
 // Run test with "--debug" for log output.
