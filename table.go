@@ -6,6 +6,7 @@ package statedb
 import (
 	"fmt"
 	"iter"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -18,7 +19,8 @@ import (
 )
 
 // NewTable creates a new table with given name and indexes.
-// Can fail if the indexes are malformed.
+// Can fail if the indexes or the name are malformed.
+// The name must match regex "^[a-z][a-z0-9_\\-]{0,30}$".
 //
 // To provide access to the table via Hive:
 //
@@ -33,6 +35,10 @@ func NewTable[Obj any](
 	primaryIndexer Indexer[Obj],
 	secondaryIndexers ...Indexer[Obj],
 ) (RWTable[Obj], error) {
+	if err := validateTableName(tableName); err != nil {
+		return nil, err
+	}
+
 	toAnyIndexer := func(idx Indexer[Obj]) anyIndexer {
 		return anyIndexer{
 			name: idx.indexName(),
@@ -103,6 +109,15 @@ func MustNewTable[Obj any](
 		panic(err)
 	}
 	return t
+}
+
+var nameRegex = regexp.MustCompile(`^[a-z][a-z0-9_\-]{0,30}$`)
+
+func validateTableName(name string) error {
+	if !nameRegex.MatchString(name) {
+		return fmt.Errorf("invalid table name %q, expected to match %q", name, nameRegex)
+	}
+	return nil
 }
 
 type genTable[Obj any] struct {

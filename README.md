@@ -239,12 +239,15 @@ func NewMyObjectTable() (statedb.RWTable[*MyObject], error) {
 ```
 
 The `NewTable` function takes the name of the table, a primary index and zero or
-more secondary indexes. It returns a `RWTable`, which is an interface for both
-reading and writing to a table. An `RWTable` is a superset of `Table`, an interface
-that contains methods just for reading. This provides a simple form of type-level
-access control to the table. `NewTable` may return an error if the indexers are
-malformed, for example if `IDIndex` is not unique (primary index has to be), or if
-the indexers have overlapping names.
+more secondary indexes. The table name must match the regular expression
+"^[a-z][a-z0-9_\\-]{0,30}$".
+
+`NewTable` returns a `RWTable`, which is an interface for both reading and
+writing to a table.  An `RWTable` is a superset of `Table`, an interface
+that contains methods just for reading. This provides a simple form of
+type-level access control to the table. `NewTable` may return an error if
+the name or indexers are malformed, for example if `IDIndex` is not unique
+(primary index has to be), or if the indexers have overlapping names.
 
 ### Inserting
 
