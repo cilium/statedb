@@ -169,6 +169,8 @@ func registerHTTPServer(
 
 	mux := http.NewServeMux()
 
+	// To dump the metrics:
+	// curl -s http://localhost:8080/expvar
 	mux.Handle("/expvar", expvar.Handler())
 
 	// For dumping the database:
