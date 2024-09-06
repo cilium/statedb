@@ -1084,6 +1084,32 @@ func Test_nonUniqueKey(t *testing.T) {
 	assert.EqualValues(t, secondary, "quux")
 }
 
+func Test_validateTableName(t *testing.T) {
+	validNames := []string{
+		"a",
+		"abc123",
+		"a1_bc",
+		"a-b",
+	}
+	invalidNames := []string{
+		"",
+		"123",
+		"ABC",
+		"loooooooooooooooooooooooooooooooooooooooooooooooong",
+		"a^*%",
+	}
+
+	for _, name := range validNames {
+		_, err := NewTable(name, idIndex)
+		require.NoError(t, err, "NewTable(%s)", name)
+	}
+
+	for _, name := range invalidNames {
+		_, err := NewTable(name, idIndex)
+		require.Error(t, err, "NewTable(%s)", name)
+	}
+}
+
 func eventuallyGraveyardIsEmpty(t testing.TB, db *DB) {
 	require.Eventually(t,
 		func() bool {
