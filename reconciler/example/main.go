@@ -97,7 +97,14 @@ func main() {
 	cmd.Execute()
 }
 
-var Hive = hive.New(
+var Hive = hive.NewWithOptions(
+	hive.Options{
+		// Create a named DB handle for each module.
+		ModuleDecorator: func(db *statedb.DB, id cell.ModuleID) *statedb.DB {
+			return db.NewHandle(string(id))
+		},
+	},
+
 	statedb.Cell,
 	job.Cell,
 
