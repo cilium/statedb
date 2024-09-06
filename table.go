@@ -216,10 +216,6 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 						slices.Clone(table.pendingInitializers),
 						func(n string) bool { return n == name },
 					)
-					if !table.initialized && len(table.pendingInitializers) == 0 {
-						close(table.initWatchChan)
-						table.initialized = true
-					}
 				}
 			})
 		}
