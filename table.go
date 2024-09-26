@@ -14,6 +14,7 @@ import (
 
 	"github.com/cilium/statedb/internal"
 	"github.com/cilium/statedb/part"
+	"gopkg.in/yaml.v3"
 
 	"github.com/cilium/statedb/index"
 )
@@ -182,6 +183,15 @@ func (t *genTable[Obj]) secondary() map[string]anyIndexer {
 
 func (t *genTable[Obj]) Name() string {
 	return t.table
+}
+
+func (t *genTable[Obj]) Indexes() []string {
+	idxs := make([]string, 0, 1+len(t.secondaryAnyIndexers))
+	idxs = append(idxs, t.primaryAnyIndexer.name)
+	for k := range t.secondaryAnyIndexers {
+		idxs = append(idxs, k)
+	}
+	return idxs
 }
 
 func (t *genTable[Obj]) ToTable() Table[Obj] {
@@ -466,6 +476,19 @@ func (t *genTable[Obj]) anyChanges(txn WriteTxn) (anyChangeIterator, error) {
 
 func (t *genTable[Obj]) sortableMutex() internal.SortableMutex {
 	return t.smu
+}
+
+func (t *genTable[Obj]) proto() any {
+	var zero Obj
+	return zero
+}
+
+func (t *genTable[Obj]) unmarshalYAML(data []byte) (any, error) {
+	var obj Obj
+	if err := yaml.Unmarshal(data, &obj); err != nil {
+		return nil, err
+	}
+	return obj, nil
 }
 
 var _ Table[bool] = &genTable[bool]{}
