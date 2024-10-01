@@ -36,8 +36,9 @@ var (
 		FromObject: func(t quickObj) index.KeySet {
 			return index.NewKeySet(index.String(t.A))
 		},
-		FromKey: index.String,
-		Unique:  true,
+		FromKey:    index.String,
+		FromString: index.FromString,
+		Unique:     true,
 	}
 
 	bIndex = Index[quickObj, string]{
@@ -45,8 +46,9 @@ var (
 		FromObject: func(t quickObj) index.KeySet {
 			return index.NewKeySet(index.String(t.B))
 		},
-		FromKey: index.String,
-		Unique:  false,
+		FromKey:    index.String,
+		FromString: index.FromString,
+		Unique:     false,
 	}
 )
 
@@ -128,7 +130,9 @@ func TestDB_Quick(t *testing.T) {
 				return false
 			}
 		}
-		for anyObj := range anyTable.Prefix(rtxn, a) {
+		anyObjs, err := anyTable.Prefix(rtxn, "a", a)
+		require.NoError(t, err, "AnyTable.Prefix")
+		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
 			if !strings.HasPrefix(obj.A, a) {
 				t.Logf("AnyTable.Prefix() returned object with wrong prefix via aIndex")
@@ -142,7 +146,9 @@ func TestDB_Quick(t *testing.T) {
 				return false
 			}
 		}
-		for anyObj := range anyTable.LowerBound(rtxn, a) {
+		anyObjs, err = anyTable.LowerBound(rtxn, "a", a)
+		require.NoError(t, err, "AnyTable.LowerBound")
+		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
 			if cmp.Compare(obj.A, a) < 0 {
 				t.Logf("AnyTable.LowerBound() order wrong")
@@ -213,6 +219,16 @@ func TestDB_Quick(t *testing.T) {
 			visited[obj.A] = struct{}{}
 		}
 
+		anyObjs, err = anyTable.Prefix(rtxn, "b", b)
+		require.NoError(t, err, "AnyTable.Prefix")
+		for anyObj := range anyObjs {
+			obj := anyObj.(quickObj)
+			if !strings.HasPrefix(obj.B, b) {
+				t.Logf("AnyTable.Prefix() via bIndex has wrong prefix")
+				return false
+			}
+		}
+
 		visited = map[string]struct{}{}
 		for obj := range table.LowerBound(rtxn, bIndex.Query(b)) {
 			if cmp.Compare(obj.B, b) < 0 {
@@ -224,6 +240,16 @@ func TestDB_Quick(t *testing.T) {
 				return false
 			}
 			visited[obj.A] = struct{}{}
+		}
+
+		anyObjs, err = anyTable.LowerBound(rtxn, "b", b)
+		require.NoError(t, err, "AnyTable.LowerBound")
+		for anyObj := range anyObjs {
+			obj := anyObj.(quickObj)
+			if cmp.Compare(obj.B, b) < 0 {
+				t.Logf("AnyTable.LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(b))
+				return false
+			}
 		}
 
 		// Iterating over the secondary index returns the objects in order

@@ -237,5 +237,4 @@ func Test_Regression_Prefix_NonUnique(t *testing.T) {
 		assert.EqualValues(t, "z", items[0].ID)
 		assert.EqualValues(t, "b", items[1].ID)
 	}
-
 }

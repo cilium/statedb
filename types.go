@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"errors"
 	"io"
 	"iter"
 
@@ -230,13 +231,17 @@ type tableInternal interface {
 	tablePos() int
 	setTablePos(int)
 	indexPos(string) int
-	tableKey() []byte                      // The radix key for the table in the root tree
+	tableKey() []byte // The radix key for the table in the root tree
+	getIndexer(name string) *anyIndexer
 	primary() anyIndexer                   // The untyped primary indexer for the table
 	secondary() map[string]anyIndexer      // Secondary indexers (if any)
 	sortableMutex() internal.SortableMutex // The sortable mutex for locking the table for writing
 	anyChanges(txn WriteTxn) (anyChangeIterator, error)
 	proto() any                             // Returns the zero value of 'Obj', e.g. the prototype
 	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
+	numDeletedObjects(txn ReadTxn) int      // Number of objects in graveyard
+	acquired(*txn)
+	getAcquiredInfo() string
 }
 
 type ReadTxn interface {
@@ -282,10 +287,26 @@ func ByRevision[Obj any](rev uint64) Query[Obj] {
 
 // Index implements the indexing of objects (FromObjects) and querying of objects from the index (FromKey)
 type Index[Obj any, Key any] struct {
-	Name       string
+	// Name of the index
+	Name string
+
+	// FromObject extracts key(s) from the object. The key set
+	// can contain 0, 1 or more keys.
 	FromObject func(obj Obj) index.KeySet
-	FromKey    func(key Key) index.Key
-	Unique     bool
+
+	// FromKey converts the index key into a raw key.
+	// With this we can perform Query() against this index with
+	// the [Key] type.
+	FromKey func(key Key) index.Key
+
+	// FromString is an optional conversion from string to a raw key.
+	// If implemented allows script commands to query with this index.
+	FromString func(key string) (index.Key, error)
+
+	// Unique marks the index as unique. Primary index must always be
+	// unique. A secondary index may be non-unique in which case a single
+	// key may map to multiple objects.
+	Unique bool
 }
 
 var _ Indexer[struct{}] = &Index[struct{}, bool]{}
@@ -301,6 +322,17 @@ func (i Index[Key, Obj]) indexName() string {
 //nolint:unused
 func (i Index[Obj, Key]) fromObject(obj Obj) index.KeySet {
 	return i.FromObject(obj)
+}
+
+var errFromStringNil = errors.New("FromString not defined")
+
+//nolint:unused
+func (i Index[Obj, Key]) fromString(s string) (index.Key, error) {
+	if i.FromString == nil {
+		return index.Key{}, errFromStringNil
+	}
+	k, err := i.FromString(s)
+	return k, err
 }
 
 //nolint:unused
@@ -333,6 +365,7 @@ type Indexer[Obj any] interface {
 	indexName() string
 	isUnique() bool
 	fromObject(Obj) index.KeySet
+	fromString(string) (index.Key, error)
 
 	ObjectToKey(Obj) index.Key
 	QueryFromObject(Obj) Query[Obj]
@@ -382,6 +415,9 @@ type anyIndexer struct {
 	// fromObject returns the key (or keys for multi-index) to index the
 	// object with.
 	fromObject func(object) index.KeySet
+
+	// fromString converts string into a key. Optional.
+	fromString func(string) (index.Key, error)
 
 	// unique if true will index the object solely on the
 	// values returned by fromObject. If false the primary

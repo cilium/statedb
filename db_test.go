@@ -11,6 +11,8 @@ import (
 	"log/slog"
 	"runtime"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +49,17 @@ func (t testObject) String() string {
 	return fmt.Sprintf("testObject{ID: %d, Tags: %v}", t.ID, t.Tags)
 }
 
+func (t testObject) TableHeader() []string {
+	return []string{"ID", "Tags"}
+}
+
+func (t testObject) TableRow() []string {
+	return []string{
+		strconv.FormatUint(uint64(t.ID), 10),
+		strings.Join(slices.Collect(t.Tags.All()), ", "),
+	}
+}
+
 var (
 	idIndex = Index[testObject, uint64]{
 		Name: "id",
@@ -54,7 +67,11 @@ var (
 			return index.NewKeySet(index.Uint64(t.ID))
 		},
 		FromKey: index.Uint64,
-		Unique:  true,
+		FromString: func(key string) (index.Key, error) {
+			v, err := strconv.ParseUint(key, 10, 64)
+			return index.Uint64(v), err
+		},
+		Unique: true,
 	}
 
 	tagsIndex = Index[testObject, string]{
@@ -62,10 +79,21 @@ var (
 		FromObject: func(t testObject) index.KeySet {
 			return index.Set(t.Tags)
 		},
-		FromKey: index.String,
-		Unique:  false,
+		FromKey:    index.String,
+		FromString: index.FromString,
+		Unique:     false,
 	}
 )
+
+func newTestObjectTable(t testing.TB, name string, secondaryIndexers ...Indexer[testObject]) RWTable[testObject] {
+	table, err := NewTable(
+		name,
+		idIndex,
+		secondaryIndexers...,
+	)
+	require.NoError(t, err, "NewTable[testObject]")
+	return table
+}
 
 const (
 	INDEX_TAGS    = true
@@ -82,12 +110,7 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 	var (
 		db *DB
 	)
-	table, err := NewTable(
-		"test",
-		idIndex,
-		secondaryIndexers...,
-	)
-	require.NoError(t, err, "NewTable[testObject]")
+	table := newTestObjectTable(t, "test", secondaryIndexers...)
 
 	h := hive.New(
 		cell.Provide(func() Metrics { return metrics }),
@@ -237,7 +260,7 @@ func TestDB_Prefix(t *testing.T) {
 	txn := db.ReadTxn()
 
 	iter, watch := table.PrefixWatch(txn, tagsIndex.Query("ab"))
-	require.Equal(t, Collect(Map(iter, testObject.getID)), []uint64{71, 82})
+	require.Equal(t, []uint64{71, 82}, Collect(Map(iter, testObject.getID)))
 
 	select {
 	case <-watch:
