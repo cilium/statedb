@@ -115,13 +115,12 @@ func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searc
 
 			secondary, primary := decodeNonUniqueKey(key)
 
-			// The secondary key is shorter than what we're looking for, e.g.
-			// we match into the primary key. Keep searching for matching secondary
-			// keys.
 			switch {
 			case !prefixSearch && len(secondary) != len(searchKey):
+				// This a List(), thus secondary key must match length exactly.
 				continue
 			case prefixSearch && len(secondary) < len(searchKey):
+				// This is Prefix(), thus key must be equal or longer to search key.
 				continue
 			}
 

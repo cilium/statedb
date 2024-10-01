@@ -5,11 +5,11 @@ go 1.23
 require (
 	github.com/cilium/hive v0.0.0-20241009102328-2ab688845f23
 	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
-	github.com/rogpeppe/go-internal v1.11.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
 	go.uber.org/goleak v1.3.0
+	golang.org/x/term v0.16.0
 	golang.org/x/time v0.5.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -34,7 +34,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/exp v0.0.0-20240119083558-1b970713d09a // indirect
 	golang.org/x/sys v0.17.0 // indirect
-	golang.org/x/term v0.16.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/tools v0.17.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect

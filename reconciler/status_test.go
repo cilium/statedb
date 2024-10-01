@@ -21,7 +21,7 @@ func TestStatusString(t *testing.T) {
 		UpdatedAt: now,
 		Error:     "",
 	}
-	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 	s.UpdatedAt = now.Add(-time.Hour)
 	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+h ago\)`, s.String())
 
@@ -30,14 +30,14 @@ func TestStatusString(t *testing.T) {
 		UpdatedAt: now,
 		Error:     "",
 	}
-	assert.Regexp(t, `Done \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+	assert.Regexp(t, `Done \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 
 	s = Status{
 		Kind:      StatusKindError,
 		UpdatedAt: now,
 		Error:     "hey I'm an error",
 	}
-	assert.Regexp(t, `Error: hey I'm an error \([0-9]+\.[0-9]+m?s ago\)`, s.String())
+	assert.Regexp(t, `Error: hey I'm an error \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 }
 
 func sanitizeAgo(s string) string {

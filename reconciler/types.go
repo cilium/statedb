@@ -19,6 +19,7 @@ import (
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
+	"github.com/cilium/statedb/internal"
 )
 
 type Reconciler[Obj any] interface {
@@ -148,30 +149,9 @@ func (s Status) IsPendingOrRefreshing() bool {
 
 func (s Status) String() string {
 	if s.Kind == StatusKindError {
-		return fmt.Sprintf("Error: %s (%s ago)", s.Error, prettySince(s.UpdatedAt))
+		return fmt.Sprintf("Error: %s (%s ago)", s.Error, internal.PrettySince(s.UpdatedAt))
 	}
-	return fmt.Sprintf("%s (%s ago)", s.Kind, prettySince(s.UpdatedAt))
-}
-
-func prettySince(t time.Time) string {
-	ago := float64(time.Now().Sub(t)) / float64(time.Millisecond)
-	// millis
-	if ago < 1000.0 {
-		return fmt.Sprintf("%.1fms", ago)
-	}
-	// secs
-	ago /= 1000.0
-	if ago < 60.0 {
-		return fmt.Sprintf("%.1fs", ago)
-	}
-	// mins
-	ago /= 60.0
-	if ago < 60.0 {
-		return fmt.Sprintf("%.1fm", ago)
-	}
-	// hours
-	ago /= 60.0
-	return fmt.Sprintf("%.1fh", ago)
+	return fmt.Sprintf("%s (%s ago)", s.Kind, internal.PrettySince(s.UpdatedAt))
 }
 
 var idGen atomic.Uint64
@@ -314,7 +294,7 @@ func (s StatusSet) String() string {
 		b.WriteString(strings.Join(done, " "))
 	}
 	b.WriteString(" (")
-	b.WriteString(prettySince(updatedAt))
+	b.WriteString(internal.PrettySince(updatedAt))
 	b.WriteString(" ago)")
 	return b.String()
 }

@@ -9,8 +9,10 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/cilium/statedb/internal"
 	"github.com/cilium/statedb/part"
@@ -46,7 +48,8 @@ func NewTable[Obj any](
 			fromObject: func(iobj object) index.KeySet {
 				return idx.fromObject(iobj.data.(Obj))
 			},
-			unique: idx.isUnique(),
+			fromString: idx.fromString,
+			unique:     idx.isUnique(),
 		}
 	}
 
@@ -129,6 +132,15 @@ type genTable[Obj any] struct {
 	primaryAnyIndexer    anyIndexer
 	secondaryAnyIndexers map[string]anyIndexer
 	indexPositions       map[string]int
+	lastWriteTxn         atomic.Pointer[txn]
+}
+
+func (t *genTable[Obj]) acquired(txn *txn) {
+	t.lastWriteTxn.Store(txn)
+}
+
+func (t *genTable[Obj]) getAcquiredInfo() string {
+	return t.lastWriteTxn.Load().acquiredInfo()
 }
 
 func (t *genTable[Obj]) tableEntry() tableEntry {
@@ -169,6 +181,16 @@ func (t *genTable[Obj]) indexPos(name string) int {
 	return t.indexPositions[name]
 }
 
+func (t *genTable[Obj]) getIndexer(name string) *anyIndexer {
+	if name == "" || t.primaryAnyIndexer.name == name {
+		return &t.primaryAnyIndexer
+	}
+	if indexer, ok := t.secondaryAnyIndexers[name]; ok {
+		return &indexer
+	}
+	return nil
+}
+
 func (t *genTable[Obj]) PrimaryIndexer() Indexer[Obj] {
 	return t.primaryIndexer
 }
@@ -191,6 +213,7 @@ func (t *genTable[Obj]) Indexes() []string {
 	for k := range t.secondaryAnyIndexers {
 		idxs = append(idxs, k)
 	}
+	sort.Strings(idxs)
 	return idxs
 }
 
@@ -241,6 +264,11 @@ func (t *genTable[Obj]) Revision(txn ReadTxn) Revision {
 func (t *genTable[Obj]) NumObjects(txn ReadTxn) int {
 	table := txn.getTxn().getTableEntry(t)
 	return table.numObjects()
+}
+
+func (t *genTable[Obj]) numDeletedObjects(txn ReadTxn) int {
+	table := txn.getTxn().getTableEntry(t)
+	return table.numDeletedObjects()
 }
 
 func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
