@@ -336,22 +336,59 @@ func (txn *txn) delete(meta TableMeta, guardRevision Revision, data any) (object
 	return obj, true, nil
 }
 
+const (
+	nonUniqueSeparator   = 0x0
+	nonUniqueSubstitute  = 0xfe
+	nonUniqueSubstitute2 = 0xfd
+)
+
+// appendEncodePrimary encodes the 'src' (primary key) into 'dst'.
+func appendEncodePrimary(dst, src []byte) []byte {
+	for _, b := range src {
+		switch b {
+		case nonUniqueSeparator:
+			dst = append(dst, nonUniqueSubstitute)
+		case nonUniqueSubstitute:
+			dst = append(dst, nonUniqueSubstitute2, 0x00)
+		case nonUniqueSubstitute2:
+			dst = append(dst, nonUniqueSubstitute2, 0x01)
+		default:
+			dst = append(dst, b)
+		}
+	}
+	return dst
+}
+
 // encodeNonUniqueKey constructs the internal key to use with non-unique indexes.
-// It concatenates the secondary key with the primary key and the length of the secondary key.
-// The length is stored as unsigned 16-bit big endian.
-// This allows looking up from the non-unique index with the secondary key by doing a prefix
-// search. The length is used to safe-guard against indexers that don't terminate the key
-// properly (e.g. if secondary key is "foo", then we don't want "foobar" to match).
+// The key is constructed by concatenating the secondary key with the primary key
+// along with the secondary key length. The secondary and primary key are separated
+// with by a 0x0 to ensure ordering is defined by the secondary key. To make sure the
+// separator does not appear in the primary key it is encoded using this schema:
+//
+//	0x0 => 0xfe, 0xfe => 0xfd00, 0xfd => 0xfd01
+//
+// The schema tries to avoid expansion for encoded small integers, e.g. 0x0000 becomes 0xfefe.
+// The length at the end is encoded as unsigned 16-bit big endian.
+//
+// This schema allows looking up from the non-unique index with the secondary key by
+// doing a prefix search. The length is used to safe-guard against indexers that don't
+// terminate the key properly (e.g. if secondary key is "foo", then we don't want
+// "foobar" to match).
 func encodeNonUniqueKey(primary, secondary index.Key) []byte {
-	key := make([]byte, 0, len(secondary)+len(primary)+2)
+	key := make([]byte, 0,
+		len(secondary)+1 /* separator */ +
+			len(primary)+
+			2 /* space for few substitutions */ +
+			2 /* length */)
 	key = append(key, secondary...)
-	key = append(key, primary...)
+	key = append(key, nonUniqueSeparator)
+	key = appendEncodePrimary(key, primary)
 	// KeySet limits size of key to 16 bits.
 	return binary.BigEndian.AppendUint16(key, uint16(len(secondary)))
 }
 
-func decodeNonUniqueKey(key []byte) (primary []byte, secondary []byte) {
-	// Multi-index key is [<secondary...>, <primary...>, <secondary length>]
+func decodeNonUniqueKey(key []byte) (secondary []byte, encPrimary []byte) {
+	// Non-unique key is [<secondary...>, '\xfe', <encoded primary...>, <secondary length>]
 	if len(key) < 2 {
 		return nil, nil
 	}
@@ -359,7 +396,7 @@ func decodeNonUniqueKey(key []byte) (primary []byte, secondary []byte) {
 	if len(key) < secondaryLength {
 		return nil, nil
 	}
-	return key[secondaryLength : len(key)-2], key[:secondaryLength]
+	return key[:secondaryLength], key[secondaryLength+1 : len(key)-2]
 }
 
 func (txn *txn) Abort() {

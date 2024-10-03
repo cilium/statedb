@@ -293,7 +293,7 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 		}
 
 		// Check that we have a full match on the key
-		_, secondary := decodeNonUniqueKey(key)
+		secondary, _ := decodeNonUniqueKey(key)
 		if len(secondary) == len(q.key) {
 			break
 		}
@@ -318,7 +318,10 @@ func (t *genTable[Obj]) LowerBoundWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Ob
 	// we watch the whole table for changes.
 	watch := indexTxn.RootWatch()
 	iter := indexTxn.LowerBound(q.key)
-	return partSeq[Obj](iter), watch
+	if indexTxn.unique {
+		return partSeq[Obj](iter), watch
+	}
+	return nonUniqueLowerBoundSeq[Obj](iter, q.key), watch
 }
 
 func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
@@ -329,7 +332,10 @@ func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revisio
 func (t *genTable[Obj]) PrefixWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.Prefix(q.key)
-	return partSeq[Obj](iter), watch
+	if indexTxn.unique {
+		return partSeq[Obj](iter), watch
+	}
+	return nonUniqueSeq[Obj](iter, true, q.key), watch
 }
 
 func (t *genTable[Obj]) All(txn ReadTxn) iter.Seq2[Obj, Revision] {
@@ -366,7 +372,7 @@ func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Rev
 	// iteration will continue until key length mismatches, e.g. we hit a
 	// longer key sharing the same prefix.
 	iter, watch := indexTxn.Prefix(q.key)
-	return nonUniqueSeq[Obj](iter, q.key), watch
+	return nonUniqueSeq[Obj](iter, false, q.key), watch
 }
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
