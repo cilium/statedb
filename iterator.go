@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"bytes"
 	"fmt"
 	"iter"
 	"slices"
@@ -71,29 +72,11 @@ func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
 	}
 }
 
-// anySeq returns a sequence of objects from a part Iterator.
-func anySeq(iter *part.Iterator[object]) iter.Seq2[any, Revision] {
-	return func(yield func(any, Revision) bool) {
-		// Iterate over a clone of the original iterator to allow the sequence to be iterated
-		// from scratch multiple times.
-		it := iter.Clone()
-		for {
-			_, iobj, ok := it.Next()
-			if !ok {
-				break
-			}
-			if !yield(iobj.data, iobj.revision) {
-				break
-			}
-		}
-	}
-}
-
 // nonUniqueSeq returns a sequence of objects for a non-unique index.
 // Non-unique indexes work by concatenating the secondary key with the
 // primary key and then prefix searching for the items:
 //
-//	<secondary><primary><secondary length>
+//	<secondary>\0<primary><secondary length>
 //	^^^^^^^^^^^
 //
 // Since the primary key can be of any length and we're prefix searching,
@@ -102,31 +85,89 @@ func anySeq(iter *part.Iterator[object]) iter.Seq2[any, Revision] {
 // For example if we search for the key "aaaa", then we might have the following
 // matches (_ is just delimiting, not part of the key):
 //
-//	aaaa_bbb4
-//	aaa_abab3
-//	aaaa_ccc4
+//	aaaa\0bbb4
+//	aaa\0abab3
+//	aaaa\0ccc4
 //
-// We yield "aaaa_bbb4", skip "aaa_abab3" and yield "aaaa_ccc4".
-func nonUniqueSeq[Obj any](iter *part.Iterator[object], searchKey []byte) iter.Seq2[Obj, Revision] {
+// We yield "aaaa\0bbb4", skip "aaa\0abab3" and yield "aaaa\0ccc4".
+func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searchKey []byte) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
 		// Clone the iterator to allow multiple iterations over the sequence.
 		it := iter.Clone()
+
+		var visited map[string]struct{}
+		if prefixSearch {
+			// When prefix searching, keep track of objects we've already seen as
+			// multiple keys in non-unique index may map to a single object.
+			// When just doing a List() on a non-unique index we will see each object
+			// only once and do not need to track this.
+			//
+			// This of course makes iterating over a non-unique index with a prefix
+			// (or lowerbound search) about 20x slower than normal!
+			visited = map[string]struct{}{}
+		}
+
 		for {
 			key, iobj, ok := it.Next()
 			if !ok {
 				break
 			}
 
-			_, secondary := decodeNonUniqueKey(key)
+			secondary, primary := decodeNonUniqueKey(key)
 
-			// The secondary key doesn't match the search key. Since the primary
-			// key length can vary, we need to continue the prefix search.
-			if len(secondary) != len(searchKey) {
+			// The secondary key is shorter than what we're looking for, e.g.
+			// we match into the primary key. Keep searching for matching secondary
+			// keys.
+			switch {
+			case !prefixSearch && len(secondary) != len(searchKey):
 				continue
+			case prefixSearch && len(secondary) < len(searchKey):
+				continue
+			}
+
+			if prefixSearch {
+				// When doing a prefix search on a non-unique index we may see the
+				// same object multiple times since multiple keys may point it.
+				// Skip if we've already seen this object.
+				if _, found := visited[string(primary)]; found {
+					continue
+				}
+				visited[string(primary)] = struct{}{}
 			}
 
 			if !yield(iobj.data.(Obj), iobj.revision) {
 				break
+			}
+		}
+	}
+}
+
+func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []byte) iter.Seq2[Obj, Revision] {
+	return func(yield func(Obj, Revision) bool) {
+		// Clone the iterator to allow multiple uses.
+		iter = iter.Clone()
+
+		// Keep track of objects we've already seen as multiple keys in non-unique
+		// index may map to a single object.
+		visited := map[string]struct{}{}
+		for {
+			key, iobj, ok := iter.Next()
+			if !ok {
+				break
+			}
+			// With a non-unique index we have a composite key <secondary><primary><secondary len>.
+			// This means we need to check every key that it's larger or equal to the search key.
+			// Just seeking to the first one isn't enough as the secondary key length may vary.
+			secondary, primary := decodeNonUniqueKey(key)
+			if bytes.Compare(secondary, searchKey) >= 0 {
+				if _, found := visited[string(primary)]; found {
+					continue
+				}
+				visited[string(primary)] = struct{}{}
+
+				if !yield(iobj.data.(Obj), iobj.revision) {
+					return
+				}
 			}
 		}
 	}

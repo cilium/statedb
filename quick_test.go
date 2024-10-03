@@ -62,7 +62,7 @@ func isOrdered[A cmp.Ordered, B any](t *testing.T, it iter.Seq2[A, B]) bool {
 	return true
 }
 
-func seqLen[A cmp.Ordered, B any](it iter.Seq2[A, B]) int {
+func seqLen[A, B any](it iter.Seq2[A, B]) int {
 	n := 0
 	for range it {
 		n++
@@ -167,13 +167,13 @@ func TestDB_Quick(t *testing.T) {
 		// Check against the secondary (non-unique index)
 		//
 
-		// Non-unique indexes return at least as many objects as we've inserted.
-		if numExpected > seqLen(Map(table.Prefix(rtxn, bIndex.Query("")), quickObj.getB)) {
+		// Non-unique indexes return the same number of objects as we've inserted.
+		if numExpected != seqLen(table.Prefix(rtxn, bIndex.Query(""))) {
 			t.Logf("Prefix() via bIndex wrong length")
 			return false
 		}
-		if numExpected > seqLen(Map(table.LowerBound(rtxn, bIndex.Query("")), quickObj.getB)) {
-			t.Logf("LowerBOund() via bIndex wrong length")
+		if numExpected != seqLen(table.LowerBound(rtxn, bIndex.Query(""))) {
+			t.Logf("LowerBound() via bIndex wrong length")
 			return false
 		}
 
@@ -200,17 +200,30 @@ func TestDB_Quick(t *testing.T) {
 			return false
 		}
 
+		visited := map[string]struct{}{}
 		for obj := range table.Prefix(rtxn, bIndex.Query(b)) {
 			if !strings.HasPrefix(obj.B, b) {
 				t.Logf("Prefix() via bIndex has wrong prefix")
 				return false
 			}
+			if _, found := visited[obj.A]; found {
+				t.Logf("Prefix() visited object %q twice", obj.A)
+				return false
+			}
+			visited[obj.A] = struct{}{}
 		}
+
+		visited = map[string]struct{}{}
 		for obj := range table.LowerBound(rtxn, bIndex.Query(b)) {
 			if cmp.Compare(obj.B, b) < 0 {
 				t.Logf("LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(b))
 				return false
 			}
+			if _, found := visited[obj.A]; found {
+				t.Logf("Prefix() visited object %q twice", obj.A)
+				return false
+			}
+			visited[obj.A] = struct{}{}
 		}
 
 		// Iterating over the secondary index returns the objects in order

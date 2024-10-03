@@ -13,7 +13,7 @@ type AnyTable struct {
 
 func (t AnyTable) All(txn ReadTxn) iter.Seq2[any, Revision] {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t.Meta, PrimaryIndexPos)
-	return anySeq(indexTxn.Iterator())
+	return partSeq[any](indexTxn.Iterator())
 }
 
 func (t AnyTable) UnmarshalYAML(data []byte) (any, error) {
@@ -41,13 +41,19 @@ func (t AnyTable) Delete(txn WriteTxn, obj any) (old any, hadOld bool, err error
 func (t AnyTable) Prefix(txn ReadTxn, key string) iter.Seq2[any, Revision] {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t.Meta, PrimaryIndexPos)
 	iter, _ := indexTxn.Prefix([]byte(key))
-	return anySeq(iter)
+	if indexTxn.unique {
+		return partSeq[any](iter)
+	}
+	return nonUniqueSeq[any](iter, true, []byte(key))
 }
 
 func (t AnyTable) LowerBound(txn ReadTxn, key string) iter.Seq2[any, Revision] {
 	indexTxn := txn.getTxn().mustIndexReadTxn(t.Meta, PrimaryIndexPos)
 	iter := indexTxn.LowerBound([]byte(key))
-	return anySeq(iter)
+	if indexTxn.unique {
+		return partSeq[any](iter)
+	}
+	return nonUniqueLowerBoundSeq[any](iter, []byte(key))
 }
 
 func (t AnyTable) TableHeader() []string {
