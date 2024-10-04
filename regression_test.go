@@ -164,5 +164,78 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 		n++
 	}
 	require.Equal(t, 3, n, "expected 3 deletions")
+}
+
+// Prefix and LowerBound searches on non-unique indexes did not properly check
+// whether the object was a false positive due to matching on the primary key part
+// of the composite key (<secondary><primary><secondary length>). E.g. if the
+// composite keys were <a><aa><1> and <aa><b><2> then Prefix("aa") incorrectly
+// yielded the <a><aa><1> as it matched partially the primary key <aa>.
+//
+// Also another issue existed with the ordering of the results due to there being
+// no separator between <secondary> and <primary> parts of the composite key.
+// E.g. <a><z><1> and <aa><a><2> were yielded in the incorrect order
+// <aa><a><2> and <a><z><1>, which implied "aa" < "a"!
+func Test_Regression_Prefix_NonUnique(t *testing.T) {
+	type object struct {
+		ID  string
+		Tag string
+	}
+	idIndex := Index[object, string]{
+		Name: "id",
+		FromObject: func(t object) index.KeySet {
+			return index.NewKeySet(index.String(t.ID))
+		},
+		FromKey: index.String,
+		Unique:  true,
+	}
+	tagIndex := Index[object, string]{
+		Name: "tag",
+		FromObject: func(t object) index.KeySet {
+			return index.NewKeySet(index.String(t.Tag))
+		},
+		FromKey: index.String,
+		Unique:  false,
+	}
+
+	db, _, _ := newTestDB(t)
+	table, err := NewTable("objects", idIndex, tagIndex)
+	require.NoError(t, err)
+	require.NoError(t, db.RegisterTable(table))
+
+	wtxn := db.WriteTxn(table)
+	table.Insert(wtxn, object{"aa", "a"})
+	table.Insert(wtxn, object{"b", "bb"})
+	table.Insert(wtxn, object{"z", "b"})
+	wtxn.Commit()
+
+	// The tag index has one object with tag "a", prefix searching
+	// "aa" should return nothing.
+	txn := db.ReadTxn()
+	iter := table.Prefix(txn, tagIndex.Query("aa"))
+	items := Collect(iter)
+	assert.Len(t, items, 0, "Prefix(\"aa\") should return nothing")
+
+	iter = table.Prefix(txn, tagIndex.Query("a"))
+	items = Collect(iter)
+	if assert.Len(t, items, 1, "Prefix(\"a\") on tags should return one match") {
+		assert.EqualValues(t, "aa", items[0].ID)
+	}
+
+	// Check prefix search ordering: should be fully defined by the secondary key.
+	iter = table.Prefix(txn, tagIndex.Query("b"))
+	items = Collect(iter)
+	if assert.Len(t, items, 2, "Prefix(\"b\") on tags should return two matches") {
+		assert.EqualValues(t, "z", items[0].ID)
+		assert.EqualValues(t, "b", items[1].ID)
+	}
+
+	// With LowerBound search on "aa" we should see tags "b" and "bb" (in that order)
+	iter = table.LowerBound(txn, tagIndex.Query("aa"))
+	items = Collect(iter)
+	if assert.Len(t, items, 2, "LowerBound(\"aa\") on tags should return two matches") {
+		assert.EqualValues(t, "z", items[0].ID)
+		assert.EqualValues(t, "b", items[1].ID)
+	}
 
 }
