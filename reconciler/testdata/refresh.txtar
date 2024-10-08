@@ -1,0 +1,58 @@
+hive start
+start-reconciler with-refresh
+
+# Step 1: Add a test object.
+db insert test-objects obj1.yaml
+expect-ops 'update(1)'
+db cmp test-objects step1.table
+
+# Step 2: Set the object as updated in the past to force refresh
+db insert test-objects obj1_old.yaml
+expect-ops 'update-refresh(1)'
+
+# Step 3: Refresh with faulty target, should see fail & retries
+set-faulty true
+db insert test-objects obj1_old.yaml
+expect-ops 'update-refresh(1) fail' 'update-refresh(1) fail'
+db cmp test-objects step3.table
+health
+health 'job-reconcile.*Degraded'
+
+# Step 4: Back to health
+set-faulty false
+db insert test-objects obj1_old.yaml
+expect-ops 'update-refresh(1)'
+db cmp test-objects step4.table
+health 'job-reconcile.*OK, 1 object'
+
+# -----
+-- step1.table --
+ID  StatusKind
+1   Done
+
+-- step3.table --
+ID  StatusKind
+1   Error
+
+-- step4.table --
+ID  StatusKind
+1   Done
+
+-- obj1.yaml --
+id: 1
+faulty: false
+updates: 1
+status:
+    kind: Pending
+    updatedat: 2024-01-01T10:10:10.0+02:00
+    error: ""
+
+-- obj1_old.yaml --
+id: 1
+faulty: false
+updates: 1
+status:
+    kind: Done
+    updatedat: 2000-01-01T10:10:10.0+02:00
+    error: ""
+

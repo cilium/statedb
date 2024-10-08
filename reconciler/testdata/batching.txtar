@@ -1,0 +1,126 @@
+# Test the incremental reconciliation with
+# batching.
+
+hive start
+start-reconciler with-batchops
+
+# From here this is the same as incremental.txtar.
+
+# Step 1: Insert non-faulty objects
+db insert test-objects obj1.yaml
+db insert test-objects obj2.yaml
+db insert test-objects obj3.yaml
+db cmp test-objects step1+3.table
+expect-ops update(1) update(2) update(3)
+
+# Reconciler should be running and reporting health
+health 'job-reconcile.*level=OK.*message=OK, 3 object'
+
+# Step 2: Update object '1' to be faulty and check that it fails and is being
+# retried.
+db insert test-objects obj1_faulty.yaml
+expect-ops 'update(1) fail' 'update(1) fail' 
+db cmp test-objects step2.table
+health 'job-reconcile.*level=Degraded.*1 error'
+
+# Step 3: Set object '1' back to healthy state
+db insert test-objects obj1.yaml
+expect-ops 'update(1)'
+db cmp test-objects step1+3.table
+health 'job-reconcile.*level=OK'
+
+# Step 4: Delete '1' and '2'
+db delete test-objects obj1.yaml
+db delete test-objects obj2.yaml
+db cmp test-objects step4.table
+expect-ops 'delete(1)' 'delete(2)'
+
+# Step 5: Try to delete '3' with faulty target
+set-faulty true
+db delete test-objects obj3.yaml
+db cmp test-objects empty.table
+expect-ops 'delete(3) fail'
+health 'job-reconcile.*level=Degraded.*1 error'
+
+# Step 6: Set the target back to healthy
+set-faulty false
+expect-ops 'delete(3)'
+health 'job-reconcile.*level=OK.*message=OK, 0 object'
+
+# Check metrics
+expvar
+! grep 'reconciliation_count.test: 0$'
+grep 'reconciliation_current_errors.test: 0$'
+! grep 'reconciliation_total_errors.test: 0$'
+! grep 'reconciliation_duration.test/update: 0$'
+! grep 'reconciliation_duration.test/delete: 0$'
+
+# ------------
+
+-- empty.table --
+ID  StatusKind
+
+-- step1+3.table --
+ID  StatusKind StatusError
+1   Done
+2   Done
+3   Done
+
+-- step2.table --
+ID  StatusKind StatusError
+1   Error      update fail
+2   Done
+3   Done
+
+-- step4.table --
+ID  StatusKind
+3   Done
+
+-- step7.table --
+ID   Faulty   StatusKind   StatusError
+4    true     Error        update fail
+5    false    Done
+
+
+-- step8.table --
+ID   Faulty   StatusKind
+4    false    Done   
+5    false    Done
+
+
+-- obj1.yaml --
+id: 1
+faulty: false
+status:
+    kind: Pending
+
+-- obj1_faulty.yaml --
+id: 1
+faulty: true
+status:
+    kind: Pending
+
+-- obj2.yaml --
+id: 2
+faulty: false
+status:
+    kind: Pending
+
+-- obj2_faulty.yaml --
+id: 2
+faulty: true
+status:
+    kind: Pending
+
+-- obj3.yaml --
+id: 3
+faulty: false
+status:
+    kind: Pending
+
+-- obj3_faulty.yaml --
+id: 3
+faulty: true
+status:
+    kind: Pending
+
