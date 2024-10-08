@@ -1,0 +1,7 @@
+hive start
+start-reconciler with-prune
+
+# Pruning happens when table is initialized even without any objects.
+mark-init
+expect-ops prune(n=0)
+health 'job-reconcile.*level=OK'

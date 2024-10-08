@@ -83,6 +83,11 @@ func TestMultipleReconcilers(t *testing.T) {
 		cell.Provide(
 			cell.NewSimpleHealth,
 			reconciler.NewExpVarMetrics,
+			func(r job.Registry, h cell.Health, lc cell.Lifecycle) job.Group {
+				g := r.NewGroup(h)
+				lc.Append(g)
+				return g
+			},
 		),
 		cell.Invoke(func(db_ *statedb.DB) error {
 			db = db_
