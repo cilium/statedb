@@ -66,12 +66,9 @@ var (
 		FromObject: func(t testObject) index.KeySet {
 			return index.NewKeySet(index.Uint64(t.ID))
 		},
-		FromKey: index.Uint64,
-		FromString: func(key string) (index.Key, error) {
-			v, err := strconv.ParseUint(key, 10, 64)
-			return index.Uint64(v), err
-		},
-		Unique: true,
+		FromKey:    index.Uint64,
+		FromString: index.Uint64String,
+		Unique:     true,
 	}
 
 	tagsIndex = Index[testObject, string]{
