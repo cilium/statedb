@@ -6,6 +6,7 @@ package statedb
 import (
 	"context"
 	"iter"
+	"log/slog"
 	"math/rand"
 	"sort"
 	"testing"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
 )
@@ -471,9 +473,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		table2 = MustNewTable("test2", id2Index)
 	)
 
-	h := hive.NewWithOptions(
-		hive.Options{Logger: logger},
-
+	h := hive.New(
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) error {
 			db = db_
@@ -481,9 +481,10 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		}),
 	)
 
-	require.NoError(b, h.Start(context.TODO()))
+	log := hivetest.Logger(b, hivetest.LogLevel(slog.LevelError))
+	require.NoError(b, h.Start(log, context.TODO()))
 	b.Cleanup(func() {
-		assert.NoError(b, h.Stop(context.TODO()))
+		assert.NoError(b, h.Stop(log, context.TODO()))
 	})
 
 	b.ResetTimer()

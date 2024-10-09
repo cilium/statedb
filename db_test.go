@@ -9,7 +9,6 @@ import (
 	"expvar"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime"
 	"slices"
 	"testing"
@@ -21,6 +20,7 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
 	"github.com/cilium/stream"
@@ -72,11 +72,6 @@ const (
 	NO_INDEX_TAGS = false
 )
 
-// Do not log debug&info level logs in tests.
-var logger = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-	Level: slog.LevelError,
-}))
-
 func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject], *ExpVarMetrics) {
 	metrics := NewExpVarMetrics(false)
 	db, table := newTestDBWithMetrics(t, metrics, secondaryIndexers...)
@@ -94,9 +89,7 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 	)
 	require.NoError(t, err, "NewTable[testObject]")
 
-	h := hive.NewWithOptions(
-		hive.Options{Logger: logger},
-
+	h := hive.New(
 		cell.Provide(func() Metrics { return metrics }),
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) {
@@ -110,9 +103,10 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 		}),
 	)
 
-	require.NoError(t, h.Start(context.TODO()))
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+	require.NoError(t, h.Start(log, context.TODO()))
 	t.Cleanup(func() {
-		assert.NoError(t, h.Stop(context.TODO()))
+		assert.NoError(t, h.Stop(log, context.TODO()))
 	})
 	return db, table
 }

@@ -7,12 +7,14 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"log/slog"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
@@ -130,7 +132,8 @@ func TestMultipleReconcilers(t *testing.T) {
 		),
 	)
 
-	require.NoError(t, hive.Start(context.TODO()), "Start")
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+	require.NoError(t, hive.Start(log, context.TODO()), "Start")
 
 	wtxn := db.WriteTxn(table)
 	table.Insert(wtxn, &multiStatusObject{
@@ -184,5 +187,5 @@ func TestMultipleReconcilers(t *testing.T) {
 		<-watch
 	}
 
-	require.NoError(t, hive.Stop(context.TODO()), "Stop")
+	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
 }

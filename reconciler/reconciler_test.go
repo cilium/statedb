@@ -9,6 +9,7 @@ import (
 	"expvar"
 	"fmt"
 	"iter"
+	"log/slog"
 	"slices"
 	"sort"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
@@ -137,9 +139,10 @@ func testReconciler(t *testing.T, batchOps bool) {
 		)
 
 		t.Run(name, func(t *testing.T) {
-			require.NoError(t, hive.Start(context.TODO()), "Start")
+			log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+			require.NoError(t, hive.Start(log, context.TODO()), "Start")
 			t.Cleanup(func() {
-				assert.NoError(t, hive.Stop(context.TODO()), "Stop")
+				assert.NoError(t, hive.Stop(log, context.TODO()), "Stop")
 			})
 			run(testHelper{
 				t:        t,
@@ -642,7 +645,7 @@ func (h testHelper) expectRetried(id uint64) {
 func (h testHelper) expectHealth(level cell.Level, statusSubString string, errSubString string) {
 	h.t.Helper()
 	cond := func() bool {
-		health := h.health.GetChild("test", "job-reconcile")
+		health := h.health.GetChild("job-reconcile")
 		require.NotNil(h.t, health, "GetChild")
 		health.Lock()
 		defer health.Unlock()
@@ -653,7 +656,7 @@ func (h testHelper) expectHealth(level cell.Level, statusSubString string, errSu
 		return level == health.Level && strings.Contains(health.Status, statusSubString) && strings.Contains(errStr, errSubString)
 	}
 	if !assert.Eventually(h.t, cond, time.Second, time.Millisecond) {
-		hc := h.health.GetChild("test", "job-reconcile")
+		hc := h.health.GetChild("job-reconcile")
 		require.NotNil(h.t, hc, "GetChild")
 		hc.Lock()
 		defer hc.Unlock()
