@@ -5,6 +5,7 @@ package part_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"iter"
 	"math/rand/v2"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStringMap(t *testing.T) {
@@ -168,6 +170,39 @@ func TestMapJSON(t *testing.T) {
 
 	var m2 part.Map[string, int]
 	err = json.Unmarshal(bs, &m2)
+	require.NoError(t, err, "Unmarshal")
+	require.True(t, m.SlowEqual(m2), "SlowEqual")
+}
+
+func TestMapYAMLStringKey(t *testing.T) {
+	var m part.Map[string, int]
+	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
+
+	bs, err := yaml.Marshal(m)
+	require.NoError(t, err, "Marshal")
+
+	var m2 part.Map[string, int]
+	err = yaml.Unmarshal(bs, &m2)
+	require.NoError(t, err, "Unmarshal")
+	require.True(t, m.SlowEqual(m2), "SlowEqual")
+}
+
+func TestMapYAMLStructKey(t *testing.T) {
+	type key struct {
+		A int    `yaml:"a"`
+		B string `yaml:"b"`
+	}
+	part.RegisterKeyType[key](func(k key) []byte {
+		return []byte(fmt.Sprintf("%d-%s", k.A, k.B))
+	})
+	var m part.Map[key, int]
+	m = m.Set(key{1, "one"}, 1).Set(key{2, "two"}, 2).Set(key{3, "three"}, 3)
+
+	bs, err := yaml.Marshal(m)
+	require.NoError(t, err, "Marshal")
+
+	var m2 part.Map[key, int]
+	err = yaml.Unmarshal(bs, &m2)
 	require.NoError(t, err, "Unmarshal")
 	require.True(t, m.SlowEqual(m2), "SlowEqual")
 }

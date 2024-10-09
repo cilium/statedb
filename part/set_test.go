@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package part_test
 
 import (
@@ -8,6 +11,7 @@ import (
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 func TestStringSet(t *testing.T) {
@@ -62,6 +66,18 @@ func TestSetJSON(t *testing.T) {
 
 	var s2 part.Set[string]
 	err = json.Unmarshal(bs, &s2)
+	require.NoError(t, err, "Unmarshal")
+	require.True(t, s.Equal(s2), "Equal")
+}
+
+func TestSetYAML(t *testing.T) {
+	s := part.NewSet("foo", "bar", "baz")
+
+	bs, err := yaml.Marshal(s)
+	require.NoError(t, err, "Marshal")
+
+	var s2 part.Set[string]
+	err = yaml.Unmarshal(bs, &s2)
 	require.NoError(t, err, "Unmarshal")
 	require.True(t, s.Equal(s2), "Equal")
 }
