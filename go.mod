@@ -3,7 +3,7 @@ module github.com/cilium/statedb
 go 1.23
 
 require (
-	github.com/cilium/hive v0.0.0-20240209163124-bd6ebb4ec11d
+	github.com/cilium/hive v0.0.0-20241009102328-2ab688845f23
 	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
 	github.com/rogpeppe/go-internal v1.11.0
 	github.com/spf13/cobra v1.8.0

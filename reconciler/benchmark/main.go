@@ -113,9 +113,7 @@ func main() {
 		panic(err)
 	}
 
-	hive := hive.NewWithOptions(
-		hive.Options{Logger: logger},
-
+	hive := hive.New(
 		cell.SimpleHealthCell,
 		statedb.Cell,
 		job.Cell,
@@ -154,7 +152,7 @@ func main() {
 		),
 	)
 
-	err = hive.Start(context.TODO())
+	err = hive.Start(logger, context.TODO())
 	if err != nil {
 		panic(err)
 	}
@@ -228,7 +226,7 @@ func main() {
 	var memAfter runtime.MemStats
 	runtime.ReadMemStats(&memAfter)
 
-	err = hive.Stop(context.TODO())
+	err = hive.Stop(logger, context.TODO())
 	if err != nil {
 		panic(err)
 	}

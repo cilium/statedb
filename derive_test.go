@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
@@ -51,6 +53,8 @@ func (*nopHealth) OK(status string) {
 // Stopped implements cell.Health.
 func (*nopHealth) Stopped(reason string) {
 }
+
+func (*nopHealth) Close() {}
 
 func newNopHealth() (cell.Health, *nopHealth) {
 	h := &nopHealth{}
@@ -103,7 +107,8 @@ func TestDerive(t *testing.T) {
 			cell.Invoke(Derive("testObject-to-derived", transform)),
 		),
 	)
-	require.NoError(t, h.Start(context.TODO()), "Start")
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+	require.NoError(t, h.Start(log, context.TODO()), "Start")
 
 	getDerived := func() []derived {
 		txn := db.ReadTxn()
@@ -174,5 +179,5 @@ func TestDerive(t *testing.T) {
 		"expected 1 to be gone, and 2 mark deleted",
 	)
 
-	require.NoError(t, h.Stop(context.TODO()), "Stop")
+	require.NoError(t, h.Stop(log, context.TODO()), "Stop")
 }
