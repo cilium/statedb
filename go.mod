@@ -2,9 +2,12 @@ module github.com/cilium/statedb
 
 go 1.23
 
+replace github.com/cilium/hive => ../hive
+
 require (
 	github.com/cilium/hive v0.0.0-20241009102328-2ab688845f23
 	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
+	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.8.4
