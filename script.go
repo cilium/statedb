@@ -649,12 +649,11 @@ func writeObjects(tbl *AnyTable, it iter.Seq2[any, Revision], w io.Writer, colum
 	return fmt.Errorf("unknown format %q, expected table, yaml or json", format)
 }
 
-func takeColumns[T any](xs []T, idxs []int) []T {
-	// Invariant: idxs is sorted so can set in-place.
-	for i, idx := range idxs {
-		xs[i] = xs[idx]
+func takeColumns[T any](xs []T, idxs []int) (out []T) {
+	for _, idx := range idxs {
+		out = append(out, xs[idx])
 	}
-	return xs[:len(idxs)]
+	return
 }
 
 func getColumnIndexes(names []string, header []string) ([]int, error) {
