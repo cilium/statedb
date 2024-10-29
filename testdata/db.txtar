@@ -39,16 +39,14 @@ grep ^Tags$
 grep '^bar, foo$'
 grep '^baz, foo$'
 
-db show  -format=json test1
-grep ID.:1.*bar
-grep ID.:2.*baz
+db show -format=table -o=test1_show.table test1
+cmp test1.table test1_show.table
 
-db show  -format=yaml test1
-grep 'id: 1'
-grep 'id: 2'
+db show -format=yaml -o=test1_show.yaml test1
+cmp test1.yaml test1_show.yaml
 
-db show -format=yaml -o=test1_export.yaml test1
-cmp test1.yaml test1_export.yaml
+db show -format=json -o=test1_show.json test1
+cmp test1.json test1_show.json
 
 # Get
 db get test2 2
@@ -160,6 +158,25 @@ id: 2
 tags:
     - baz
     - foo
+-- test1.json --
+{
+  "ID": 1,
+  "Tags": [
+    "bar",
+    "foo"
+  ]
+}
+{
+  "ID": 2,
+  "Tags": [
+    "baz",
+    "foo"
+  ]
+}
+-- test1.table --
+ID   Tags
+1    bar, foo
+2    baz, foo
 -- objs.table --
 ID   Tags
 1    bar, foo

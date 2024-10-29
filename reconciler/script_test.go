@@ -30,7 +30,7 @@ import (
 	"golang.org/x/time/rate"
 )
 
-func newScriptTest(t *testing.T) *script.Engine {
+func newEngine(t testing.TB, args []string) *script.Engine {
 	log := hivetest.Logger(t)
 
 	var (
@@ -225,9 +225,9 @@ func TestScript(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	scripttest.Test(t,
-		ctx, func() *script.Engine {
-			return newScriptTest(t)
-		}, []string{}, "testdata/*.txtar")
+		ctx, newEngine,
+		[]string{},
+		"testdata/*.txtar")
 }
 
 type testObject struct {
