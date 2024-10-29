@@ -37,9 +37,13 @@ func TestScript(t *testing.T) {
 		Cmds: cmds,
 	}
 	scripttest.Test(t,
-		context.Background(), func() *script.Engine {
+		context.Background(),
+		func(t testing.TB, args []string) *script.Engine {
 			return engine
-		}, []string{}, "testdata/*.txtar")
+		},
+		[]string{},
+		"testdata/*.txtar",
+	)
 }
 
 func TestHeaderLine(t *testing.T) {
