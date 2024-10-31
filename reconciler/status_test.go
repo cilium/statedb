@@ -40,6 +40,57 @@ func TestStatusString(t *testing.T) {
 	assert.Regexp(t, `Error: hey I'm an error \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 }
 
+func TestStatusJSON(t *testing.T) {
+	testCases := []struct {
+		s        Status
+		expected string
+	}{
+		{
+			Status{
+				Kind:      StatusKindDone,
+				UpdatedAt: time.Unix(1, 0).UTC(),
+				Error:     "",
+			},
+			`{"kind":"Done","updated-at":"1970-01-01T00:00:01Z"}`,
+		},
+		{
+			Status{
+				Kind:      StatusKindPending,
+				UpdatedAt: time.Unix(2, 0).UTC(),
+				Error:     "",
+			},
+			`{"kind":"Pending","updated-at":"1970-01-01T00:00:02Z"}`,
+		},
+		{
+			Status{
+				Kind:      StatusKindError,
+				UpdatedAt: time.Unix(3, 0).UTC(),
+				Error:     "some-error",
+			},
+			`{"kind":"Error","updated-at":"1970-01-01T00:00:03Z","error":"some-error"}`,
+		},
+		{
+			Status{
+				Kind:      StatusKindRefreshing,
+				UpdatedAt: time.Unix(4, 0).UTC(),
+				Error:     "",
+			},
+			`{"kind":"Refreshing","updated-at":"1970-01-01T00:00:04Z"}`,
+		},
+	}
+
+	for _, tc := range testCases {
+		b, err := json.Marshal(tc.s)
+		assert.NoError(t, err, "Marshal")
+		assert.Equal(t, tc.expected, string(b))
+
+		var s Status
+		assert.NoError(t, json.Unmarshal(b, &s), "Unmarshal")
+		assert.Equal(t, tc.s, s)
+	}
+
+}
+
 func sanitizeAgo(s string) string {
 	r := regexp.MustCompile(`\(.* ago\)`)
 	return string(r.ReplaceAll([]byte(s), []byte("(??? ago)")))
