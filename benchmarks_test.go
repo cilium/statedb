@@ -94,6 +94,68 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_Delete(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+
+	b.ResetTimer()
+	for range b.N {
+		txn := db.WriteTxn(table)
+		for i := range numObjectsToInsert {
+			table.Insert(txn, testObject{ID: uint64(i)})
+		}
+		txn.Commit()
+
+		txn = db.WriteTxn(table)
+		table.DeleteAll(txn)
+		txn.Commit()
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "insert+delete/sec")
+}
+
+func BenchmarkDB_Delete_With_Changes(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	txn := db.WriteTxn(table)
+	iter, err := table.Changes(txn)
+	txn.Commit()
+	require.NoError(b, err)
+
+	b.ResetTimer()
+	for range b.N {
+		txn := db.WriteTxn(table)
+		for i := range numObjectsToInsert {
+			table.Insert(txn, testObject{ID: uint64(i)})
+		}
+		rxn := txn.Commit()
+
+		// Observe inserts
+		numChanges := 0
+		changes, _ := iter.Next(rxn)
+		for range changes {
+			numChanges++
+		}
+		if numChanges != numObjectsToInsert {
+			b.Fatalf("expected %d changes, got %d\n", numObjectsToInsert, numChanges)
+		}
+
+		txn = db.WriteTxn(table)
+		table.DeleteAll(txn)
+		rxn = txn.Commit()
+
+		// Observe deletes
+		changes, _ = iter.Next(rxn)
+		numChanges = 0
+		for range changes {
+			numChanges++
+		}
+		if numChanges != numObjectsToInsert {
+			b.Fatalf("expected %d changes, got %d\n", numObjectsToInsert, numChanges)
+		}
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "insert+delete/sec")
+}
+
 func BenchmarkDB_Modify(b *testing.B) {
 	benchmarkDB_Modify_vs_GetInsert(b, false)
 }
