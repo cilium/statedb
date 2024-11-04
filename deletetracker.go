@@ -5,8 +5,6 @@ package statedb
 
 import (
 	"sync/atomic"
-
-	"github.com/cilium/statedb/index"
 )
 
 type deleteTracker[Obj any] struct {
@@ -32,25 +30,11 @@ func (dt *deleteTracker[Obj]) getRevision() uint64 {
 	return dt.revision.Load()
 }
 
-// Deleted returns an iterator for deleted objects in this table starting from
-// 'minRevision'. The deleted objects are not garbage-collected unless 'Mark' is
-// called!
-func (dt *deleteTracker[Obj]) deleted(txn *txn, minRevision Revision) Iterator[Obj] {
-	indexEntry := txn.root[dt.table.tablePos()].indexes[GraveyardRevisionIndexPos]
-	indexTxn := indexReadTxn{indexEntry.tree, indexEntry.unique}
-	iter := indexTxn.LowerBound(index.Uint64(minRevision))
-	return &iterator[Obj]{iter}
-}
-
 // Mark the revision up to which deleted objects have been processed. This sets
 // the low watermark for deleted object garbage collection.
 func (dt *deleteTracker[Obj]) mark(upTo Revision) {
 	// Store the new low watermark and trigger a round of garbage collection.
 	dt.revision.Store(upTo)
-	select {
-	case dt.db.gcTrigger <- struct{}{}:
-	default:
-	}
 }
 
 func (dt *deleteTracker[Obj]) close() {
@@ -70,14 +54,6 @@ func (dt *deleteTracker[Obj]) close() {
 	txn.Commit()
 
 	db.metrics.DeleteTrackerCount(dt.table.Name(), table.deleteTrackers.Len())
-
-	// Trigger garbage collection without this delete tracker to garbage
-	// collect any deleted objects that may not have been consumed.
-	select {
-	case db.gcTrigger <- struct{}{}:
-	default:
-	}
-
 }
 
 var closedWatchChannel = func() <-chan struct{} {

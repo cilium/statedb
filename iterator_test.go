@@ -27,8 +27,6 @@ func TestCollectFilterMapToSeq(t *testing.T) {
 	}
 	table, _ := NewTable("test", idIndex)
 	require.NoError(t, db.RegisterTable(table))
-	db.Start()
-	defer db.Stop()
 
 	txn := db.WriteTxn(table)
 	table.Insert(txn, &testObject{ID: 1})

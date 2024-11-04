@@ -62,7 +62,6 @@ import (
 //  4. Insert/replace the object into primary index
 //  5. Create/reuse write transaction on revision index
 //  6. If old object existed, remove from revision index
-//  7. If old object existed, remove from graveyard
 //  8. Update each secondary index
 //  9. Commit transaction by committing each index to
 //     the table and then committing table to the root.
@@ -74,13 +73,14 @@ import (
 //  2. Create new delete tracker and add it to the table
 //  3. Commit the write transaction to update the table
 //     with the new delete tracker
-//  4. Query the graveyard by revision, starting from the
-//     revision of the write transaction at which it was
-//     created.
+//  4. Query the objects by revision, emitting a deleted
+//     object for each object wrapped in deleted{},
+//     starting from last seen revision.
 //  5. For each successfully processed deletion, mark the
 //     revision to set low watermark for garbage collection.
-//  6. Periodically garbage collect the graveyard by finding
-//     the lowest revision of all delete trackers.
+//  6. On each commit, find objects in revision index that
+//     have been observed and marked deleted and remove them
+//     from the index.
 type DB struct {
 	handleName string
 	*dbState
@@ -88,14 +88,11 @@ type DB struct {
 
 // dbState is the underlying state of the database shared by all [DB] handles.
 type dbState struct {
-	mu                  sync.Mutex // protects 'tables' and sequences modifications to the root tree
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	root                atomic.Pointer[dbRoot]
-	gcTrigger           chan struct{} // trigger for graveyard garbage collection
-	gcExited            chan struct{}
-	gcRateLimitInterval time.Duration
-	metrics             Metrics
+	mu      sync.Mutex // protects 'tables' and sequences modifications to the root tree
+	ctx     context.Context
+	cancel  context.CancelFunc
+	root    atomic.Pointer[dbRoot]
+	metrics Metrics
 }
 
 type dbRoot []tableEntry
@@ -127,8 +124,7 @@ func New(options ...Option) *DB {
 
 	db := &DB{
 		dbState: &dbState{
-			metrics:             opts.metrics,
-			gcRateLimitInterval: defaultGCRateLimitInterval,
+			metrics: opts.metrics,
 		},
 	}
 	db.handleName = "DB"
@@ -270,25 +266,6 @@ func (db *DB) GetTable(txn ReadTxn, name string) TableMeta {
 	return nil
 }
 
-// Start the background workers for the database.
-//
-// This starts the graveyard worker that deals with garbage collecting
-// deleted objects that are no longer necessary for Changes().
-func (db *DB) Start() error {
-	db.gcTrigger = make(chan struct{}, 1)
-	db.gcExited = make(chan struct{})
-	db.ctx, db.cancel = context.WithCancel(context.Background())
-	go graveyardWorker(db, db.ctx, db.gcRateLimitInterval)
-	return nil
-}
-
-// Stop the background workers.
-func (db *DB) Stop() error {
-	db.cancel()
-	<-db.gcExited
-	return nil
-}
-
 // ServeHTTP is an HTTP handler for dumping StateDB as JSON.
 //
 // Example usage:
@@ -301,12 +278,6 @@ func (db *DB) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Add("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	db.ReadTxn().WriteJSON(w)
-}
-
-// setGCRateLimitInterval can set the graveyard GC interval before DB is started.
-// Used by tests.
-func (db *DB) setGCRateLimitInterval(interval time.Duration) {
-	db.gcRateLimitInterval = interval
 }
 
 // NewHandle returns a new named handle to the DB. The given name is used to annotate

@@ -13,7 +13,6 @@ type Metrics interface {
 	WriteTxnDuration(handle string, tables []string, acquire time.Duration)
 
 	GraveyardLowWatermark(tableName string, lowWatermark Revision)
-	GraveyardCleaningDuration(tableName string, duration time.Duration)
 	GraveyardObjectCount(tableName string, numDeletedObjects int)
 	ObjectCount(tableName string, numObjects int)
 
@@ -23,24 +22,20 @@ type Metrics interface {
 
 // ExpVarMetrics is a simple implementation for the metrics.
 type ExpVarMetrics struct {
-	LockContentionVar            *expvar.Map
-	GraveyardCleaningDurationVar *expvar.Map
-	GraveyardLowWatermarkVar     *expvar.Map
-	GraveyardObjectCountVar      *expvar.Map
-	ObjectCountVar               *expvar.Map
-	WriteTxnAcquisitionVar       *expvar.Map
-	WriteTxnDurationVar          *expvar.Map
-	DeleteTrackerCountVar        *expvar.Map
-	RevisionVar                  *expvar.Map
+	LockContentionVar        *expvar.Map
+	GraveyardLowWatermarkVar *expvar.Map
+	GraveyardObjectCountVar  *expvar.Map
+	ObjectCountVar           *expvar.Map
+	WriteTxnAcquisitionVar   *expvar.Map
+	WriteTxnDurationVar      *expvar.Map
+	DeleteTrackerCountVar    *expvar.Map
+	RevisionVar              *expvar.Map
 }
 
 func (m *ExpVarMetrics) String() (out string) {
 	var b strings.Builder
 	m.LockContentionVar.Do(func(kv expvar.KeyValue) {
 		fmt.Fprintf(&b, "lock_contention[%s]: %s\n", kv.Key, kv.Value.String())
-	})
-	m.GraveyardCleaningDurationVar.Do(func(kv expvar.KeyValue) {
-		fmt.Fprintf(&b, "graveyard_cleaning_duration[%s]: %s\n", kv.Key, kv.Value.String())
 	})
 	m.GraveyardLowWatermarkVar.Do(func(kv expvar.KeyValue) {
 		fmt.Fprintf(&b, "graveyard_low_watermark[%s]: %s\n", kv.Key, kv.Value.String())
@@ -75,15 +70,14 @@ func NewExpVarMetrics(publish bool) *ExpVarMetrics {
 		return new(expvar.Map).Init()
 	}
 	return &ExpVarMetrics{
-		LockContentionVar:            newMap("lock_contention"),
-		GraveyardCleaningDurationVar: newMap("graveyard_cleaning_duration"),
-		GraveyardLowWatermarkVar:     newMap("graveyard_low_watermark"),
-		GraveyardObjectCountVar:      newMap("graveyard_object_count"),
-		ObjectCountVar:               newMap("object_count"),
-		WriteTxnAcquisitionVar:       newMap("write_txn_acquisition"),
-		WriteTxnDurationVar:          newMap("write_txn_duration"),
-		DeleteTrackerCountVar:        newMap("delete_tracker_count"),
-		RevisionVar:                  newMap("revision"),
+		LockContentionVar:        newMap("lock_contention"),
+		GraveyardLowWatermarkVar: newMap("graveyard_low_watermark"),
+		GraveyardObjectCountVar:  newMap("graveyard_object_count"),
+		ObjectCountVar:           newMap("object_count"),
+		WriteTxnAcquisitionVar:   newMap("write_txn_acquisition"),
+		WriteTxnDurationVar:      newMap("write_txn_duration"),
+		DeleteTrackerCountVar:    newMap("delete_tracker_count"),
+		RevisionVar:              newMap("revision"),
 	}
 }
 
@@ -97,10 +91,6 @@ func (m *ExpVarMetrics) Revision(name string, revision uint64) {
 	var intVar expvar.Int
 	intVar.Set(int64(revision))
 	m.RevisionVar.Set(name, &intVar)
-}
-
-func (m *ExpVarMetrics) GraveyardCleaningDuration(name string, duration time.Duration) {
-	m.GraveyardCleaningDurationVar.AddFloat(name, duration.Seconds())
 }
 
 func (m *ExpVarMetrics) GraveyardLowWatermark(name string, lowWatermark Revision) {
@@ -139,10 +129,6 @@ type NopMetrics struct{}
 
 // DeleteTrackerCount implements Metrics.
 func (*NopMetrics) DeleteTrackerCount(tableName string, numTrackers int) {
-}
-
-// GraveyardCleaningDuration implements Metrics.
-func (*NopMetrics) GraveyardCleaningDuration(tableName string, duration time.Duration) {
 }
 
 // GraveyardLowWatermark implements Metrics.

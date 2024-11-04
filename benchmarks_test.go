@@ -374,7 +374,7 @@ func BenchmarkDB_Changes(b *testing.B) {
 		}
 	}
 	b.StopTimer()
-	eventuallyGraveyardIsEmpty(b, db)
+
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
 

@@ -84,7 +84,7 @@ func TablesCmd(db *DB) script.Cmd {
 			for _, tbl := range tbls {
 				idxs := strings.Join(tbl.Indexes(), ", ")
 				fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%v\t%T\t%s\n",
-					tbl.Name(), tbl.NumObjects(txn), tbl.numDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.proto(), tbl.getAcquiredInfo())
+					tbl.Name(), tbl.NumObjects(txn), tbl.numPendingDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.proto(), tbl.getAcquiredInfo())
 			}
 			w.Flush()
 			return nil, nil

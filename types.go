@@ -70,9 +70,9 @@ type Table[Obj any] interface {
 
 	// Changes returns an iterator for changes happening to the table.
 	// This uses the revision index to iterate over the objects in the order
-	// they have changed. Deleted objects are placed onto a temporary index
-	// (graveyard) where they live until all change iterators have observed
-	// the deletion.
+	// they have changed. If change iterators exist then objects are marked
+	// as deleted, but kept around in primary and revision indexes until
+	// observed. These deleted objects can only be seen by Changes().
 	//
 	// If an object is created and deleted before the observer has iterated
 	// over the creation then only the deletion is seen.
@@ -167,11 +167,9 @@ type RWTable[Obj any] interface {
 	// Delete an object from the table. Returns the object that was
 	// deleted if there was one.
 	//
-	// If the table is being tracked for deletions via EventIterator()
-	// the deleted object is inserted into a graveyard index and garbage
-	// collected when all delete trackers have consumed it. Each deleted
-	// object in the graveyard has unique revision allowing interleaved
-	// iteration of updates and deletions.
+	// If the table is watched via Changes() then Delete() will mark the object
+	// as deleted and keep it in the primary and revision indexes until observed.
+	// An observed deleted object is fully deleted by the next Commit().
 	//
 	// Possible errors:
 	// - ErrTableNotLockedForWriting: table was not locked for writing
@@ -237,9 +235,9 @@ type tableInternal interface {
 	secondary() map[string]anyIndexer      // Secondary indexers (if any)
 	sortableMutex() internal.SortableMutex // The sortable mutex for locking the table for writing
 	anyChanges(txn WriteTxn) (anyChangeIterator, error)
-	proto() any                             // Returns the zero value of 'Obj', e.g. the prototype
-	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
-	numDeletedObjects(txn ReadTxn) int      // Number of objects in graveyard
+	proto() any                               // Returns the zero value of 'Obj', e.g. the prototype
+	unmarshalYAML(data []byte) (any, error)   // Unmarshal the data into 'Obj'
+	numPendingDeletedObjects(txn ReadTxn) int // Number of deleted objects not yet observed
 	acquired(*txn)
 	getAcquiredInfo() string
 }
@@ -387,23 +385,18 @@ type TableWritable interface {
 //
 
 const (
-	PrimaryIndexPos = 0
-
-	reservedIndexPrefix       = "__"
-	RevisionIndex             = "__revision__"
-	RevisionIndexPos          = 1
-	GraveyardIndex            = "__graveyard__"
-	GraveyardIndexPos         = 2
-	GraveyardRevisionIndex    = "__graveyard_revision__"
-	GraveyardRevisionIndexPos = 3
-
-	SecondaryIndexStartPos = 4
+	PrimaryIndexPos        = 0
+	reservedIndexPrefix    = "__"
+	RevisionIndex          = "__revision__"
+	RevisionIndexPos       = 1
+	SecondaryIndexStartPos = 2
 )
 
 // object is the format in which data is stored in the tables.
 type object struct {
 	revision uint64
 	data     any
+	deleted  bool
 }
 
 // anyIndexer is an untyped indexer. The user-defined 'Index[Obj,Key]'
@@ -440,14 +433,37 @@ type indexEntry struct {
 	unique bool
 }
 
+// revisionRange is the closed range of revisions [begin, end].
+type revisionRange struct {
+	begin, end Revision
+}
+
 type tableEntry struct {
 	meta                TableMeta
 	indexes             []indexEntry
-	deleteTrackers      *part.Tree[anyDeleteTracker]
 	revision            uint64
 	pendingInitializers []string
 	initialized         bool
 	initWatchChan       chan struct{}
+
+	// deleteTrackers back the iterator as part of Changes()
+	// to construct the lowest observed deleted revision that
+	// can be GCd.
+	deleteTrackers *part.Tree[anyDeleteTracker]
+
+	// gcRange holds the revisions of the oldest and
+	// newest deleted objects. Used to short-cut GCing of
+	// deleted objects.
+	gcRange revisionRange
+
+	// numPendingDeletedObjects is the number of objects
+	// in the primary and revision indexes that have been
+	// marked as deleted, but have not yet been observed.
+	// Once they are observed they will be deleted by
+	// txn.gcDeleted as part of Commit() and this number
+	// is decreased accordingly. This field is used in the
+	// 'db tables' command and in metrics.
+	numPendingDeletedObjects int
 }
 
 func (t *tableEntry) numObjects() int {
@@ -455,13 +471,17 @@ func (t *tableEntry) numObjects() int {
 	if indexEntry.txn != nil {
 		return indexEntry.txn.Len()
 	}
-	return indexEntry.tree.Len()
+	return indexEntry.tree.Len() - t.numPendingDeletedObjects
 }
 
-func (t *tableEntry) numDeletedObjects() int {
-	indexEntry := t.indexes[t.meta.indexPos(GraveyardIndex)]
-	if indexEntry.txn != nil {
-		return indexEntry.txn.Len()
+func (t *tableEntry) deletedLowWatermark() Revision {
+	lowWatermark := t.revision
+	dtIter := t.deleteTrackers.Iterator()
+	for _, dt, ok := dtIter.Next(); ok; _, dt, ok = dtIter.Next() {
+		rev := dt.getRevision()
+		if rev < lowWatermark {
+			lowWatermark = rev
+		}
 	}
-	return indexEntry.tree.Len()
+	return lowWatermark
 }

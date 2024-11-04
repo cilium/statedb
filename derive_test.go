@@ -154,11 +154,11 @@ func TestDerive(t *testing.T) {
 				objs[1].ID == 2 && objs[1].Deleted
 		},
 		time.Second,
-		10*time.Millisecond,
+		100*time.Millisecond,
 		"expected 1 & 2, with 2 marked deleted",
 	)
 
-	// Delete 1 (testing DeriveDelete)
+	// Update 1 to have delete tag set and then delete it. (testing DeriveDelete)
 	wtxn = db.WriteTxn(inTable)
 	_, _, err = inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("delete")})
 	require.NoError(t, err, "Insert failed")

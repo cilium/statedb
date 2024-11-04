@@ -67,8 +67,6 @@ func NewTable[Obj any](
 
 	// Internal indexes
 	table.indexPositions[RevisionIndex] = RevisionIndexPos
-	table.indexPositions[GraveyardIndex] = GraveyardIndexPos
-	table.indexPositions[GraveyardRevisionIndex] = GraveyardRevisionIndexPos
 
 	indexPos := SecondaryIndexStartPos
 	for _, indexer := range secondaryIndexers {
@@ -156,9 +154,6 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	}
 	// For revision indexes we only need to watch the root.
 	entry.indexes[t.indexPositions[RevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
-	entry.indexes[t.indexPositions[GraveyardRevisionIndex]] = indexEntry{part.New[object](part.RootOnlyWatch), nil, true}
-	entry.indexes[t.indexPositions[GraveyardIndex]] = indexEntry{part.New[object](), nil, true}
-
 	return entry
 }
 
@@ -266,9 +261,9 @@ func (t *genTable[Obj]) NumObjects(txn ReadTxn) int {
 	return table.numObjects()
 }
 
-func (t *genTable[Obj]) numDeletedObjects(txn ReadTxn) int {
+func (t *genTable[Obj]) numPendingDeletedObjects(txn ReadTxn) int {
 	table := txn.getTxn().getTableEntry(t)
-	return table.numDeletedObjects()
+	return table.numPendingDeletedObjects
 }
 
 func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, ok bool) {
@@ -306,6 +301,10 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 		if !ok {
 			return
 		}
+		if iobj.deleted {
+			ok = false
+			return
+		}
 		obj = iobj.data.(Obj)
 		revision = iobj.revision
 		return
@@ -325,6 +324,10 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 		if len(secondary) == len(q.key) {
 			break
 		}
+	}
+
+	if iobj.deleted {
+		return
 	}
 
 	if ok {
@@ -388,7 +391,7 @@ func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Rev
 		// Doing a Get() is more efficient than constructing an iterator.
 		value, watch, ok := indexTxn.Get(q.key)
 		seq := func(yield func(Obj, Revision) bool) {
-			if ok {
+			if ok && !value.deleted {
 				yield(value.data.(Obj), value.revision)
 			}
 		}
@@ -464,12 +467,10 @@ func (t *genTable[Obj]) DeleteAll(txn WriteTxn) error {
 
 func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	iter := &changeIterator[Obj]{
-		revision: 0,
-
-		// Don't observe any past deletions.
-		deleteRevision: t.Revision(txn),
-		table:          t,
-		watch:          closedWatchChannel,
+		revision:            0,
+		deleteStartRevision: t.Revision(txn),
+		table:               t,
+		watch:               closedWatchChannel,
 	}
 	// Set a finalizer to unregister the delete tracker when the iterator
 	// is dropped.
@@ -484,8 +485,7 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 		trackerName: name,
 		table:       t,
 	}
-
-	iter.dt.setRevision(iter.deleteRevision)
+	iter.dt.setRevision(iter.deleteStartRevision)
 	err := itxn.addDeleteTracker(t, name, iter.dt)
 	if err != nil {
 		return nil, err

@@ -5,7 +5,6 @@ package statedb
 
 import (
 	"bytes"
-	"fmt"
 	"iter"
 	"slices"
 
@@ -65,6 +64,11 @@ func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
 			if !ok {
 				break
 			}
+
+			if iobj.deleted {
+				continue
+			}
+
 			if !yield(iobj.data.(Obj), iobj.revision) {
 				break
 			}
@@ -134,6 +138,10 @@ func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searc
 				visited[string(primary)] = struct{}{}
 			}
 
+			if iobj.deleted {
+				continue
+			}
+
 			if !yield(iobj.data.(Obj), iobj.revision) {
 				break
 			}
@@ -154,6 +162,10 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 			if !ok {
 				break
 			}
+			if iobj.deleted {
+				continue
+			}
+
 			// With a non-unique index we have a composite key <secondary><primary><secondary len>.
 			// This means we need to check every key that it's larger or equal to the search key.
 			// Just seeking to the first one isn't enough as the secondary key length may vary.
@@ -162,6 +174,7 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 				if _, found := visited[string(primary)]; found {
 					continue
 				}
+
 				visited[string(primary)] = struct{}{}
 
 				if !yield(iobj.data.(Obj), iobj.revision) {
@@ -172,20 +185,6 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 	}
 }
 
-// iterator adapts the "any" object iterator to a typed object.
-type iterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
-}
-
-func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
-	_, iobj, ok := it.iter.Next()
-	if ok {
-		obj = iobj.data.(Obj)
-		revision = iobj.revision
-	}
-	return
-}
-
 // Iterator for iterating a sequence objects.
 type Iterator[Obj any] interface {
 	// Next returns the next object and its revision if ok is true, otherwise
@@ -193,72 +192,22 @@ type Iterator[Obj any] interface {
 	Next() (obj Obj, rev Revision, ok bool)
 }
 
-func NewDualIterator[Obj any](left, right Iterator[Obj]) *DualIterator[Obj] {
-	return &DualIterator[Obj]{
-		left:  iterState[Obj]{iter: left},
-		right: iterState[Obj]{iter: right},
-	}
-}
-
-type iterState[Obj any] struct {
-	iter Iterator[Obj]
-	obj  Obj
-	rev  Revision
-	ok   bool
-}
-
-// DualIterator allows iterating over two iterators in revision order.
-// Meant to be used for combined iteration of LowerBound(ByRevision)
-// and Deleted().
-type DualIterator[Obj any] struct {
-	left  iterState[Obj]
-	right iterState[Obj]
-}
-
-func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool) {
-	// Advance the iterators
-	if !it.left.ok && it.left.iter != nil {
-		it.left.obj, it.left.rev, it.left.ok = it.left.iter.Next()
-		if !it.left.ok {
-			it.left.iter = nil
-		}
-	}
-	if !it.right.ok && it.right.iter != nil {
-		it.right.obj, it.right.rev, it.right.ok = it.right.iter.Next()
-		if !it.right.ok {
-			it.right.iter = nil
-		}
-	}
-
-	// Find the lowest revision object
-	switch {
-	case !it.left.ok && !it.right.ok:
-		ok = false
-		return
-	case it.left.ok && !it.right.ok:
-		it.left.ok = false
-		return it.left.obj, it.left.rev, true, true
-	case it.right.ok && !it.left.ok:
-		it.right.ok = false
-		return it.right.obj, it.right.rev, false, true
-	case it.left.rev <= it.right.rev:
-		it.left.ok = false
-		return it.left.obj, it.left.rev, true, true
-	case it.right.rev <= it.left.rev:
-		it.right.ok = false
-		return it.right.obj, it.right.rev, false, true
-	default:
-		panic(fmt.Sprintf("BUG: Unhandled case: %+v", it))
-	}
-}
-
 type changeIterator[Obj any] struct {
-	table          Table[Obj]
-	revision       Revision
-	deleteRevision Revision
-	dt             *deleteTracker[Obj]
-	iter           *DualIterator[Obj]
-	watch          <-chan struct{}
+	table Table[Obj]
+
+	// revision is the latest observed object
+	revision Revision
+
+	// deleteStartRevision is the oldest deleted revision
+	// this iterator should observe. E.g. this is the revision
+	// of the table at the time the change iterator was created,
+	// and it's used to make sure we don't observe deletions that
+	// happened in the past.
+	deleteStartRevision Revision
+
+	dt    *deleteTracker[Obj]
+	iter  *part.Iterator[object]
+	watch <-chan struct{}
 }
 
 func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
@@ -269,13 +218,7 @@ func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
 	itxn := txn.getTxn()
 	indexEntry := itxn.root[it.table.tablePos()].indexes[RevisionIndexPos]
 	indexTxn := indexReadTxn{indexEntry.tree, indexEntry.unique}
-	updateIter := &iterator[Obj]{indexTxn.LowerBound(index.Uint64(it.revision + 1))}
-	deleteIter := it.dt.deleted(itxn, it.deleteRevision+1)
-	it.iter = NewDualIterator(deleteIter, updateIter)
-
-	// It is enough to watch the revision index and not the graveyard since
-	// any object that is inserted into the graveyard will be deleted from
-	// the revision index.
+	it.iter = indexTxn.LowerBound(index.Uint64(it.revision + 1))
 	it.watch = indexTxn.RootWatch()
 }
 
@@ -307,17 +250,24 @@ func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Rev
 		if it.iter == nil {
 			return
 		}
-		for obj, rev, deleted, ok := it.iter.Next(); ok; obj, rev, deleted, ok = it.iter.Next() {
-			if deleted {
-				it.deleteRevision = rev
+		for _, obj, ok := it.iter.Next(); ok; _, obj, ok = it.iter.Next() {
+			rev := obj.revision
+			it.revision = rev
+			change := Change[Obj]{
+				Revision: rev,
+			}
+			if obj.deleted {
+				if rev <= it.deleteStartRevision {
+					// Ignore objects that were marked deleted before this
+					// change iterator was created.
+					continue
+				}
+
+				change.Object = obj.data.(Obj)
+				change.Deleted = true
 				it.dt.mark(rev)
 			} else {
-				it.revision = rev
-			}
-			change := Change[Obj]{
-				Object:   obj,
-				Revision: rev,
-				Deleted:  deleted,
+				change.Object = obj.data.(Obj)
 			}
 			if !yield(change, rev) {
 				return

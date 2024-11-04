@@ -28,15 +28,5 @@ type params struct {
 }
 
 func newHiveDB(p params) *DB {
-	db := New(WithMetrics(p.Metrics))
-	p.Lifecycle.Append(
-		cell.Hook{
-			OnStart: func(cell.HookContext) error {
-				return db.Start()
-			},
-			OnStop: func(cell.HookContext) error {
-				return db.Stop()
-			},
-		})
-	return db
+	return New(WithMetrics(p.Metrics))
 }

@@ -116,10 +116,6 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 		cell.Invoke(func(db_ *DB) {
 			err := db_.RegisterTable(table)
 			require.NoError(t, err, "RegisterTable failed")
-
-			// Use a short GC interval.
-			db_.setGCRateLimitInterval(50 * time.Millisecond)
-
 			db = db_
 		}),
 	)
@@ -134,8 +130,6 @@ func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...In
 
 func TestDB_Insert_SamePointer(t *testing.T) {
 	db := New()
-	require.NoError(t, db.Start(), "Start")
-	defer func() { require.NoError(t, db.Stop(), "Stop") }()
 
 	idIndex := Index[*testObject, uint64]{
 		Name: "id",
@@ -328,7 +322,7 @@ func TestDB_Changes(t *testing.T) {
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
 
 	// The initial watch channel is closed, so users can either iterate first or watch first.
-	changes, watch := iter.Next(db.ReadTxn())
+	_, watch := iter.Next(db.ReadTxn())
 
 	// Delete 2/3 objects
 	{
@@ -371,7 +365,7 @@ func TestDB_Changes(t *testing.T) {
 
 	// Observe the objects that existed when the tracker was created.
 	<-watch
-	changes, watch = iter.Next(txn0)
+	changes, watch := iter.Next(txn0)
 	for change := range changes {
 		if change.Deleted {
 			nDeleted++
@@ -385,7 +379,7 @@ func TestDB_Changes(t *testing.T) {
 	// Wait for the new changes.
 	<-watch
 
-	changes, watch = iter.Next(txn)
+	changes, _ = iter.Next(txn)
 
 	// Consume one change, leaving a partially consumed sequence.
 	for change := range changes {
@@ -400,7 +394,7 @@ func TestDB_Changes(t *testing.T) {
 
 	// The iterator can be refreshed with new snapshot without having consumed
 	// the previous sequence fully. No changes are missed.
-	changes, watch = iter.Next(db.ReadTxn())
+	changes, _ = iter.Next(db.ReadTxn())
 	for change := range changes {
 		if change.Deleted {
 			nDeleted++
@@ -412,10 +406,6 @@ func TestDB_Changes(t *testing.T) {
 
 	assert.Equal(t, 2, nDeleted)
 	assert.Equal(t, 1, nExist)
-
-	// Since the second iterator has not processed the deletions,
-	// the graveyard index should still hold them.
-	require.False(t, db.graveyardIsEmpty())
 
 	// Consume the deletions using the second iterator.
 	nExist = 0
@@ -439,8 +429,8 @@ func TestDB_Changes(t *testing.T) {
 		t.Fatalf("unexpected change: %v", change)
 	}
 
-	// Graveyard will now be GCd.
-	eventuallyGraveyardIsEmpty(t, db)
+	// Deleted objects will be cleaned up if we do a WriteTxn
+	db.WriteTxn(table).Commit()
 
 	assert.EqualValues(t, table.Revision(db.ReadTxn()), expvarInt(metrics.RevisionVar.Get("test")), "Revision")
 	assert.EqualValues(t, 1, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
@@ -476,14 +466,15 @@ func TestDB_Changes(t *testing.T) {
 
 	// After dropping the first iterator, deletes are still tracked for second one.
 	// Delete the remaining objects.
+	// Normally the finalizer for the change iterator does the closing, but since
+	// we want full control here we're calling the close() directly.
+	iter.(*changeIterator[testObject]).close()
 	iter = nil
 	{
 		txn := db.WriteTxn(table)
 		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
-
-	require.False(t, db.graveyardIsEmpty())
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 2, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
@@ -501,12 +492,13 @@ func TestDB_Changes(t *testing.T) {
 	}
 	assert.Equal(t, 2, count)
 
-	eventuallyGraveyardIsEmpty(t, db)
-
+	// Deleted objects will be cleaned up if we do a WriteTxn
+	db.WriteTxn(table).Commit()
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
-	// After dropping the second iterator the deletions no longer go into graveyard.
+	// After dropping the second iterator the deleted objects are no longer kept around
+	iter2.(*changeIterator[testObject]).close()
 	iter2 = nil
 	{
 		txn := db.WriteTxn(table)
@@ -517,9 +509,8 @@ func TestDB_Changes(t *testing.T) {
 		require.NoError(t, table.DeleteAll(txn), "DeleteAll failed")
 		txn.Commit()
 	}
-	// Eventually GC drops the second iterator and the delete tracker is closed.
-	eventuallyGraveyardIsEmpty(t, db)
 
+	// Committing does GC to drop the second iterator and the delete tracker is closed.
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
 
@@ -1066,7 +1057,7 @@ func TestDB_MemoryUsage(t *testing.T) {
 
 		// maxObjectsOverhead defines the maximum number of heap objects allocated
 		// per each database object.
-		maxObjectsOverhead = 6.0
+		maxObjectsOverhead = 7.0
 	)
 
 	db, table, _ := newTestDB(t)
@@ -1173,17 +1164,6 @@ func Test_validateTableName(t *testing.T) {
 		_, err := NewTable(name, idIndex)
 		require.Error(t, err, "NewTable(%s)", name)
 	}
-}
-
-func eventuallyGraveyardIsEmpty(t testing.TB, db *DB) {
-	require.Eventually(t,
-		func() bool {
-			runtime.GC() // force changeIterator finalizers
-			return db.graveyardIsEmpty()
-		},
-		5*time.Second,
-		100*time.Millisecond,
-		"graveyard not garbage collected")
 }
 
 func expvarInt(v expvar.Var) int64 {

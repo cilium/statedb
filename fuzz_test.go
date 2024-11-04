@@ -499,9 +499,6 @@ func TestDB_Fuzz(t *testing.T) {
 		require.NoError(t, fuzzDB.RegisterTable(tbl))
 	}
 
-	fuzzDB.Start()
-	defer fuzzDB.Stop()
-
 	actionLog := &realActionLog{
 		log: map[string][]actionLogEntry{},
 	}
