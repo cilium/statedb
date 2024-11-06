@@ -9,6 +9,7 @@ import (
 	"expvar"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -1053,6 +1054,52 @@ func TestDB_Initialization(t *testing.T) {
 	default:
 		t.Fatalf("Initialized() watch channel was not closed")
 	}
+}
+
+// TestDB_MemoryUsage tests how much memory in terms of bytes and allocated objects
+// is used per object.
+func TestDB_MemoryUsage(t *testing.T) {
+	const (
+		// maxBytesOverhead is the maximum number of additional bytes per database
+		// object.
+		maxBytesOverhead = 400
+
+		// maxObjectsOverhead defines the maximum number of heap objects allocated
+		// per each database object.
+		maxObjectsOverhead = 6.0
+	)
+
+	db, table, _ := newTestDB(t)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+
+	const numObjects = 20000
+	txn := db.WriteTxn(table)
+	for i := range numObjects {
+		_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
+		require.NoError(t, err)
+	}
+	txn.Commit()
+	runtime.GC()
+
+	runtime.ReadMemStats(&after)
+
+	objSize := int(reflect.TypeOf(testObject{}).Size())
+	objectsRatio := float64(after.HeapObjects-before.HeapObjects) / float64(numObjects)
+	perObjectBytes := (after.HeapInuse - before.HeapInuse) / numObjects
+	bytesOverhead := int(perObjectBytes) - objSize
+
+	t.Logf("objSize: %d, perObjectBytes: %d, objectsRatio: %f, bytesOverhead: %d",
+		objSize,
+		perObjectBytes,
+		objectsRatio,
+		bytesOverhead,
+	)
+
+	assert.LessOrEqual(t, bytesOverhead, maxBytesOverhead, "expected bytes ratio exceeded")
+	assert.LessOrEqual(t, objectsRatio, maxObjectsOverhead, "expected objects ratio exceeded")
+
 }
 
 func TestWriteJSON(t *testing.T) {
