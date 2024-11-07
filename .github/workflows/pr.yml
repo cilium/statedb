@@ -17,26 +17,21 @@ jobs:
       - uses: actions/checkout@v3
         with:
           fetch-depth: 0
+
       - name: test
         run: |
+          set -o pipefail
           echo '```' > results.comment
-          echo "$ make test" >> results.comment
-          make test 2>&1 | tee test.out
-          cat test.out | tail -20 >> results.comment
-          echo "-----" >> results.comment
+          echo "$ make" >> results.comment
+          make 2>&1 | tee -a results.comment
 
-      - name: test-race
+      - name: close
+        if: success() || failure()
         run: |
-          make test-race
-      - name: bench
-        run: |
-          echo "$ make bench" >> results.comment
-          make bench 2>&1 | tee bench.out
-          cat bench.out >> results.comment
           echo '```' >> results.comment
           
       - name: results
-        if: always()
+        if: success() || failure()
         uses: thollander/actions-comment-pull-request@v2
         with:
           comment_tag: results
