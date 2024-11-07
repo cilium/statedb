@@ -107,7 +107,7 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 	)
 
 	cmds["start-reconciler"] = script.Command(
-		script.CmdUsage{Summary: "Mark table as initialized"},
+		script.CmdUsage{Summary: "Start the reconciler"},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			opts := []reconciler.Option{
 				// Speed things up a bit. Quick retry interval does mean we can't
