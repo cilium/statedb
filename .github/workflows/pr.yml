@@ -10,6 +10,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
     steps:
       - uses: actions/setup-go@v2
         with:
@@ -36,7 +38,6 @@ jobs:
           echo '```' >> results.comment
           
       - name: results
-        if: always()
         uses: thollander/actions-comment-pull-request@v2
         with:
           comment_tag: results
