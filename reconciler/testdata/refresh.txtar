@@ -46,6 +46,7 @@ status:
     kind: Pending
     updatedat: 2024-01-01T10:10:10.0+02:00
     error: ""
+    id: 2
 
 -- obj1_old.yaml --
 id: 1
@@ -55,4 +56,5 @@ status:
     kind: Done
     updatedat: 2000-01-01T10:10:10.0+02:00
     error: ""
+    id: 1
 

@@ -90,34 +90,40 @@ id: 1
 faulty: false
 status:
     kind: Pending
+    id: 1
 
 -- obj1_faulty.yaml --
 id: 1
 faulty: true
 status:
     kind: Pending
+    id: 2
 
 -- obj2.yaml --
 id: 2
 faulty: false
 status:
     kind: Pending
+    id: 3
 
 -- obj2_faulty.yaml --
 id: 2
 faulty: true
 status:
     kind: Pending
+    id: 4
 
 -- obj3.yaml --
 id: 3
 faulty: false
 status:
     kind: Pending
+    id: 5
 
 -- obj3_faulty.yaml --
 id: 3
 faulty: true
 status:
     kind: Pending
+    id: 6
 

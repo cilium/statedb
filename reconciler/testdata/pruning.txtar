@@ -59,10 +59,12 @@ id: 1
 faulty: false
 status:
     kind: Pending
+    id: 1
 
 -- obj2.yaml --
 id: 2
 faulty: false
 status:
     kind: Pending
+    id: 2
 

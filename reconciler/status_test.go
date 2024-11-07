@@ -112,7 +112,7 @@ func TestStatusSet(t *testing.T) {
 
 	s := set.Get("foo")
 	assert.Equal(t, s.Kind, StatusKindPending)
-	assert.NotZero(t, s.id)
+	assert.NotZero(t, s.ID)
 
 	set = set.Set("foo", StatusDone())
 	set = set.Set("bar", StatusError(errors.New("fail")))
@@ -123,7 +123,7 @@ func TestStatusSet(t *testing.T) {
 	assert.Regexp(t, "^Errored: bar \\(fail\\), Done: foo \\(.* ago\\)", set.String())
 
 	set = set.Pending()
-	assert.NotZero(t, set.Get("foo").id)
+	assert.NotZero(t, set.Get("foo").ID)
 	assert.Equal(t, set.Get("foo").Kind, StatusKindPending)
 	assert.Equal(t, set.Get("bar").Kind, StatusKindPending)
 	assert.Equal(t, set.Get("baz").Kind, StatusKindPending)
