@@ -176,10 +176,16 @@ func TestMapJSON(t *testing.T) {
 
 func TestMapYAMLStringKey(t *testing.T) {
 	var m part.Map[string, int]
-	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
 
 	bs, err := yaml.Marshal(m)
 	require.NoError(t, err, "Marshal")
+	require.Equal(t, "[]\n", string(bs))
+
+	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
+
+	bs, err = yaml.Marshal(m)
+	require.NoError(t, err, "Marshal")
+	require.Equal(t, "- k: bar\n  v: 2\n- k: baz\n  v: 3\n- k: foo\n  v: 1\n", string(bs))
 
 	var m2 part.Map[string, int]
 	err = yaml.Unmarshal(bs, &m2)
