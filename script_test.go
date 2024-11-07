@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package statedb
 
 import (
@@ -107,5 +110,23 @@ func TestHeaderLine(t *testing.T) {
 			line := joinByPositions(cols, pos)
 			require.Equal(t, line, r.header)
 		}
+	}
+}
+
+func TestSortedFlags(t *testing.T) {
+	cases := []struct{ input, expected string }{
+		{"foo bar", "foo bar"},
+		{"bar foo", "bar foo"},
+		{"foo bar -baz=1", "-baz=1 foo bar"},
+		{"bar foo -baz=1", "-baz=1 bar foo"},
+		{"foo -baz=1 bar", "-baz=1 foo bar"},
+		{"-baz=1 foo bar", "-baz=1 foo bar"},
+		{"-baz=1 foo -quux=2 bar", "-baz=1 -quux=2 foo bar"},
+		{"-baz=1 bar foo -quux=2", "-baz=1 -quux=2 bar foo"},
+	}
+
+	for _, tc := range cases {
+		actual := strings.Join(sortedArgs(strings.Split(tc.input, " ")), " ")
+		assert.Equal(t, tc.expected, actual)
 	}
 }
