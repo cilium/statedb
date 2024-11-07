@@ -75,9 +75,16 @@ func TestSetYAML(t *testing.T) {
 
 	bs, err := yaml.Marshal(s)
 	require.NoError(t, err, "Marshal")
+	require.Equal(t, "- bar\n- baz\n- foo\n", string(bs))
 
 	var s2 part.Set[string]
 	err = yaml.Unmarshal(bs, &s2)
 	require.NoError(t, err, "Unmarshal")
+	require.True(t, s.Equal(s2), "Equal")
+
+	var empty part.Set[string]
+	bs, err = yaml.Marshal(empty)
+	require.NoError(t, err, "Unmarshal")
+	require.Equal(t, "[]\n", string(bs))
 	require.True(t, s.Equal(s2), "Equal")
 }
