@@ -2,10 +2,10 @@ hive start
 start-reconciler with-prune
 
 # Pruning without table being initialized does nothing.
-db insert test-objects obj1.yaml
+db/insert test-objects obj1.yaml
 expect-ops update(1)
 prune
-db insert test-objects obj2.yaml 
+db/insert test-objects obj2.yaml 
 expect-ops update(2) update(1)
 health 'job-reconcile.*level=OK'
 
@@ -33,12 +33,12 @@ expvar
 grep 'prune_current_errors.test: 0'
 
 # Delete an object and check pruning happens without it
-db delete test-objects obj1.yaml
+db/delete test-objects obj1.yaml
 prune
 expect-ops 'prune(n=1)' delete(1)
 
 # Prune without objects
-db delete test-objects obj2.yaml
+db/delete test-objects obj2.yaml
 prune
 expect-ops prune(n=0) delete(2) prune(n=1)
 

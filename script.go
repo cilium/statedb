@@ -6,12 +6,10 @@ package statedb
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"iter"
-	"maps"
 	"os"
 	"regexp"
 	"slices"
@@ -25,116 +23,30 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func underline(s string) string {
-	return "\033[4m" + s + "\033[0m"
+func ScriptCommands(db *DB) hive.ScriptCmdsOut {
+	return hive.NewScriptCmds(map[string]script.Cmd{
+		"db":             DBCmd(db),
+		"db/show":        ShowCmd(db),
+		"db/cmp":         CompareCmd(db),
+		"db/insert":      InsertCmd(db),
+		"db/delete":      DeleteCmd(db),
+		"db/get":         GetCmd(db),
+		"db/prefix":      PrefixCmd(db),
+		"db/list":        ListCmd(db),
+		"db/lowerbound":  LowerBoundCmd(db),
+		"db/watch":       WatchCmd(db),
+		"db/initialized": InitializedCmd(db),
+	})
 }
 
-func usageDetails(cmds map[string]script.Cmd, sortedNames []string) (out []string) {
-	out = strings.Split(`DESCRIPTION
-  The 'db' command allows inspecting and manipulating
-  StateDB tables. Here's an example to get you started:
-
-  > db tables
-  Name     Object count   Zombie objects   Indexes  ...
-  example  2              0                id, x    ...
-
-  > db show example  
-  Name   X
-  one    1
-  two    2
-
-  > db prefix -index=id example o
-  Name   X
-  one    1
-
-  > db insert example three.yaml four.yaml
-
-  > db delete example three.yaml
-
-COMMANDS
-`, "\n")
-
-	for _, name := range sortedNames {
-		cmd := cmds[name]
-		u := cmd.Usage()
-		cmdLine := underline(name) + " " + u.Args
-		// Do manual line wrapping to indent nicely when wrapped.
-		const wrap = 60 /* wrap mark in script */ - 8 /* indent */
-		dots := strings.Repeat(".", len(name))
-		if len(cmdLine) > wrap {
-			idx := strings.LastIndex(cmdLine[:wrap], " ")
-			out = append(out, cmdLine[:idx])
-			rest := cmdLine[idx:]
-			for {
-				if len(rest) < wrap {
-					out = append(out, dots+rest)
-					break
-				}
-				idx := strings.LastIndex(rest[:wrap], " ")
-				out = append(out, dots+rest[:idx])
-				rest = rest[idx:]
-			}
-		} else {
-			out = append(out, cmdLine)
-		}
-		out = append(out, "")
-		out = append(out, u.Detail...)
-		out = append(out, "")
-	}
-
-	return out
-}
-
-func ScriptCommands(db *DB) hive.ScriptCmdOut {
-	subCmds := map[string]script.Cmd{
-		"tables":      TablesCmd(db),
-		"show":        ShowCmd(db),
-		"cmp":         CompareCmd(db),
-		"insert":      InsertCmd(db),
-		"delete":      DeleteCmd(db),
-		"get":         GetCmd(db),
-		"prefix":      PrefixCmd(db),
-		"list":        ListCmd(db),
-		"lowerbound":  LowerBoundCmd(db),
-		"watch":       WatchCmd(db),
-		"initialized": InitializedCmd(db),
-	}
-	subCmdsNames := slices.Sorted(maps.Keys(subCmds))
-	subCmdsList := strings.Join(subCmdsNames, ", ")
-	return hive.NewScriptCmd(
-		"db",
-		script.Command(
-			script.CmdUsage{
-				Summary: "Inspect and manipulate StateDB ('help db' for usage)",
-				Args:    "cmd args...",
-				Detail:  usageDetails(subCmds, subCmdsNames),
-			},
-			func(s *script.State, args ...string) (script.WaitFunc, error) {
-				if len(args) < 1 {
-					return nil, fmt.Errorf("expected command (%s), see 'help db'", subCmdsList)
-				}
-				cmd, ok := subCmds[args[0]]
-				if !ok {
-					return nil, fmt.Errorf("command %q not found, expected one of: %s, see 'help db'", args[0], subCmdsList)
-				}
-				wf, err := cmd.Run(s, sortedArgs(args[1:])...)
-				if errors.Is(err, errUsage) {
-					s.Logf("usage: db %s %s\n", args[0], cmd.Usage().Args)
-				}
-				return wf, err
-			},
-		),
-	)
-}
-
-var errUsage = errors.New("bad arguments")
-
-func TablesCmd(db *DB) script.Cmd {
+func DBCmd(db *DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
-			Summary: "List StateDB tables",
+			Summary: "Describe StateDB configuration",
 			Detail: []string{
-				"List each registered table.",
+				"The 'db' command describes the StateDB configuration, showing",
+				"all registered tables and brief summary of their state.",
+				"",
 				"The following details are shown:",
 				"- Name: The name of the table as given to 'NewTable'",
 				"- Object count: Objects in the table",
@@ -143,6 +55,23 @@ func TablesCmd(db *DB) script.Cmd {
 				"- Initializers: Pending table initializers",
 				"- Go type: The Go type, the T in Table[T]",
 				"- Last WriteTxn: The current/last write against the table",
+				"",
+				"The individual tables can be manipulated and inspected with the",
+				"other commands. See 'help -v db/show' etc. for detailed help.",
+				"Here is some examples to get you statred:",
+				"",
+				"> db/show example",
+				"Name   X",
+				"one    1",
+				"two    2",
+				"",
+				"> db/prefix -index=id example o",
+				"Name   X",
+				"one    1",
+				"",
+				"> db/insert example three.yaml four.yaml",
+				"",
+				"> db/delete example three.yaml",
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
@@ -161,11 +90,10 @@ func TablesCmd(db *DB) script.Cmd {
 	)
 }
 
-func newCmdFlagSet() *flag.FlagSet {
-	return &flag.FlagSet{
-		// Disable showing the normal usage.
-		Usage: func() {},
-	}
+func newCmdFlagSet(w io.Writer) *flag.FlagSet {
+	fs := flag.NewFlagSet("", flag.ContinueOnError)
+	fs.SetOutput(w)
+	return fs
 }
 
 func InitializedCmd(db *DB) script.Cmd {
@@ -183,17 +111,17 @@ func InitializedCmd(db *DB) script.Cmd {
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
-			txn := db.ReadTxn()
-			allTbls := db.GetTables(txn)
-			tbls := allTbls
-
-			flags := newCmdFlagSet()
+			flags := newCmdFlagSet(s.LogWriter())
 			timeout := flags.Duration("timeout", 5*time.Second, "Maximum amount of time to wait for the table contents to match")
 			if err := flags.Parse(args); err != nil {
-				return nil, fmt.Errorf("%w: %s", errUsage, err)
+				return nil, fmt.Errorf("%w: %w", script.ErrUsage, err)
 			}
-			timeoutChan := time.After(*timeout)
 			args = flags.Args()
+
+			txn := db.ReadTxn()
+			timeoutChan := time.After(*timeout)
+			allTbls := db.GetTables(txn)
+			tbls := allTbls
 
 			if len(args) > 0 {
 				// Specific tables requested, look them up.
@@ -254,12 +182,12 @@ func ShowCmd(db *DB) script.Cmd {
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
-			flags := newCmdFlagSet()
+			flags := newCmdFlagSet(s.LogWriter())
 			file := flags.String("o", "", "File to write to instead of stdout")
 			columns := flags.String("columns", "", "Comma-separated list of columns to write")
 			format := flags.String("format", "table", "Format to write in (table, yaml, json)")
 			if err := flags.Parse(args); err != nil {
-				return nil, fmt.Errorf("%w: %s", errUsage, err)
+				return nil, fmt.Errorf("%w: %w", script.ErrUsage, err)
 			}
 
 			var cols []string
@@ -269,7 +197,7 @@ func ShowCmd(db *DB) script.Cmd {
 
 			args = flags.Args()
 			if len(args) < 1 {
-				return nil, fmt.Errorf("%w: missing table name", errUsage)
+				return nil, fmt.Errorf("missing table name")
 			}
 			tableName := args[0]
 			return func(*script.State) (stdout, stderr string, err error) {
@@ -305,7 +233,7 @@ func CompareCmd(db *DB) script.Cmd {
 				"The comparison is retried until a timeout (1s default).",
 				"",
 				"The file should be formatted in the same style as",
-				"the output from 'db show -format=table'. Indentation",
+				"the output from 'db/show -format=table'. Indentation",
 				"does not matter as long as header is aligned with the data.",
 				"",
 				"Not all columns need to be specified. Remove the columns",
@@ -315,13 +243,16 @@ func CompareCmd(db *DB) script.Cmd {
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
-			flags := newCmdFlagSet()
+			flags := newCmdFlagSet(s.LogWriter())
 			timeout := flags.Duration("timeout", time.Second, "Maximum amount of time to wait for the table contents to match")
 			grep := flags.String("grep", "", "Grep the result rows and only compare matching ones")
 			err := flags.Parse(args)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %w", script.ErrUsage, err)
+			}
 			args = flags.Args()
-			if err != nil || len(args) != 2 {
-				return nil, fmt.Errorf("%w: %s", errUsage, err)
+			if len(args) != 2 {
+				return nil, fmt.Errorf("expected table and filename")
 			}
 
 			var grepRe *regexp.Regexp
@@ -463,7 +394,7 @@ func getTable(db *DB, tableName string) (*AnyTable, ReadTxn, error) {
 
 func insertOrDelete(insert bool, db *DB, s *script.State, args ...string) (script.WaitFunc, error) {
 	if len(args) < 2 {
-		return nil, fmt.Errorf("%w: expected table and path(s)", errUsage)
+		return nil, fmt.Errorf("expected table and path(s)")
 	}
 
 	tbl, _, err := getTable(db, args[0])
@@ -564,14 +495,14 @@ func queryCmd(db *DB, query int, summary string, detail []string) script.Cmd {
 }
 
 func runQueryCmd(query int, db *DB, s *script.State, args []string) (script.WaitFunc, error) {
-	flags := newCmdFlagSet()
+	flags := newCmdFlagSet(s.LogWriter())
 	file := flags.String("o", "", "File to write results to instead of stdout")
 	index := flags.String("index", "", "Index to query")
 	format := flags.String("format", "table", "Format to write in (table, yaml, json)")
 	columns := flags.String("columns", "", "Comma-separated list of columns to write")
 	delete := flags.Bool("delete", false, "Delete all matching objects")
 	if err := flags.Parse(args); err != nil {
-		return nil, fmt.Errorf("%w: %s", errUsage, err)
+		return nil, fmt.Errorf("%w: %w", script.ErrUsage, err)
 	}
 
 	var cols []string
@@ -581,7 +512,7 @@ func runQueryCmd(query int, db *DB, s *script.State, args []string) (script.Wait
 
 	args = flags.Args()
 	if len(args) < 2 {
-		return nil, fmt.Errorf("%w: expected table and key", errUsage)
+		return nil, fmt.Errorf("expected table and key")
 	}
 
 	return func(*script.State) (stdout, stderr string, err error) {
@@ -974,7 +905,7 @@ func newTabWriter(out io.Writer) *tabwriter.Writer {
 
 // sortArgs sorts the arguments to bring '-arg' first. Allows mixing
 // the argument order. If e.g. key starts with '-', then it'll just
-// need to be quoted: "db get foo '-mykey'"
+// need to be quoted: "db/get foo '-mykey'"
 func sortedArgs(args []string) []string {
 	return slices.SortedStableFunc(
 		slices.Values(args),
@@ -991,4 +922,8 @@ func sortedArgs(args []string) []string {
 			}
 		},
 	)
+}
+
+func underline(s string) string {
+	return "\033[4m" + s + "\033[0m"
 }
