@@ -6,6 +6,7 @@ build:
 	go build ./...
 
 test:
+	aoeusth
 	go test ./... -cover -vet=all -test.count 1
 
 test-race:
