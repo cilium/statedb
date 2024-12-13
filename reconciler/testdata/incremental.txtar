@@ -48,11 +48,11 @@ health 'job-reconcile.*level=OK.*message=OK, 0 object'
 
 # Check metrics
 expvar
-! grep 'reconciliation_count.test: 0$'
-grep 'reconciliation_current_errors.test: 0$'
-! grep 'reconciliation_total_errors.test: 0$'
-! grep 'reconciliation_duration.test/update: 0$'
-! grep 'reconciliation_duration.test/delete: 0$'
+! stdout 'reconciliation_count.test: 0$'
+stdout 'reconciliation_current_errors.test: 0$'
+! stdout 'reconciliation_total_errors.test: 0$'
+! stdout 'reconciliation_duration.test/update: 0$'
+! stdout 'reconciliation_duration.test/delete: 0$'
 
 # ------------
 
