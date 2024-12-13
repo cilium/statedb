@@ -24,44 +24,44 @@ db/insert test2 obj2.yaml
 
 # Show (non-empty)
 db/show test1
-grep ^ID.*Tags
-grep 1.*bar
-grep 2.*baz
+stdout ^ID.*Tags
+stdout 1.*bar
+stdout 2.*baz
 db/show test2
 
-db/show -format=table test1
-grep ^ID.*Tags
-grep 1.*bar
-grep 2.*baz
+db/show --format=table test1
+stdout ^ID.*Tags
+stdout 1.*bar
+stdout 2.*baz
 
-db/show -format=table -columns=Tags test1
-grep ^Tags$
-grep '^bar, foo$'
-grep '^baz, foo$'
+db/show --format=table --columns=Tags test1
+stdout ^Tags$
+stdout '^bar, foo$'
+stdout '^baz, foo$'
 
-db/show -format=table -o=test1_show.table test1
+db/show -f table -o test1_show.table test1
 cmp test1.table test1_show.table
 
-db/show -format=yaml -o=test1_show.yaml test1
+db/show --format=yaml --out=test1_show.yaml test1
 cmp test1.yaml test1_show.yaml
 
-db/show -format=json -o=test1_show.json test1
+db/show --format=json -o=test1_show.json test1
 cmp test1.json test1_show.json
 
 # Get
 db/get test2 2
-db/get -format=table test2 2
-grep '^ID.*Tags$'
-grep ^2.*baz
-db/get -format=table -columns=Tags test2 2
-grep ^Tags$
-grep '^baz, foo$'
-db/get -format=json test2 2
-db/get -format=yaml test2 2
-db/get -format=yaml -o=obj2_get.yaml test2 2
+db/get --format=table test2 2
+stdout '^ID.*Tags$'
+stdout ^2.*baz
+db/get --format=table --columns=Tags test2 2
+stdout ^Tags$
+stdout '^baz, foo$'
+db/get --format=json test2 2
+db/get --format=yaml test2 2
+db/get --format=yaml -o=obj2_get.yaml test2 2
 cmp obj2.yaml obj2_get.yaml
 
-db/get -index=tags -format=yaml -o=obj1_get.yaml test1 bar
+db/get -i tags -f yaml -o obj1_get.yaml test1 bar
 cmp obj1.yaml obj1_get.yaml
 
 # List
@@ -70,24 +70,24 @@ cmp obj1.table list.table
 db/list -o=list.table test1 2
 cmp obj2.table list.table
 
-db/list -o=list.table -index=tags test1 bar
+db/list -o list.table -i tags test1 bar
 cmp obj1.table list.table
-db/list -o=list.table -index=tags test1 baz
+db/list -o=list.table -i=tags test1 baz
 cmp obj2.table list.table
-db/list -o=list.table -index=tags test1 foo
+db/list --out=list.table --index=tags test1 foo
 cmp objs.table list.table
 
-db/list -format=table -index=tags -columns=Tags test1 foo
-grep ^Tags$
-grep '^bar, foo$'
-grep '^baz, foo$'
+db/list --format=table --index=tags --columns=Tags test1 foo
+stdout ^Tags$
+stdout '^bar, foo$'
+stdout '^baz, foo$'
 
 # Prefix
 # uint64 so can't really prefix search meaningfully, unless
 # FromString() accomodates partial keys.
 db/prefix test1 1
 
-db/prefix -o=prefix.table -index=tags test1 ba
+db/prefix -o=prefix.table --index=tags test1 ba
 cmp objs.table prefix.table
 
 # LowerBound
@@ -103,8 +103,8 @@ cmp empty.table lb.table
 # Compare
 db/cmp test1 objs.table
 db/cmp test1 objs_ids.table
-db/cmp -grep=bar test1 obj1.table
-db/cmp -grep=baz test1 obj2.table
+db/cmp --grep=bar test1 obj1.table
+db/cmp --grep=baz test1 obj2.table
 
 # Delete
 db/delete test1 obj1.yaml
@@ -116,21 +116,21 @@ db/cmp test1 empty.table
 # Delete with get
 db/insert test1 obj1.yaml
 db/cmp test1 obj1.table
-db/get -delete test1 1
+db/get --delete test1 1
 db/cmp test1 empty.table
 
 # Delete with prefix
 db/insert test1 obj1.yaml
 db/insert test1 obj2.yaml
 db/cmp test1 objs.table
-db/prefix -index=tags -delete test1 fo
+db/prefix --index=tags --delete test1 fo
 db/cmp test1 empty.table
 
 # Delete with lowerbound
 db/insert test1 obj1.yaml
 db/insert test1 obj2.yaml
 db/cmp test1 objs.table
-db/lowerbound -index=id -delete test1 2
+db/lowerbound --index=id --delete test1 2
 db/cmp test1 obj1.table
 
 # Tables

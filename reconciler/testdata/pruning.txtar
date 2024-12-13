@@ -14,7 +14,7 @@ mark-init
 expect-ops prune(n=2)
 health 'job-reconcile.*level=OK'
 expvar
-! grep 'prune_count.test: 0'
+! stdout  'prune_count.test: 0'
 
 # Pruning with faulty ops will mark status as degraded
 set-faulty true
@@ -22,7 +22,7 @@ prune
 expect-ops 'prune(n=2) fail'
 health 'job-reconcile.*level=Degraded.*message=.*prune fail'
 expvar
-grep 'prune_current_errors.test: 1'
+stdout 'prune_current_errors.test: 1'
 
 # Pruning again with healthy ops fixes the status.
 set-faulty false
@@ -30,7 +30,7 @@ prune
 expect-ops 'prune(n=2)'
 health 'job-reconcile.*level=OK'
 expvar
-grep 'prune_current_errors.test: 0'
+stdout 'prune_current_errors.test: 0'
 
 # Delete an object and check pruning happens without it
 db/delete test-objects obj1.yaml
@@ -44,15 +44,15 @@ expect-ops prune(n=0) delete(2) prune(n=1)
 
 # Check metrics
 expvar
-! grep 'prune_count.test: 0'
-grep 'prune_current_errors.test: 0'
-grep 'prune_total_errors.test: 1'
-! grep 'prune_duration.test: 0$'
-! grep 'reconciliation_count.test: 0$'
-grep 'reconciliation_current_errors.test: 0$'
-grep 'reconciliation_total_errors.test: 0$'
-! grep 'reconciliation_duration.test/update: 0$'
-! grep 'reconciliation_duration.test/delete: 0$'
+! stdout 'prune_count.test: 0'
+stdout 'prune_current_errors.test: 0'
+stdout 'prune_total_errors.test: 1'
+! stdout 'prune_duration.test: 0$'
+! stdout 'reconciliation_count.test: 0$'
+stdout 'reconciliation_current_errors.test: 0$'
+stdout 'reconciliation_total_errors.test: 0$'
+! stdout 'reconciliation_duration.test/update: 0$'
+! stdout 'reconciliation_duration.test/delete: 0$'
 
 -- obj1.yaml --
 id: 1
