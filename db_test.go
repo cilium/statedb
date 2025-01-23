@@ -6,6 +6,8 @@ package statedb
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"expvar"
 	"fmt"
 	"log/slog"
@@ -47,6 +49,19 @@ func (t testObject) getID() uint64 {
 
 func (t testObject) String() string {
 	return fmt.Sprintf("testObject{ID: %d, Tags: %v}", t.ID, t.Tags)
+}
+
+func (t testObject) MarshalJSON() ([]byte, error) {
+	if t.Tags.Has("json-panic") {
+		panic("json-panic")
+	} else if t.Tags.Has("json-error") {
+		return nil, errors.New("json-error")
+	}
+	t2 := struct {
+		ID   uint64
+		Tags part.Set[string]
+	}{t.ID, t.Tags}
+	return json.Marshal(t2)
 }
 
 func (t testObject) TableHeader() []string {
@@ -1063,13 +1078,47 @@ func TestWriteJSON(t *testing.T) {
 	buf := new(bytes.Buffer)
 	err := db.ReadTxn().WriteJSON(buf)
 	require.NoError(t, err)
+	require.Equal(t, "{\n  \"test\": [\n  ]\n}\n", buf.String())
 
 	txn := db.WriteTxn(table)
-	for i := 1; i <= 10; i++ {
+	for i := 1; i <= 3; i++ {
 		_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 		require.NoError(t, err)
 	}
 	txn.Commit()
+
+	buf = new(bytes.Buffer)
+	err = db.ReadTxn().WriteJSON(buf)
+	require.NoError(t, err)
+	require.Equal(t, `{
+  "test": [
+    {"ID":1,"Tags":[]},
+    {"ID":2,"Tags":[]},
+    {"ID":3,"Tags":[]}
+  ]
+}
+`, buf.String())
+
+	// Test json error/panic handling
+	txn = db.WriteTxn(table)
+	_, _, err = table.Insert(txn, testObject{ID: uint64(11), Tags: part.NewSet("json-panic")})
+	_, _, err = table.Insert(txn, testObject{ID: uint64(12), Tags: part.NewSet("json-error")})
+	require.NoError(t, err)
+	txn.Commit()
+
+	buf = new(bytes.Buffer)
+	err = db.ReadTxn().WriteJSON(buf)
+	require.NoError(t, err)
+	require.Equal(t, `{
+  "test": [
+    {"ID":1,"Tags":[]},
+    {"ID":2,"Tags":[]},
+    {"ID":3,"Tags":[]},
+    "panic marshalling JSON: json-panic",
+    "marshalling error: json: error calling MarshalJSON for type statedb.testObject: json-error"
+  ]
+}
+`, buf.String())
 }
 
 func Test_nonUniqueKey(t *testing.T) {
