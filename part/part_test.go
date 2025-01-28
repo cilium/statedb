@@ -45,9 +45,10 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		txn := tree.Txn()
 		txn.Insert([]byte("abc"), 1)
-		txn.Insert([]byte("ab"), 2)
+		_, _, watch_ab := txn.InsertWatch([]byte("ab"), 2)
 		txn.Insert([]byte("abd"), 3)
 		tree = txn.Commit()
+		assertOpen(t, watch_ab)
 
 		_, w, f := tree.Get([]byte("ab"))
 		assert.True(t, f)
@@ -63,6 +64,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		_, _, tree = tree.Insert([]byte("ab"), 42)
 		assertClosed(t, w)
 		assertClosed(t, w2)
+		assertClosed(t, watch_ab)
 
 		assertOpen(t, w3)
 

@@ -181,6 +181,32 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 	require.NoError(t, err, "Insert failed")
 }
 
+func TestDB_InsertWatch(t *testing.T) {
+	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+
+	txn := db.WriteTxn(table)
+	_, _, watch, err := table.InsertWatch(txn, testObject{ID: 42, Tags: part.NewSet("hello")})
+	require.NoError(t, err, "Insert failed")
+	txn.Commit()
+
+	select {
+	case <-watch:
+		t.Fatal("watch channel unexpectedly closed")
+	default:
+	}
+
+	txn = db.WriteTxn(table)
+	_, _, err = table.Insert(txn, testObject{ID: 42, Tags: part.NewSet("hello", "world")})
+	require.NoError(t, err, "Insert failed")
+	txn.Commit()
+
+	select {
+	case <-watch:
+	case <-time.After(watchCloseTimeout):
+		t.Fatal("watch channel not closed")
+	}
+}
+
 func TestDB_LowerBound_ByRevision(t *testing.T) {
 	t.Parallel()
 
