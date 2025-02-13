@@ -20,7 +20,7 @@ func TestWatchSet(t *testing.T) {
 
 	// Empty watch set, cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
-	go cancel()
+	cancel()
 	ch, err := ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, ch)
@@ -31,7 +31,7 @@ func TestWatchSet(t *testing.T) {
 	ch3 := make(chan struct{})
 	ws.Add(ch1, ch2, ch3)
 	ctx, cancel = context.WithCancel(context.Background())
-	go cancel()
+	cancel()
 	ch, err = ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, ch)
@@ -95,10 +95,6 @@ func TestWatchSetInQueries(t *testing.T) {
 	_, _, watch1, _ := table.GetWatch(txn, idIndex.Query(1))
 	_, _, watch2, _ := table.GetWatch(txn, idIndex.Query(2))
 	_, _, watch3, _ := table.GetWatch(txn, idIndex.Query(3))
-
-	closed, err = ws.Wait(context.Background(), time.Millisecond)
-	require.NoError(t, err)
-	require.Empty(t, closed)
 
 	wtxn = db.WriteTxn(table)
 	table.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("foo")})

@@ -5,7 +5,6 @@ package statedb
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"slices"
 	"sync"
@@ -75,13 +74,12 @@ func (ws *WatchSet) Merge(other *WatchSet) {
 	}
 }
 
-// Wait for channels in the watch set to close until context is cancelled or timeout reached.
+// Wait for channels in the watch set to close or the context is cancelled.
+// After the first closed channel is seen Wait will wait [settleTime] for
+// more closed channels.
 // Returns the closed channels and removes them from the set.
-func (ws *WatchSet) Wait(ctx context.Context, timeout time.Duration) ([]<-chan struct{}, error) {
-	if timeout <= 0 {
-		return nil, fmt.Errorf("bad timeout %d, must be >0", timeout)
-	}
-	innerCtx, cancel := context.WithTimeout(ctx, timeout)
+func (ws *WatchSet) Wait(ctx context.Context, settleTime time.Duration) ([]<-chan struct{}, error) {
+	innerCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	ws.mu.Lock()
@@ -91,7 +89,7 @@ func (ws *WatchSet) Wait(ctx context.Context, timeout time.Duration) ([]<-chan s
 
 	// No channels to watch? Just watch the context.
 	if len(ws.chans) == 0 {
-		<-innerCtx.Done()
+		<-ctx.Done()
 		return nil, ctx.Err()
 	}
 
@@ -101,22 +99,36 @@ func (ws *WatchSet) Wait(ctx context.Context, timeout time.Duration) ([]<-chan s
 	chunkSize := 16
 	roundedSize := len(chans) + (chunkSize - len(chans)%chunkSize)
 	chans = slices.Grow(chans, roundedSize)[:roundedSize]
-
-	if len(ws.chans) <= chunkSize {
-		watch16(closedChannels, innerCtx.Done(), chans)
-		return closedChannels.chans, ctx.Err()
-	}
+	haveResult := make(chan struct{}, 1)
 
 	var wg sync.WaitGroup
-	for chunk := range slices.Chunk(chans, chunkSize) {
+	chunks := slices.Chunk(chans, chunkSize)
+	for chunk := range chunks {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			watch16(closedChannels, innerCtx.Done(), chunk)
+			watch16(haveResult, closedChannels, innerCtx.Done(), chunk)
 		}()
 	}
+
+	// Wait for the first closed channel to be seen. If [settleTime] is set,
+	// then wait a bit longer for more.
+	select {
+	case <-haveResult:
+		if settleTime > 0 {
+			select {
+			case <-time.After(settleTime):
+			case <-ctx.Done():
+			}
+		}
+	case <-ctx.Done():
+	}
+
+	// Stop waiting for more channels to close
+	cancel()
 	wg.Wait()
 
+	// Remove the closed channels from the watch set.
 	for _, ch := range closedChannels.chans {
 		delete(ws.chans, ch)
 	}
@@ -124,7 +136,7 @@ func (ws *WatchSet) Wait(ctx context.Context, timeout time.Duration) ([]<-chan s
 	return closedChannels.chans, ctx.Err()
 }
 
-func watch16(closedChannels *closedChannelsSlice, stop <-chan struct{}, chans []<-chan struct{}) {
+func watch16(haveClosed chan struct{}, closedChannels *closedChannelsSlice, stop <-chan struct{}, chans []<-chan struct{}) {
 	for {
 		closedIndex := -1
 		select {
@@ -165,6 +177,13 @@ func watch16(closedChannels *closedChannelsSlice, stop <-chan struct{}, chans []
 		}
 		closedChannels.append(chans[closedIndex])
 		chans[closedIndex] = nil
+		if haveClosed != nil {
+			select {
+			case haveClosed <- struct{}{}:
+				haveClosed = nil
+			default:
+			}
+		}
 	}
 }
 
