@@ -5,9 +5,11 @@ package statedb
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 	"sync"
+	"time"
 )
 
 const watchSetChunkSize = 16
@@ -50,6 +52,18 @@ func (ws *WatchSet) Has(ch <-chan struct{}) bool {
 	return found
 }
 
+// HasAny returns true if the WatchSet has any of the given channels
+func (ws *WatchSet) HasAny(chans []<-chan struct{}) bool {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	for _, ch := range chans {
+		if _, found := ws.chans[ch]; found {
+			return true
+		}
+	}
+	return false
+}
+
 // Merge channels from another WatchSet
 func (ws *WatchSet) Merge(other *WatchSet) {
 	other.mu.Lock()
@@ -61,18 +75,23 @@ func (ws *WatchSet) Merge(other *WatchSet) {
 	}
 }
 
-// Wait for any channel in the watch set to close. The
-// watch set is cleared when this method returns.
-func (ws *WatchSet) Wait(ctx context.Context) (<-chan struct{}, error) {
+// Wait for channels in the watch set to close until context is cancelled or timeout reached.
+// Returns the closed channels and removes them from the set.
+func (ws *WatchSet) Wait(ctx context.Context, timeout time.Duration) ([]<-chan struct{}, error) {
+	if timeout <= 0 {
+		return nil, fmt.Errorf("bad timeout %d, must be >0", timeout)
+	}
+	innerCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	ws.mu.Lock()
-	defer func() {
-		clear(ws.chans)
-		ws.mu.Unlock()
-	}()
+	defer ws.mu.Unlock()
+
+	closedChannels := &closedChannelsSlice{}
 
 	// No channels to watch? Just watch the context.
 	if len(ws.chans) == 0 {
-		<-ctx.Done()
+		<-innerCtx.Done()
 		return nil, ctx.Err()
 	}
 
@@ -84,77 +103,78 @@ func (ws *WatchSet) Wait(ctx context.Context) (<-chan struct{}, error) {
 	chans = slices.Grow(chans, roundedSize)[:roundedSize]
 
 	if len(ws.chans) <= chunkSize {
-		ch := watch16(ctx.Done(), chans)
-		return ch, ctx.Err()
+		watch16(closedChannels, innerCtx.Done(), chans)
+		return closedChannels.chans, ctx.Err()
 	}
 
-	// More than one chunk. Fork goroutines to watch each chunk. The first chunk
-	// that completes will cancel the context and stop the other goroutines.
-	innerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	closedChan := make(chan (<-chan struct{}), 1)
-	defer close(closedChan)
 	var wg sync.WaitGroup
-
 	for chunk := range slices.Chunk(chans, chunkSize) {
 		wg.Add(1)
 		go func() {
-			defer cancel()
 			defer wg.Done()
-			chunk = slices.Clone(chunk)
-			if ch := watch16(innerCtx.Done(), chunk); ch != nil {
-				select {
-				case closedChan <- ch:
-				default:
-				}
-			}
+			watch16(closedChannels, innerCtx.Done(), chunk)
 		}()
 	}
 	wg.Wait()
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case ch := <-closedChan:
-		return ch, nil
+
+	for _, ch := range closedChannels.chans {
+		delete(ws.chans, ch)
+	}
+
+	return closedChannels.chans, ctx.Err()
+}
+
+func watch16(closedChannels *closedChannelsSlice, stop <-chan struct{}, chans []<-chan struct{}) {
+	for {
+		closedIndex := -1
+		select {
+		case <-stop:
+			return
+		case <-chans[0]:
+			closedIndex = 0
+		case <-chans[1]:
+			closedIndex = 1
+		case <-chans[2]:
+			closedIndex = 2
+		case <-chans[3]:
+			closedIndex = 3
+		case <-chans[4]:
+			closedIndex = 4
+		case <-chans[5]:
+			closedIndex = 5
+		case <-chans[6]:
+			closedIndex = 6
+		case <-chans[7]:
+			closedIndex = 7
+		case <-chans[8]:
+			closedIndex = 8
+		case <-chans[9]:
+			closedIndex = 9
+		case <-chans[10]:
+			closedIndex = 10
+		case <-chans[11]:
+			closedIndex = 11
+		case <-chans[12]:
+			closedIndex = 12
+		case <-chans[13]:
+			closedIndex = 13
+		case <-chans[14]:
+			closedIndex = 14
+		case <-chans[15]:
+			closedIndex = 15
+		}
+		closedChannels.append(chans[closedIndex])
+		chans[closedIndex] = nil
 	}
 }
 
-func watch16(stop <-chan struct{}, chans []<-chan struct{}) <-chan struct{} {
-	select {
-	case <-stop:
-		return nil
-	case <-chans[0]:
-		return chans[0]
-	case <-chans[1]:
-		return chans[1]
-	case <-chans[2]:
-		return chans[2]
-	case <-chans[3]:
-		return chans[3]
-	case <-chans[4]:
-		return chans[4]
-	case <-chans[5]:
-		return chans[5]
-	case <-chans[6]:
-		return chans[6]
-	case <-chans[7]:
-		return chans[7]
-	case <-chans[8]:
-		return chans[8]
-	case <-chans[9]:
-		return chans[9]
-	case <-chans[10]:
-		return chans[10]
-	case <-chans[11]:
-		return chans[11]
-	case <-chans[12]:
-		return chans[12]
-	case <-chans[13]:
-		return chans[13]
-	case <-chans[14]:
-		return chans[14]
-	case <-chans[15]:
-		return chans[15]
-	}
+type closedChannelsSlice struct {
+	mu    sync.Mutex
+	chans []<-chan struct{}
+}
+
+func (ccs *closedChannelsSlice) append(ch <-chan struct{}) {
+	ccs.mu.Lock()
+	ccs.chans = append(ccs.chans, ch)
+	ccs.mu.Unlock()
 }

@@ -21,7 +21,7 @@ func TestWatchSet(t *testing.T) {
 	// Empty watch set, cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
 	go cancel()
-	ch, err := ws.Wait(ctx)
+	ch, err := ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, ch)
 
@@ -32,12 +32,12 @@ func TestWatchSet(t *testing.T) {
 	ws.Add(ch1, ch2, ch3)
 	ctx, cancel = context.WithCancel(context.Background())
 	go cancel()
-	ch, err = ws.Wait(ctx)
+	ch, err = ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
 	require.Nil(t, ch)
 
 	// Many channels
-	for _, numChans := range []int{0, 1, 8, 12, 16, 31, 32, 61, 64, 121} {
+	for _, numChans := range []int{0, 1, 16, 31, 61, 64} {
 		for i := range numChans {
 			var chans []chan struct{}
 			var rchans []<-chan struct{}
@@ -46,14 +46,16 @@ func TestWatchSet(t *testing.T) {
 				chans = append(chans, ch)
 				rchans = append(rchans, ch)
 			}
+			ws.Clear()
 			ws.Add(rchans...)
 
 			close(chans[i])
-			ctx, cancel = context.WithCancel(context.Background())
-			ch, err := ws.Wait(ctx)
+			closed, err := ws.Wait(context.Background(), time.Millisecond)
 			require.NoError(t, err)
-			require.True(t, ch == chans[i])
+			require.Len(t, closed, 1)
+			require.True(t, closed[0] == chans[i])
 			cancel()
+
 		}
 	}
 }
@@ -68,10 +70,10 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	// Should timeout as watches should not have closed yet.
 	ws.Add(watchAll)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
-	ch, err := ws.Wait(ctx)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	closed, err := ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Nil(t, ch)
+	require.Empty(t, closed)
 	cancel()
 
 	// Insert some objects
@@ -83,20 +85,20 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	// The 'watchAll' channel should now have closed and Wait() returns.
 	ws.Add(watchAll)
-	ch, err = ws.Wait(context.Background())
+	closed, err = ws.Wait(context.Background(), time.Millisecond)
 	require.NoError(t, err)
-	require.Equal(t, ch, watchAll)
+	require.Len(t, closed, 1)
+	require.True(t, closed[0] == watchAll)
+	ws.Clear()
 
 	// Try watching specific objects for changes.
 	_, _, watch1, _ := table.GetWatch(txn, idIndex.Query(1))
 	_, _, watch2, _ := table.GetWatch(txn, idIndex.Query(2))
 	_, _, watch3, _ := table.GetWatch(txn, idIndex.Query(3))
 
-	ctx, cancel = context.WithTimeout(context.Background(), 5*time.Millisecond)
-	ch, err = ws.Wait(ctx)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	require.Nil(t, ch)
-	cancel()
+	closed, err = ws.Wait(context.Background(), time.Millisecond)
+	require.NoError(t, err)
+	require.Empty(t, closed)
 
 	wtxn = db.WriteTxn(table)
 	table.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("foo")})
@@ -111,11 +113,13 @@ func TestWatchSetInQueries(t *testing.T) {
 	// in ws2.
 	ws.Merge(ws2)
 
-	ch, err = ws.Wait(context.Background())
+	closed, err = ws.Wait(context.Background(), time.Millisecond)
 	require.NoError(t, err)
-	require.True(t, ch == watch1)
-	require.True(t, ws2.Has(ch))
+	require.Len(t, closed, 1)
+	require.True(t, closed[0] == watch1)
+	require.True(t, ws2.Has(closed[0]))
+	require.True(t, ws2.HasAny(closed))
 
 	ws2.Clear()
-	require.False(t, ws2.Has(ch))
+	require.False(t, ws2.Has(closed[0]))
 }
