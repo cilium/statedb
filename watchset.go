@@ -5,10 +5,9 @@ package statedb
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"sync"
-
-	"golang.org/x/exp/maps"
 )
 
 const watchSetChunkSize = 16
@@ -79,7 +78,7 @@ func (ws *WatchSet) Wait(ctx context.Context) (<-chan struct{}, error) {
 
 	// Collect the channels into a slice. The slice length is rounded to a full
 	// chunk size.
-	chans := maps.Keys(ws.chans)
+	chans := slices.Collect(maps.Keys(ws.chans))
 	chunkSize := 16
 	roundedSize := len(chans) + (chunkSize - len(chans)%chunkSize)
 	chans = slices.Grow(chans, roundedSize)[:roundedSize]
