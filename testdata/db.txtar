@@ -17,10 +17,16 @@ db/initialized test1 test2
 db/show test1
 db/show test2
 
+# Assert empty
+db/empty test1 test2
+
 # Insert
 db/insert test1 obj1.yaml
 db/insert test1 obj2.yaml
 db/insert test2 obj2.yaml
+
+# Assert not empty
+! db/empty test1 test2
 
 # Show (non-empty)
 db/show test1
