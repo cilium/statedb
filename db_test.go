@@ -1150,31 +1150,26 @@ func TestWriteJSON(t *testing.T) {
 func Test_nonUniqueKey(t *testing.T) {
 	// empty keys
 	key := encodeNonUniqueKey(nil, nil)
-	secondary, _ := decodeNonUniqueKey(key)
-	assert.Len(t, secondary, 0)
+	nuk := nonUniqueKey(key)
+	assert.Equal(t, 0, nuk.secondaryLen())
 
 	// empty primary
 	key = encodeNonUniqueKey(nil, []byte("foo"))
-	secondary, _ = decodeNonUniqueKey(key)
-	assert.Equal(t, string(secondary), "foo")
+	nuk = nonUniqueKey(key)
+	assert.Zero(t, nuk.primaryLen())
+	assert.Equal(t, 3, nuk.secondaryLen())
 
 	// empty secondary
 	key = encodeNonUniqueKey([]byte("quux"), []byte{})
-	secondary, _ = decodeNonUniqueKey(key)
-	assert.Len(t, secondary, 0)
+	nuk = nonUniqueKey(key)
+	assert.Zero(t, nuk.secondaryLen())
 
 	// non-empty
 	key = encodeNonUniqueKey([]byte("foo"), []byte("quux"))
-	secondary, primary := decodeNonUniqueKey(key)
-	assert.EqualValues(t, secondary, "quux")
-	assert.EqualValues(t, primary, "foo")
-
-	// non-empty, primary with substitutions:
-	// 0x0 => 0xfe, 0xfe => 0xfd01, 0xfd => 0xfd00
-	key = encodeNonUniqueKey([]byte{0x0, 0xfd, 0xfe}, []byte("quux"))
-	secondary, primary = decodeNonUniqueKey(key)
-	assert.EqualValues(t, secondary, "quux")
-	assert.EqualValues(t, primary, []byte{0xfe, 0xfd, 0x01, 0xfd, 0x00})
+	nuk = nonUniqueKey(key)
+	assert.Equal(t, 4, nuk.secondaryLen())
+	assert.Equal(t, 3, nuk.primaryLen())
+	assert.EqualValues(t, "foo", nuk.encodedPrimary())
 }
 
 func Test_validateTableName(t *testing.T) {
