@@ -1,8 +1,12 @@
 package statedb
 
 import (
+	"bytes"
 	"cmp"
+	"fmt"
 	"iter"
+	"math/rand"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/quick"
@@ -13,6 +17,18 @@ import (
 
 var quickConfig = &quick.Config{
 	MaxCount: 5000,
+
+	// Make 1-8 byte long strings as input data. Keep the strings shorter
+	// than the default quick value generation to hit the more interesting cases
+	// often.
+	Values: func(args []reflect.Value, rand *rand.Rand) {
+		for i := range args {
+			numBytes := 1 + rand.Intn(8)
+			bs := make([]byte, numBytes)
+			rand.Read(bs)
+			args[i] = reflect.ValueOf(string(bs))
+		}
+	},
 }
 
 // Use an object with strings for both primary and secondary
@@ -23,11 +39,8 @@ type quickObj struct {
 	A, B string
 }
 
-func (q quickObj) getA() string {
-	return q.A
-}
-func (q quickObj) getB() string {
-	return q.B
+func (q quickObj) String() string {
+	return fmt.Sprintf("%x %x", []byte(q.A), []byte(q.B))
 }
 
 var (
@@ -52,13 +65,27 @@ var (
 	}
 )
 
-func isOrdered[A cmp.Ordered, B any](t *testing.T, it iter.Seq2[A, B]) bool {
-	var prev A
+func isOrdered(t *testing.T, aFirst bool, it iter.Seq2[quickObj, Revision]) bool {
+	var prev quickObj
 	for a := range it {
-		if cmp.Compare(a, prev) < 0 {
-			t.Logf("isOrdered: %#v < %#v!", a, prev)
-			return false
+		if aFirst {
+			if ret := cmp.Compare(a.A, prev.A); ret < 0 {
+				t.Logf("isOrdered(A): %s < %s!", a, prev)
+				return false
+			} else if ret == 0 && cmp.Compare(a.B, prev.B) < 0 {
+				t.Logf("isOrdered(B): %s < %s!", a, prev)
+				return false
+			}
+		} else {
+			if ret := cmp.Compare(a.B, prev.B); ret < 0 {
+				t.Logf("isOrdered(B): %s < %s!", a, prev)
+				return false
+			} else if ret == 0 && cmp.Compare(a.A, prev.A) < 0 {
+				t.Logf("isOrdered(A): %s < %s!", a, prev)
+				return false
+			}
 		}
+
 		prev = a
 	}
 	return true
@@ -106,15 +133,15 @@ func TestDB_Quick(t *testing.T) {
 		// Check queries against the primary index
 		//
 
-		if numExpected != seqLen(Map(table.All(rtxn), quickObj.getA)) {
+		if numExpected != seqLen(table.All(rtxn)) {
 			t.Logf("All() via aIndex wrong length")
 			return false
 		}
-		if numExpected != seqLen(Map(table.Prefix(rtxn, aIndex.Query("")), quickObj.getA)) {
+		if numExpected != seqLen(table.Prefix(rtxn, aIndex.Query(""))) {
 			t.Logf("Prefix() via aIndex wrong length")
 			return false
 		}
-		if numExpected != seqLen(Map(table.LowerBound(rtxn, aIndex.Query("")), quickObj.getA)) {
+		if numExpected != seqLen(table.LowerBound(rtxn, aIndex.Query(""))) {
 			t.Logf("LowerBound() via aIndex wrong length")
 			return false
 		}
@@ -151,20 +178,20 @@ func TestDB_Quick(t *testing.T) {
 		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
 			if cmp.Compare(obj.A, a) < 0 {
-				t.Logf("AnyTable.LowerBound() order wrong")
+				t.Logf("AnyTable.LowerBound(%x) order wrong: %x < %x", []byte(a), []byte(obj.A), []byte(a))
 				return false
 			}
 		}
 
-		if !isOrdered(t, Map(table.All(rtxn), quickObj.getA)) {
+		if !isOrdered(t, true, table.All(rtxn)) {
 			t.Logf("All() wrong order")
 			return false
 		}
-		if !isOrdered(t, Map(table.Prefix(rtxn, aIndex.Query("")), quickObj.getA)) {
+		if !isOrdered(t, true, table.Prefix(rtxn, aIndex.Query(""))) {
 			t.Logf("Prefix() via aIndex wrong order")
 			return false
 		}
-		if !isOrdered(t, Map(table.LowerBound(rtxn, aIndex.Query("")), quickObj.getA)) {
+		if !isOrdered(t, true, table.LowerBound(rtxn, aIndex.Query(""))) {
 			t.Logf("LowerBound() via aIndex wrong order")
 			return false
 		}
@@ -178,6 +205,7 @@ func TestDB_Quick(t *testing.T) {
 			t.Logf("Prefix() via bIndex wrong length")
 			return false
 		}
+
 		if numExpected != seqLen(table.LowerBound(rtxn, bIndex.Query(""))) {
 			t.Logf("LowerBound() via bIndex wrong length")
 			return false
@@ -187,7 +215,7 @@ func TestDB_Quick(t *testing.T) {
 		// not be the one that we just inserted.
 		obj, _, found = table.Get(rtxn, bIndex.Query(b))
 		if !found || obj.B != b {
-			t.Logf("Get() via bIndex not found or wrong B")
+			t.Logf("Get(%q) via bIndex not found (%v) or wrong B (%q vs %q)", b, found, obj.B, b)
 			return false
 		}
 
@@ -224,7 +252,7 @@ func TestDB_Quick(t *testing.T) {
 		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
 			if !strings.HasPrefix(obj.B, b) {
-				t.Logf("AnyTable.Prefix() via bIndex has wrong prefix")
+				t.Logf("AnyTable.Prefix() via bIndex has wrong prefix: %q vs %q", obj.B, b)
 				return false
 			}
 		}
@@ -253,17 +281,75 @@ func TestDB_Quick(t *testing.T) {
 		}
 
 		// Iterating over the secondary index returns the objects in order
-		// defined by the "B" key.
-		if !isOrdered(t, Map(table.Prefix(rtxn, bIndex.Query("")), quickObj.getB)) {
-			t.Logf("Prefix() via bIndex has wrong order")
+		// defined by the "B" key first and then by the "A" key.
+		if !isOrdered(t, false, table.Prefix(rtxn, bIndex.Query(""))) {
+			t.Logf("Prefix() via bIndex wrong order")
+			rtxn.getTxn().mustIndexReadTxn(table, table.indexPos("b")).PrintTree()
 			return false
 		}
-		if !isOrdered(t, Map(table.LowerBound(rtxn, bIndex.Query("")), quickObj.getB)) {
-			t.Logf("LowerBound() via bIndex has wrong order")
+		if !isOrdered(t, false, table.LowerBound(rtxn, bIndex.Query(""))) {
+			t.Logf("Prefix() via bIndex wrong order")
 			return false
 		}
 		return true
 	}
 
 	require.NoError(t, quick.Check(check, quickConfig))
+}
+
+func Test_Quick_nonUniqueKey(t *testing.T) {
+	check := func(p1, s1, p2, s2 []byte) bool {
+		key1 := encodeNonUniqueKey(p1, s1)
+		expectedLen := encodedLength(p1) + 1 + encodedLength(s1) + 2
+		minLen := len(p1) + 1 + len(s1) + 2
+		if expectedLen < minLen {
+			t.Logf("expected length too short (%d), must be >= %d", expectedLen, minLen)
+			return false
+		}
+		if len(key1) != expectedLen {
+			t.Logf("length mismatch, expected %d, got %d", expectedLen, len(key1))
+			return false
+		}
+
+		nuk1 := nonUniqueKey(key1)
+		if len(nuk1.encodedPrimary()) < len(p1) {
+			t.Logf("encodedPrimary() length (%d) shorter than original (%d)", len(nuk1.encodedPrimary()), len(p1))
+			return false
+		}
+		if len(nuk1.encodedPrimary()) != encodedLength(p1) {
+			t.Logf("encodedPrimary() length (%d) does not match encodedLength() (%d)", len(nuk1.encodedPrimary()), len(p1))
+			return false
+		}
+		if len(nuk1.encodedSecondary()) < len(s1) {
+			t.Logf("encodedSecondary() length (%d) shorter than original (%d)", len(nuk1.encodedSecondary()), len(s1))
+		}
+		if len(nuk1.encodedSecondary()) != encodedLength(s1) {
+			t.Logf("encodedSecondary() length (%d) does not match encodedLength() (%d)", len(nuk1.encodedSecondary()), len(s1))
+			return false
+		}
+
+		// Do another key and check that ordering is preserved.
+		key2 := encodeNonUniqueKey(p2, s2)
+		scmp := bytes.Compare(s1, s2)
+		pcmp := bytes.Compare(p1, p2)
+		kcmp := bytes.Compare(key1, key2)
+
+		if (scmp == 0 && pcmp != kcmp) /* secondary key matches, primary key determines order */ ||
+			(scmp != 0 && scmp != kcmp) /* secondary key determines order */ {
+			t.Logf("ordering not preserved: key1=%v key2=%v, p1=%v, s1=%v, p2=%v, s2=%v", key1, key2, p1, s1, p2, s2)
+			return false
+		}
+		return true
+	}
+	require.NoError(t, quick.Check(check, &quick.Config{
+		MaxCount: 50000,
+		Values: func(args []reflect.Value, rand *rand.Rand) {
+			for i := range args {
+				numBytes := 1 + rand.Intn(8)
+				bs := make([]byte, numBytes)
+				rand.Read(bs)
+				args[i] = reflect.ValueOf(bs)
+			}
+		},
+	}))
 }
