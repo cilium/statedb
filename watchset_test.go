@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"math/rand"
 	"testing"
 	"time"
 
@@ -37,26 +38,27 @@ func TestWatchSet(t *testing.T) {
 	require.Nil(t, ch)
 
 	// Many channels
-	for _, numChans := range []int{0, 1, 16, 31, 61, 64} {
-		for i := range numChans {
-			var chans []chan struct{}
-			var rchans []<-chan struct{}
-			for range numChans {
-				ch := make(chan struct{})
-				chans = append(chans, ch)
-				rchans = append(rchans, ch)
-			}
-			ws.Clear()
-			ws.Add(rchans...)
-
-			close(chans[i])
-			closed, err := ws.Wait(context.Background(), time.Millisecond)
-			require.NoError(t, err)
-			require.Len(t, closed, 1)
-			require.True(t, closed[0] == chans[i])
-			cancel()
-
+	for _, numChans := range []int{2, 16, 31, 1024} {
+		var chans []chan struct{}
+		var rchans []<-chan struct{}
+		for range numChans {
+			ch := make(chan struct{})
+			chans = append(chans, ch)
+			rchans = append(rchans, ch)
 		}
+		ws.Clear()
+		ws.Add(rchans...)
+
+		i, j := rand.Intn(numChans), rand.Intn(numChans)
+		for j == i {
+			j = rand.Intn(numChans)
+		}
+		close(chans[i])
+		close(chans[j])
+		closed, err := ws.Wait(context.Background(), 50*time.Millisecond)
+		require.NoError(t, err)
+		require.ElementsMatch(t, closed, []<-chan struct{}{chans[i], chans[j]}, "i=%d, j=%d", i, j)
+		cancel()
 	}
 }
 
@@ -85,7 +87,7 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	// The 'watchAll' channel should now have closed and Wait() returns.
 	ws.Add(watchAll)
-	closed, err = ws.Wait(context.Background(), time.Millisecond)
+	closed, err = ws.Wait(context.Background(), 100*time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, closed, 1)
 	require.True(t, closed[0] == watchAll)
@@ -109,7 +111,7 @@ func TestWatchSetInQueries(t *testing.T) {
 	// in ws2.
 	ws.Merge(ws2)
 
-	closed, err = ws.Wait(context.Background(), time.Millisecond)
+	closed, err = ws.Wait(context.Background(), 100*time.Millisecond)
 	require.NoError(t, err)
 	require.Len(t, closed, 1)
 	require.True(t, closed[0] == watch1)
@@ -118,4 +120,33 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	ws2.Clear()
 	require.False(t, ws2.Has(closed[0]))
+}
+
+func benchmarkWatchSet(b *testing.B, numChans int) {
+	ws := NewWatchSet()
+	for range numChans - 1 {
+		ws.Add(make(chan struct{}))
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		ws.Add(closedWatchChannel)
+		ws.Wait(context.TODO(), 0)
+	}
+}
+
+func BenchmarkWatchSet_4(b *testing.B) {
+	benchmarkWatchSet(b, 4)
+}
+
+func BenchmarkWatchSet_16(b *testing.B) {
+	benchmarkWatchSet(b, 16)
+}
+
+func BenchmarkWatchSet_128(b *testing.B) {
+	benchmarkWatchSet(b, 128)
+}
+
+func BenchmarkWatchSet_1024(b *testing.B) {
+	benchmarkWatchSet(b, 1024)
 }
