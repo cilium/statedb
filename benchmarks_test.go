@@ -231,6 +231,31 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	b.ResetTimer()
+
+	for j := 0; j < b.N; j++ {
+		txn := db.WriteTxn(table)
+		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
+			_, _, err := table.Insert(txn, testObject{ID: id})
+			if err != nil {
+				b.Fatalf("Insert error: %s", err)
+			}
+			for range 5 {
+				for range table.Prefix(txn, idIndex.Query(id)) {
+					break
+				}
+			}
+		}
+		require.EqualValues(b, table.NumObjects(txn), numObjectsToInsert)
+		txn.Abort()
+	}
+	b.StopTimer()
+
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_Changes_Baseline(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	b.ResetTimer()
