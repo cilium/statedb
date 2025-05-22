@@ -48,7 +48,7 @@ type multiMockOps struct {
 }
 
 // Delete implements reconciler.Operations.
-func (m *multiMockOps) Delete(context.Context, statedb.ReadTxn, *multiStatusObject) error {
+func (m *multiMockOps) Delete(context.Context, statedb.ReadTxn, statedb.Revision, *multiStatusObject) error {
 	return nil
 }
 
@@ -58,7 +58,7 @@ func (m *multiMockOps) Prune(context.Context, statedb.ReadTxn, iter.Seq2[*multiS
 }
 
 // Update implements reconciler.Operations.
-func (m *multiMockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *multiStatusObject) error {
+func (m *multiMockOps) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *multiStatusObject) error {
 	m.numUpdates++
 	if m.faulty.Load() {
 		return errors.New("fail")
