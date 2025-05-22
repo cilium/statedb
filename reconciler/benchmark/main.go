@@ -60,7 +60,7 @@ type mockOps struct {
 }
 
 // Delete implements reconciler.Operations.
-func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
+func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *testObject) error {
 	return nil
 }
 
@@ -70,7 +70,7 @@ func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter.
 }
 
 // Update implements reconciler.Operations.
-func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
+func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *testObject) error {
 	mt.numUpdates.Add(1)
 	return nil
 }

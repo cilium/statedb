@@ -35,7 +35,7 @@ func NewMemoOps(lc cell.Lifecycle, log *slog.Logger, cfg Config) reconciler.Oper
 }
 
 // Delete a memo.
-func (ops *MemoOps) Delete(ctx context.Context, txn statedb.ReadTxn, memo *Memo) error {
+func (ops *MemoOps) Delete(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, memo *Memo) error {
 	filename := path.Join(ops.directory, memo.Name)
 	err := os.Remove(filename)
 	ops.log.Info("Delete", "filename", filename, "error", err)
@@ -76,7 +76,7 @@ func (ops *MemoOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter
 }
 
 // Update a memo.
-func (ops *MemoOps) Update(ctx context.Context, txn statedb.ReadTxn, memo *Memo) error {
+func (ops *MemoOps) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, memo *Memo) error {
 	filename := path.Join(ops.directory, memo.Name)
 	err := os.WriteFile(filename, []byte(memo.Content), 0644)
 	ops.log.Info("Update", "filename", filename, "error", err)

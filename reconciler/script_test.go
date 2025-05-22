@@ -340,22 +340,26 @@ type mockOps struct {
 	updates intMap
 }
 
-// DeleteBatch implements recogciler.BatchOperations.
+// DeleteBatch implements reconciler.BatchOperations.
 func (mt *mockOps) DeleteBatch(ctx context.Context, txn statedb.ReadTxn, batch []reconciler.BatchEntry[*testObject]) {
 	for i := range batch {
-		batch[i].Result = mt.Delete(ctx, txn, batch[i].Object)
+		batch[i].Result = mt.Delete(ctx, txn, batch[i].Revision, batch[i].Object)
 	}
 }
 
 // UpdateBatch implements reconciler.BatchOperations.
 func (mt *mockOps) UpdateBatch(ctx context.Context, txn statedb.ReadTxn, batch []reconciler.BatchEntry[*testObject]) {
 	for i := range batch {
-		batch[i].Result = mt.Update(ctx, txn, batch[i].Object)
+		batch[i].Result = mt.Update(ctx, txn, batch[i].Revision, batch[i].Object)
 	}
 }
 
 // Delete implements reconciler.Operations.
-func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
+func (mt *mockOps) Delete(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *testObject) error {
+	if rev == 0 {
+		panic("BUG: revision must not be 0")
+	}
+
 	if mt.faulty.Load() || obj.Faulty {
 		mt.history.add(opFail(opDelete(obj.ID)))
 		return errors.New("delete fail")
@@ -377,7 +381,10 @@ func (mt *mockOps) Prune(ctx context.Context, txn statedb.ReadTxn, objects iter.
 }
 
 // Update implements reconciler.Operations.
-func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, obj *testObject) error {
+func (mt *mockOps) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *testObject) error {
+	if rev == 0 {
+		panic("BUG: revision must not be 0")
+	}
 	mt.updates.incr(obj.ID)
 
 	op := opUpdate(obj.ID)
