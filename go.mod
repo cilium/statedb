@@ -3,7 +3,7 @@ module github.com/cilium/statedb
 go 1.23
 
 require (
-	github.com/cilium/hive v0.0.0-20241213121623-605c1412b9b3
+	github.com/cilium/hive v0.0.0-20250522123230-2946c4940f41
 	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
 	github.com/spf13/cobra v1.8.0
@@ -18,6 +18,7 @@ require (
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
+	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
