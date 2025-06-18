@@ -58,6 +58,9 @@ func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <
 	if !hadOld {
 		txn.size++
 	}
+	if txn.opts.rootOnlyWatch {
+		watch = txn.root.watch
+	}
 	return
 }
 
@@ -79,6 +82,9 @@ func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, w
 	old, hadOld, watch, txn.root = txn.modify(txn.root, key, mod)
 	if !hadOld {
 		txn.size++
+	}
+	if txn.opts.rootOnlyWatch {
+		watch = txn.root.watch
 	}
 	return
 }
