@@ -982,7 +982,7 @@ func Test_closed_chan_regression(t *testing.T) {
 	for _, c := range tree.root.children() {
 		select {
 		case <-c.watch:
-			t.Logf("%x %p closed already", c.prefix, &c.watch)
+			t.Logf("%x %p closed already", c.prefix(), &c.watch)
 			t.FailNow()
 		default:
 		}

@@ -209,9 +209,9 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	// it, we do it and return. If an existing node exists where the key should go, then
 	// we stop. 'this' points to that node, and 'thisp' to its memory location. It has
 	// not been cloned.
-	for !this.isLeaf() && bytes.HasPrefix(key, this.prefix) {
+	for !this.isLeaf() && bytes.HasPrefix(key, this.prefix()) {
 		// Prefix matched. Consume it and go further.
-		key = key[len(this.prefix):]
+		key = key[this.prefixLen:]
 		if len(key) == 0 {
 			// Our key matches this node or we reached a leaf node.
 			break
@@ -247,14 +247,14 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		this = *thisp
 	}
 
-	common := commonPrefix(key, this.prefix)
+	common := commonPrefix(key, this.prefix())
 
 	// A node already exists where we wanted to insert the key.
 	// 'this' points to it, and 'thisp' is its memory location. The parents
 	// have been cloned.
 	//
 	// Check first if it's an exact match.
-	if len(key) == 0 || len(key) == len(common) && len(key) == len(this.prefix) {
+	if len(key) == 0 || len(key) == len(common) && len(key) == int(this.prefixLen) {
 		this = txn.cloneNode(this)
 		*thisp = this
 		if leaf := this.getLeaf(); leaf != nil {
@@ -270,7 +270,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		} else {
 			// Set the leaf
 			var zero T
-			leaf := newLeaf(txn.opts, this.prefix, fullKey, mod(zero))
+			leaf := newLeaf(txn.opts, this.prefix(), fullKey, mod(zero))
 			watch = leaf.watch
 			this.setLeaf(leaf)
 		}
@@ -289,22 +289,21 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		this = txn.cloneNode(this)
 	}
 	*thisp = this
-	this.prefix = this.prefix[len(common):]
+	this.setPrefix(this.prefix()[len(common):])
 	key = key[len(common):]
 
 	var zero T
 	newLeaf := newLeaf(txn.opts, key, fullKey, mod(zero))
 	watch = newLeaf.watch
-	newNode := &node4[T]{
-		header: header[T]{prefix: common},
-	}
+	newNode := &node4[T]{}
+	newNode.setPrefix(common)
 	newNode.setKind(nodeKind4)
 	if !txn.opts.rootOnlyWatch {
 		newNode.watch = make(chan struct{})
 	}
 
 	switch {
-	case len(this.prefix) == 0:
+	case this.prefixLen == 0:
 		// target has shorter key than new leaf
 		newNode.setLeaf(this.getLeaf())
 		newNode.children[0] = newLeaf.self()
@@ -315,13 +314,13 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		// new leaf has shorter key than target
 		newNode.setLeaf(newLeaf)
 		newNode.children[0] = this
-		newNode.keys[0] = this.prefix[0]
+		newNode.keys[0] = this.key()
 		newNode.setSize(1)
 
-	case this.prefix[0] < key[0]:
+	case this.key() < key[0]:
 		// target node has smaller key then new leaf
 		newNode.children[0] = this
-		newNode.keys[0] = this.prefix[0]
+		newNode.keys[0] = this.key()
 		newNode.children[1] = newLeaf.self()
 		newNode.keys[1] = key[0]
 		newNode.setSize(2)
@@ -330,7 +329,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		newNode.children[0] = newLeaf.self()
 		newNode.keys[0] = key[0]
 		newNode.children[1] = this
-		newNode.keys[1] = this.prefix[0]
+		newNode.keys[1] = this.key()
 		newNode.setSize(2)
 	}
 	*thisp = newNode.self()
@@ -360,8 +359,8 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	// Find the target node and record the path to it.
 	var leaf *leaf[T]
 	for {
-		if bytes.HasPrefix(key, this.prefix) {
-			key = key[len(this.prefix):]
+		if bytes.HasPrefix(key, this.prefix()) {
+			key = key[this.prefixLen:]
 			if len(key) == 0 {
 				leaf = this.getLeaf()
 				if leaf == nil {
@@ -454,7 +453,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 				n16.leaf = parent.node.getLeaf()
 				size := n16.size()
 				for i := range size {
-					n16.keys[i] = n16.children[i].prefix[0]
+					n16.keys[i] = n16.children[i].key()
 				}
 			case parent.node.kind() == nodeKind16 && parent.node.size() <= 3:
 				newNode = (&node4[T]{header: *parent.node}).self()
