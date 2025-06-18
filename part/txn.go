@@ -195,16 +195,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	// it, we do it and return. If an existing node exists where the key should go, then
 	// we stop. 'this' points to that node, and 'thisp' to its memory location. It has
 	// not been cloned.
-	for {
-		if this.isLeaf() {
-			// We've reached a leaf node, cannot go further.
-			break
-		}
-
-		if !bytes.HasPrefix(key, this.prefix) {
-			break
-		}
-
+	for !this.isLeaf() && bytes.HasPrefix(key, this.prefix) {
 		// Prefix matched. Consume it and go further.
 		key = key[len(this.prefix):]
 		if len(key) == 0 {
@@ -263,6 +254,9 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				header: header[T]{prefix: common},
 			}
 			newNode.setKind(nodeKind4)
+			if !txn.opts.rootOnlyWatch {
+				newNode.watch = make(chan struct{})
+			}
 
 			// Make a shallow copy of the leaf. But keep its watch channel
 			// intact since we're only manipulating its prefix.
@@ -344,6 +338,9 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 			header: header[T]{prefix: common},
 		}
 		newNode.setKind(nodeKind4)
+		if !txn.opts.rootOnlyWatch {
+			newNode.watch = make(chan struct{})
+		}
 
 		switch {
 		case len(key) == 0:
