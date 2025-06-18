@@ -46,7 +46,7 @@ func FromMap[K comparable, V any](m Map[K, V], hm map[K]V) Map[K, V] {
 // an empty map does not allocate anything.
 func (m *Map[K, V]) ensureTree() {
 	if m.tree == nil {
-		m.tree = New[mapKVPair[K, V]](RootOnlyWatch)
+		m.tree = New[mapKVPair[K, V]](RootOnlyWatch, NoCache)
 	}
 	m.bytesFromKey = lookupKeyType[K]()
 }
