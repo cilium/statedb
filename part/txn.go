@@ -10,14 +10,15 @@ import (
 // Txn is a transaction against a tree. It allows doing efficient
 // modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
-	// tree is the tree being modified
-	Tree[T]
+	opts *options
+	root *header[T]
+	size int // the number of objects in the tree
 
 	// mutated is the set of nodes mutated in this transaction
 	// that we can keep mutating without cloning them again.
 	// It is cleared if the transaction is cloned or iterated
 	// upon.
-	mutated nodeMutated[T]
+	mutated *nodeMutated
 
 	// watches contains the channels of cloned nodes that should be closed
 	// when transaction is committed.
@@ -39,8 +40,12 @@ func (txn *Txn[T]) Clone() Ops[T] {
 	// Clear the mutated nodes so that the returned clone won't be changed by
 	// further modifications in this transaction.
 	txn.mutated.clear()
-	treeCopy := txn.Tree
-	return &treeCopy
+	return &Tree[T]{
+		opts: txn.opts,
+		root: txn.root,
+		size: txn.size,
+		txn:  nil,
+	}
 }
 
 // Insert or update the tree with the given key and value.
@@ -140,34 +145,35 @@ func (txn *Txn[T]) LowerBound(key []byte) *Iterator[T] {
 // Iterator returns an iterator for all objects.
 func (txn *Txn[T]) Iterator() *Iterator[T] {
 	txn.mutated.clear()
-	return newIterator[T](txn.root)
+	return newIterator(txn.root)
 }
 
 // Commit the transaction and produce the new tree.
 func (txn *Txn[T]) Commit() *Tree[T] {
-	txn.mutated.clear()
-	for ch := range txn.watches {
-		close(ch)
-	}
-	txn.watches = nil
-	return &Tree[T]{txn.opts, txn.root, txn.size}
+	txn.Notify()
+	return txn.CommitOnly()
 }
 
 // CommitOnly the transaction, but do not close the
 // watch channels. Returns the new tree.
-// To close the watch channels call Notify().
+// To close the watch channels call Notify(). You must call Notify() before
+// Tree.Txn().
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
-	txn.mutated.clear()
-	return &Tree[T]{txn.opts, txn.root, txn.size}
+	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
+	if !txn.opts.noCache {
+		t.txn = txn
+	}
+	return t
 }
 
 // Notify closes the watch channels of nodes that were
-// mutated as part of this transaction.
+// mutated as part of this transaction. Must be called before
+// Tree.Txn() is used again.
 func (txn *Txn[T]) Notify() {
 	for ch := range txn.watches {
 		close(ch)
 	}
-	txn.watches = nil
+	clear(txn.watches)
 }
 
 // PrintTree to the standard output. For debugging.
@@ -176,14 +182,14 @@ func (txn *Txn[T]) PrintTree() {
 }
 
 func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
-	if txn.mutated.exists(n) {
+	if nodeMutatedExists(txn.mutated, n) {
 		return n
 	}
 	if n.watch != nil {
 		txn.watches[n.watch] = struct{}{}
 	}
 	n = n.clone(!txn.opts.rootOnlyWatch || n == txn.root)
-	txn.mutated.put(n)
+	nodeMutatedSet(txn.mutated, n)
 	return n
 }
 
@@ -220,7 +226,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 					txn.watches[this.watch] = struct{}{}
 				}
 				this = this.promote(!txn.opts.rootOnlyWatch || this == root)
-				txn.mutated.put(this)
+				nodeMutatedSet(txn.mutated, this)
 			} else {
 				// Node is big enough, clone it so we can mutate it
 				this = txn.cloneNode(this)

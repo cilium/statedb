@@ -11,6 +11,7 @@ package part
 type Tree[T any] struct {
 	opts *options
 	root *header[T]
+	txn  *Txn[T]
 	size int // the number of objects in the tree
 }
 
@@ -20,11 +21,15 @@ func New[T any](opts ...Option) *Tree[T] {
 	for _, opt := range opts {
 		opt(&o)
 	}
-	return &Tree[T]{
+	t := &Tree[T]{
 		root: newNode4[T](),
 		size: 0,
 		opts: &o,
 	}
+	if !o.noCache {
+		t.txn = newTxn[T](&o)
+	}
+	return t
 }
 
 type Option func(*options)
@@ -34,14 +39,36 @@ type Option func(*options)
 // grained notifications.
 func RootOnlyWatch(o *options) { o.rootOnlyWatch = true }
 
-// Txn constructs a new transaction against the tree. Transactions
-// enable efficient large mutations of the tree by caching cloned
-// nodes.
-func (t *Tree[T]) Txn() *Txn[T] {
+// NoCache disables the mutated node cache
+func NoCache(o *options) { o.noCache = true }
+
+func newTxn[T any](o *options) *Txn[T] {
 	txn := &Txn[T]{
-		Tree:    *t,
 		watches: make(map[chan struct{}]struct{}),
 	}
+	if !o.noCache {
+		txn.mutated = &nodeMutated{}
+		txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
+	}
+	txn.opts = o
+	return txn
+}
+
+// Txn constructs a new transaction against the tree. Transactions
+// enable efficient large mutations of the tree by caching cloned
+// nodes. Only a single transaction can be in flight at a time.
+func (t *Tree[T]) Txn() *Txn[T] {
+	var txn *Txn[T]
+	if t.txn != nil {
+		txn = t.txn
+		txn.mutated.clear()
+		clear(txn.watches)
+	} else {
+		txn = newTxn[T](t.opts)
+	}
+	txn.opts = t.opts
+	txn.root = t.root
+	txn.size = t.size
 	return txn
 }
 
@@ -127,4 +154,5 @@ func (t *Tree[T]) PrintTree() {
 
 type options struct {
 	rootOnlyWatch bool
+	noCache       bool
 }

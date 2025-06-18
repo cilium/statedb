@@ -27,7 +27,7 @@ type Set[T any] struct {
 // NewSet creates a new set of T.
 // The value type T must be registered with RegisterKeyType.
 func NewSet[T any](values ...T) Set[T] {
-	s := Set[T]{tree: New[T](RootOnlyWatch)}
+	s := Set[T]{tree: New[T](RootOnlyWatch, NoCache)}
 	s.toBytes = lookupKeyType[T]()
 	if len(values) > 0 {
 		txn := s.tree.Txn()

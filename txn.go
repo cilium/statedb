@@ -572,14 +572,14 @@ func (txn *txn) Commit() ReadTxn {
 	db.root.Store(&root)
 	db.mu.Unlock()
 
-	// With the root pointer updated, we can now release the tables for the next write transaction.
-	txn.smus.Unlock()
-
 	// Now that new root is committed, we can notify readers by closing the watch channels of
 	// mutated radix tree nodes in all changed indexes and on the root itself.
 	for _, txn := range txnToNotify {
 		txn.Notify()
 	}
+
+	// With the root pointer updated, we can now release the tables for the next write transaction.
+	txn.smus.Unlock()
 
 	// Notify table initializations
 	for _, ch := range initChansToClose {
