@@ -234,9 +234,9 @@ func main() {
 	fmt.Printf("%d objects reconciled in %.2f seconds (batch size %d)\n",
 		*numObjects, float64(duration)/float64(time.Second), *batchSize)
 	fmt.Printf("Throughput %.2f objects per second\n", objsPerSecond)
-	fmt.Printf("Allocated %d objects, %dkB bytes, %dkB bytes still in use\n",
+	fmt.Printf("%dMB total allocated, %d in-use objects, %dMB bytes in use\n",
+		(memAfter.TotalAlloc-memBefore.TotalAlloc)/1024/1024,
 		memAfter.HeapObjects-memBefore.HeapObjects,
-		(memAfter.HeapAlloc-memBefore.HeapAlloc)/1024,
-		(memAfter.HeapInuse-memBefore.HeapInuse)/1024)
+		(memAfter.HeapAlloc-memBefore.HeapAlloc)/1024/1024)
 
 }
