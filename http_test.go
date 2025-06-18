@@ -73,7 +73,7 @@ func Test_http_runQuery(t *testing.T) {
 	txn := db.ReadTxn()
 
 	// idIndex, unique
-	indexTxn, err := txn.getTxn().indexReadTxn(table, table.indexPos(idIndex.Name))
+	indexTxn, err := txn.indexReadTxn(table, table.indexPos(idIndex.Name))
 	require.NoError(t, err)
 	items := []object{}
 	onObject := func(obj object) error {
@@ -86,7 +86,7 @@ func Test_http_runQuery(t *testing.T) {
 	}
 
 	// tagsIndex, non-unique
-	indexTxn, err = txn.getTxn().indexReadTxn(table, table.indexPos(tagsIndex.Name))
+	indexTxn, err = txn.indexReadTxn(table, table.indexPos(tagsIndex.Name))
 	require.NoError(t, err)
 	items = nil
 	runQuery(indexTxn, false, index.String("foo"), onObject)
@@ -97,7 +97,7 @@ func Test_http_runQuery(t *testing.T) {
 	}
 
 	// lower-bound on revision index
-	indexTxn, err = txn.getTxn().indexReadTxn(table, RevisionIndexPos)
+	indexTxn, err = txn.indexReadTxn(table, RevisionIndexPos)
 	require.NoError(t, err)
 	items = nil
 	runQuery(indexTxn, true, index.Uint64(0), onObject)
