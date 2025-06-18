@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"iter"
 	"math/rand/v2"
+	"runtime"
 	"testing"
 
 	"github.com/cilium/statedb/part"
@@ -248,4 +249,60 @@ func Benchmark_Uint64Map_Sequential(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
+}
+
+func TestMapMemoryUse(t *testing.T) {
+	runtime.GC()
+	runtime.GC()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	numMaps := 10000
+	maps := make([]part.Map[uint64, int], numMaps)
+
+	for i := range numMaps {
+		maps[i] = maps[i].Set(uint64(1), 1)
+	}
+	runtime.GC()
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+
+	perMap := (after.HeapAlloc - before.HeapAlloc) / uint64(len(maps))
+	t.Logf("%d bytes per map", perMap)
+
+	// Do some thing with the maps to ensure they weren't GCd.
+	for _, m := range maps {
+		if m.Len() != 1 {
+			t.Fatalf("bad count")
+		}
+	}
+}
+
+func TestHashMapMemoryUse(t *testing.T) {
+	runtime.GC()
+	runtime.GC()
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	numMaps := 10000
+	maps := make([]map[uint64]int, numMaps)
+
+	for i := range numMaps {
+		maps[i] = map[uint64]int{1: 1}
+	}
+	runtime.GC()
+	runtime.GC()
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+
+	perMap := (after.HeapAlloc - before.HeapAlloc) / uint64(len(maps))
+	t.Logf("%d bytes per map", perMap)
+
+	// Do some thing with the maps to ensure they weren't GCd.
+	for _, m := range maps {
+		if len(m) != 1 {
+			t.Fatalf("bad count")
+		}
+	}
 }
