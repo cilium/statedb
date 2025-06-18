@@ -199,7 +199,7 @@ func TestMapYAMLStructKey(t *testing.T) {
 		B string `yaml:"b"`
 	}
 	part.RegisterKeyType[key](func(k key) []byte {
-		return []byte(fmt.Sprintf("%d-%s", k.A, k.B))
+		return fmt.Appendf(nil, "%d-%s", k.A, k.B)
 	})
 	var m part.Map[key, int]
 	m = m.Set(key{1, "one"}, 1).Set(key{2, "two"}, 2).Set(key{3, "three"}, 3)
@@ -238,7 +238,7 @@ func Benchmark_Uint64Map_Sequential(b *testing.B) {
 
 	for n := 0; n < b.N; n++ {
 		var m part.Map[uint64, int]
-		for i := 0; i < numItems; i++ {
+		for i := range numItems {
 			k := uint64(i)
 			m = m.Set(k, i)
 			v, ok := m.Get(k)

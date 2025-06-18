@@ -501,7 +501,7 @@ func search[T any](root *header[T], key []byte) (value T, watch <-chan struct{},
 
 func commonPrefix(a, b []byte) []byte {
 	n := min(len(a), len(b))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if a[i] != b[i] {
 			return a[:i]
 		}

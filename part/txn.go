@@ -483,7 +483,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 				n16 := newNode.node16()
 				n16.leaf = parent.node.getLeaf()
 				size := n16.size()
-				for i := 0; i < size; i++ {
+				for i := range size {
 					n16.keys[i] = n16.children[i].prefix[0]
 				}
 			case parent.node.kind() == nodeKind16 && parent.node.size() <= 3:
