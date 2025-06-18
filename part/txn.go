@@ -217,7 +217,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				if this.watch != nil {
 					txn.watches[this.watch] = struct{}{}
 				}
-				this = this.promote(!txn.opts.rootOnlyWatch || this == newRoot)
+				this = this.promote(!txn.opts.rootOnlyWatch || this == root)
 				txn.mutated.put(this)
 			} else {
 				// Node is big enough, clone it so we can mutate it

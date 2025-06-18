@@ -1,6 +1,7 @@
 package part_test
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 	"testing/quick"
@@ -16,18 +17,23 @@ var quickConfig = &quick.Config{
 
 func TestQuick_InsertGetPrefix(t *testing.T) {
 	var tree *part.Tree[string]
-	var rootOnlyWatch bool
 	insert := func(key, value string) any {
 		txn := tree.Txn()
 		_, _, watch := txn.InsertWatch([]byte(key), value)
 		if watch == nil {
-			panic("nil watch from InsertWatch")
+			return "nil watch from InsertWatch()"
 		}
-		if rootOnlyWatch {
-			tree = txn.CommitOnly()
-		} else {
-			tree = txn.Commit()
+		val, watch2, found := txn.Get([]byte(key))
+		if !found {
+			return "inserted value not found"
 		}
+		if val != value {
+			return fmt.Sprintf("mismatching value %q vs %q", val, value)
+		}
+		if watch != watch2 {
+			return fmt.Sprintf("mismatching channels %p vs %p", watch, watch2)
+		}
+		tree = txn.Commit()
 		return value
 	}
 
@@ -52,7 +58,6 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 	require.NoError(t,
 		quick.CheckEqual(insert, get, quickConfig),
 	)
-	rootOnlyWatch = true
 	tree = part.New[string](part.RootOnlyWatch)
 	require.NoError(t,
 		quick.CheckEqual(insert, get, quickConfig),
