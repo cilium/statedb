@@ -15,23 +15,45 @@ var quickConfig = &quick.Config{
 }
 
 func TestQuick_InsertGetPrefix(t *testing.T) {
-	tree := part.New[string]()
+	var tree *part.Tree[string]
+	var rootOnlyWatch bool
 	insert := func(key, value string) any {
-		_, _, tree = tree.Insert([]byte(key), value)
+		txn := tree.Txn()
+		_, _, watch := txn.InsertWatch([]byte(key), value)
+		if watch == nil {
+			panic("nil watch from InsertWatch")
+		}
+		if rootOnlyWatch {
+			tree = txn.CommitOnly()
+		} else {
+			tree = txn.Commit()
+		}
 		return value
 	}
 
 	get := func(key, value string) any {
-		val, _, _ := tree.Get([]byte(key))
+		val, watch, _ := tree.Get([]byte(key))
+		if watch == nil {
+			panic("nil watch from Get()")
+		}
 		if val != value {
 			return val
 		}
 
-		iter, _ := tree.Prefix([]byte(key))
+		iter, watch := tree.Prefix([]byte(key))
+		if watch == nil {
+			panic("nil watch from Prefix()")
+		}
 		_, v, _ := iter.Next()
 		return v
 	}
 
+	tree = part.New[string]()
+	require.NoError(t,
+		quick.CheckEqual(insert, get, quickConfig),
+	)
+	rootOnlyWatch = true
+	tree = part.New[string](part.RootOnlyWatch)
 	require.NoError(t,
 		quick.CheckEqual(insert, get, quickConfig),
 	)
