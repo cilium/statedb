@@ -94,6 +94,22 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_NewWriteTxn(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	for b.Loop() {
+		db.WriteTxn(table).Abort()
+	}
+}
+
+func BenchmarkDB_NewReadTxn(b *testing.B) {
+	db, _ := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	for b.Loop() {
+		if db.ReadTxn() == nil {
+			b.Fatalf("nil")
+		}
+	}
+}
+
 func BenchmarkDB_Modify(b *testing.B) {
 	benchmarkDB_Modify_vs_GetInsert(b, false)
 }
@@ -162,7 +178,7 @@ func BenchmarkDB_RandomInsert(b *testing.B) {
 				b.Fatalf("Insert error: %s", err)
 			}
 		}
-		txn.Abort()
+		txn.Commit()
 	}
 	b.StopTimer()
 
@@ -204,7 +220,7 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 				b.Fatalf("Insert error: %s", err)
 			}
 		}
-		txn.Abort()
+		txn.Commit()
 	}
 	b.StopTimer()
 
@@ -466,6 +482,31 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		for _, q := range queries {
 			_, _, ok := table.Get(txn, q)
+			if !ok {
+				b.Fatalf("Object not found")
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_FullIteration_ReadTxnGet(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	wtxn := db.WriteTxn(table)
+	ids := []uint64{}
+	queries := []Query[testObject]{}
+	for i := range numObjectsIteration {
+		queries = append(queries, idIndex.Query(uint64(i)))
+		ids = append(ids, uint64(i))
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+	b.ResetTimer()
+
+	for b.Loop() {
+		for _, q := range queries {
+			_, _, ok := table.Get(db.ReadTxn(), q)
 			if !ok {
 				b.Fatalf("Object not found")
 			}
