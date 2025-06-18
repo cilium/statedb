@@ -130,7 +130,7 @@ func TestExponentialBackoff(t *testing.T) {
 		max: time.Second,
 	}
 
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		dur := backoff.Duration(i)
 		require.GreaterOrEqual(t, dur, backoff.min)
 		require.LessOrEqual(t, dur, backoff.max)

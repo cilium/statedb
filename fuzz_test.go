@@ -473,7 +473,7 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 				table:  target.(statedb.RWTable[fuzzObj]),
 			}
 			numActs := rand.Intn(20)
-			for i := 0; i < numActs; i++ {
+			for range numActs {
 				randomAction()(ctx)
 				runtime.Gosched()
 			}
@@ -509,7 +509,7 @@ func TestDB_Fuzz(t *testing.T) {
 	// Start workers to mutate the tables.
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
-	for i := 0; i < numWorkers; i++ {
+	for i := range numWorkers {
 		i := i
 		go func() {
 			fuzzWorker(actionLog, i, numIterations)
@@ -521,7 +521,7 @@ func TestDB_Fuzz(t *testing.T) {
 	stop := make(chan struct{})
 	var wg2 sync.WaitGroup
 	wg2.Add(numTrackers)
-	for i := 0; i < numTrackers; i++ {
+	for i := range numTrackers {
 		i := i
 		go func() {
 			trackerWorker(i, stop)

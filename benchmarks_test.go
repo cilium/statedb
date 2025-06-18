@@ -8,7 +8,7 @@ import (
 	"iter"
 	"log/slog"
 	"math/rand"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -106,7 +106,7 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 
 	ids := []uint64{}
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		ids = append(ids, uint64(i))
 	}
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
@@ -146,7 +146,7 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 func BenchmarkDB_RandomInsert(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	ids := []uint64{}
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		ids = append(ids, uint64(i))
 	}
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
@@ -178,7 +178,7 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	ids := []uint64{}
 	txn := db.WriteTxn(table)
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		tag := "odd"
 		if i%2 == 0 {
 			tag = "even"
@@ -217,7 +217,7 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		txn := db.WriteTxn(table)
-		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
+		for id := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: id})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
@@ -237,7 +237,7 @@ func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
 
 	for j := 0; j < b.N; j++ {
 		txn := db.WriteTxn(table)
-		for id := uint64(0); id < uint64(numObjectsToInsert); id++ {
+		for id := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: id})
 			if err != nil {
 				b.Fatalf("Insert error: %s", err)
@@ -261,7 +261,7 @@ func BenchmarkDB_Changes_Baseline(b *testing.B) {
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
 		txn := db.WriteTxn(table)
-		for i := uint64(0); i < numObjectsToInsert; i++ {
+		for i := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 			if err != nil {
 				b.Fatalf("Insert: %s", err)
@@ -291,7 +291,7 @@ func BenchmarkDB_Changes(b *testing.B) {
 	for n := 0; n < b.N; n++ {
 		// Create objects
 		txn = db.WriteTxn(table)
-		for i := 0; i < numObjectsToInsert; i++ {
+		for i := range numObjectsToInsert {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
 			if err != nil {
 				b.Fatalf("Insert: %s", err)
@@ -346,7 +346,7 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 
 	wtxn := db.WriteTxn(table)
 	queries := []Query[testObject]{}
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
@@ -374,7 +374,7 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
 	queries := []Query[testObject]{}
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
@@ -399,7 +399,7 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	tagSet := part.NewSet("test")
 	txn := db.WriteTxn(table)
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: tagSet})
 		require.NoError(b, err)
 	}
@@ -425,7 +425,7 @@ const numObjectsIteration = 100000
 func BenchmarkDB_FullIteration_All(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
-	for i := 0; i < numObjectsIteration; i++ {
+	for i := range numObjectsIteration {
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
@@ -453,7 +453,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
 	queries := []Query[testObject]{}
-	for i := 0; i < numObjectsIteration; i++ {
+	for i := range numObjectsIteration {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
@@ -529,7 +529,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 
 		// Commit a batch to the first table.
 		wtxn := db.WriteTxn(table1)
-		for i := 0; i < batchSize; i++ {
+		for i := range batchSize {
 			table1.Insert(wtxn, testObject{ID: uint64(i)})
 		}
 		wtxn.Commit()
@@ -559,10 +559,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 	b.StopTimer()
 
 	if len(samples) > 100 {
-		sort.Slice(samples,
-			func(i, j int) bool {
-				return samples[i] < samples[j]
-			})
+		slices.Sort(samples)
 		b.ReportMetric(float64(samples[len(samples)/2]/time.Microsecond), "50th_µs")
 		b.ReportMetric(float64(samples[len(samples)*9/10]/time.Microsecond), "90th_µs")
 		b.ReportMetric(float64(samples[len(samples)*99/100]/time.Microsecond), "99th_µs")

@@ -601,7 +601,7 @@ func marshalJSON(data any) (out []byte) {
 	// purposes even if the object has panicing JSON marshalling.
 	defer func() {
 		if r := recover(); r != nil {
-			out = []byte(fmt.Sprintf("\"panic marshalling JSON: %.32s\"", r))
+			out = fmt.Appendf(nil, "\"panic marshalling JSON: %.32s\"", r)
 		}
 	}()
 	bs, err := json.Marshal(data)

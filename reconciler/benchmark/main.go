@@ -163,7 +163,7 @@ func main() {
 	// on them while they're added.
 	id := uint64(0)
 	batches := int(*numObjects / *batchSize)
-	for b := 0; b < batches; b++ {
+	for b := range batches {
 		if !*quiet {
 			fmt.Printf("\rInserting batch %d/%d ...", b+1, batches)
 		}

@@ -197,7 +197,7 @@ func uint64Key(n uint64) []byte {
 }
 
 func hexKey(n uint64) []byte {
-	return []byte(fmt.Sprintf("%x", n))
+	return fmt.Appendf(nil, "%x", n)
 }
 
 func uint32Key(n uint32) []byte {
@@ -225,7 +225,7 @@ func Test_delete(t *testing.T) {
 	tree := New[uint64]()
 
 	// Do multiple rounds with the same tree.
-	for round := 0; round < 100; round++ {
+	for range 100 {
 		// Use a random amount of keys in random order to exercise different
 		// tree structures each time.
 		numKeys := 10 + rand.Intn(1000)
@@ -298,7 +298,7 @@ func Test_delete(t *testing.T) {
 		assert.Equal(t, len(keys), tree.Len())
 
 		// Do few rounds of lookups and deletions.
-		for step := 0; step < 2; step++ {
+		for range 2 {
 			// Lookup with a Txn
 			txn = tree.Txn()
 			for _, i := range keys {
@@ -461,11 +461,11 @@ func Test_watch(t *testing.T) {
 
 func Test_insert(t *testing.T) {
 	tree := New[int]()
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		key := binary.NativeEndian.AppendUint32(nil, uint32(i))
 		_, _, tree = tree.Insert(key, i)
 	}
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		key := binary.NativeEndian.AppendUint32(nil, uint32(i))
 		_, _, ok := tree.Get(key)
 		if !ok {
@@ -875,7 +875,7 @@ func Test_iterate(t *testing.T) {
 		t.Logf("size=%d", size)
 		tree := New[uint64]()
 		keys := []uint64{}
-		for i := 0; i < size; i++ {
+		for i := range size {
 			keys = append(keys, uint64(i))
 		}
 
@@ -1015,7 +1015,7 @@ func benchmark_Insert(b *testing.B, opts ...Option) {
 	for n := 0; n < b.N; n++ {
 		tree := New[int](opts...)
 		txn := tree.Txn()
-		for i := 0; i < numObjectsToInsert; i++ {
+		for i := range numObjectsToInsert {
 			key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
 			txn.Insert(key, numObjectsToInsert+i)
 		}
@@ -1028,7 +1028,7 @@ func benchmark_Insert(b *testing.B, opts ...Option) {
 func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	tree := New[int](RootOnlyWatch)
 	keys := [][]byte{}
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
 		_, _, tree = tree.Insert(key, numObjectsToInsert+i)
 		keys = append(keys, key)
@@ -1068,7 +1068,7 @@ func Benchmark_Replace_RootOnlyWatch(b *testing.B) {
 func benchmark_Replace(b *testing.B, watching bool) {
 	tree := New[int](RootOnlyWatch)
 	txn := tree.Txn()
-	for i := 0; i < numObjectsToInsert; i++ {
+	for i := range numObjectsToInsert {
 		key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
 		txn.Insert(key, numObjectsToInsert+i)
 	}
@@ -1103,7 +1103,7 @@ func benchmark_txn_batch(b *testing.B, batchSize int) {
 	n := b.N
 	for n > 0 {
 		txn := tree.Txn()
-		for j := 0; j < batchSize; j++ {
+		for j := range batchSize {
 			txn.Insert(uint64Key(uint64(j)), j)
 		}
 		tree = txn.Commit()
@@ -1135,7 +1135,7 @@ func Benchmark_txn_delete_1000(b *testing.B) {
 
 func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
 	tree := New[int](RootOnlyWatch)
-	for j := 0; j < batchSize; j++ {
+	for j := range batchSize {
 		_, _, tree = tree.Insert(uint64Key(uint64(j)), j)
 	}
 	b.ResetTimer()
@@ -1143,7 +1143,7 @@ func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
 	n := b.N
 	for n > 0 {
 		txn := tree.Txn()
-		for j := 0; j < batchSize; j++ {
+		for j := range batchSize {
 			txn.Delete(uint64Key(uint64(j)))
 		}
 		n -= batchSize
@@ -1157,13 +1157,13 @@ func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
 
 func Benchmark_Get(b *testing.B) {
 	tree := New[uint64](RootOnlyWatch)
-	for j := uint64(0); j < numObjectsToInsert; j++ {
+	for j := range uint64(numObjectsToInsert) {
 		_, _, tree = tree.Insert(uint64Key(j), j)
 	}
 	b.ResetTimer()
 	var key [8]byte // to avoid the allocation
 	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
+		for j := range uint64(numObjectsToInsert) {
 			binary.BigEndian.PutUint64(key[:], j)
 			v, _, ok := tree.Get(key[:])
 			if v != j {
@@ -1195,7 +1195,7 @@ func Benchmark_Iterate(b *testing.B) {
 func Benchmark_Hashmap_Insert(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		m := map[uint64]uint64{}
-		for j := uint64(0); j < numObjectsToInsert; j++ {
+		for j := range uint64(numObjectsToInsert) {
 			m[j] = j
 		}
 		if len(m) != numObjectsToInsert {
@@ -1207,12 +1207,12 @@ func Benchmark_Hashmap_Insert(b *testing.B) {
 
 func Benchmark_Hashmap_Get_Uint64(b *testing.B) {
 	m := map[uint64]uint64{}
-	for j := uint64(0); j < numObjectsToInsert; j++ {
+	for j := range uint64(numObjectsToInsert) {
 		m[j] = j
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
+		for j := range uint64(numObjectsToInsert) {
 			if m[j] != j {
 				b.Fatalf("impossible: %d != %d", m[j], j)
 			}
@@ -1224,13 +1224,13 @@ func Benchmark_Hashmap_Get_Uint64(b *testing.B) {
 func Benchmark_Hashmap_Get_Bytes(b *testing.B) {
 	var k [8]byte
 	m := map[[8]byte]uint64{}
-	for j := uint64(0); j < numObjectsToInsert; j++ {
+	for j := range uint64(numObjectsToInsert) {
 		binary.BigEndian.PutUint64(k[:], j)
 		m[k] = j
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		for j := uint64(0); j < numObjectsToInsert; j++ {
+		for j := range uint64(numObjectsToInsert) {
 			binary.BigEndian.PutUint64(k[:], j)
 			if m[k] != j {
 				b.Fatalf("impossible: %d != %d", m[k], j)
