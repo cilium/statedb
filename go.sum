@@ -1,9 +1,3 @@
-github.com/cilium/hive v0.0.0-20241213101835-553aca42f74a h1:KuDVdRWFhuntkXMuXBraKvsJ4o6HuPf3iF2hETefRtE=
-github.com/cilium/hive v0.0.0-20241213101835-553aca42f74a/go.mod h1:pI2GJ1n3SLKIQVFrKF7W6A6gb6BQkZ+3Hp4PAEo5SuI=
-github.com/cilium/hive v0.0.0-20241213121623-605c1412b9b3 h1:RfmUH1ouzj0LzORYJRhp43e1rlGpx6GNv4NIRUakU2w=
-github.com/cilium/hive v0.0.0-20241213121623-605c1412b9b3/go.mod h1:pI2GJ1n3SLKIQVFrKF7W6A6gb6BQkZ+3Hp4PAEo5SuI=
-github.com/cilium/hive v0.0.0-20250409150907-8eacab6fab5b h1:00k4EwXiIZ2J3cMt0xvawCqYu/oULGIpKta3o/U8CgE=
-github.com/cilium/hive v0.0.0-20250409150907-8eacab6fab5b/go.mod h1:3DSFWuYTjYtWkanf84uwMgDvP1pjJ313zXJxMfkz/Eg=
 github.com/cilium/hive v0.0.0-20250522123230-2946c4940f41 h1:H3y9UKJpLlMhkuu+008rotTY52gGIE8U2wEUJKp+hoc=
 github.com/cilium/hive v0.0.0-20250522123230-2946c4940f41/go.mod h1:3DSFWuYTjYtWkanf84uwMgDvP1pjJ313zXJxMfkz/Eg=
 github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d h1:p6MgATaKEB9o7iAsk9rlzXNDMNCeKPAkx4Y8f+Zq8X8=
