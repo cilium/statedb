@@ -221,7 +221,7 @@ func Benchmark_Uint64Map_Random(b *testing.B) {
 		k := uint64(rand.Int64())
 		keys[k] = int(k)
 	}
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		var m part.Map[uint64, int]
 		for k, v := range keys {
 			m = m.Set(k, v)
@@ -237,7 +237,7 @@ func Benchmark_Uint64Map_Random(b *testing.B) {
 func Benchmark_Uint64Map_Sequential(b *testing.B) {
 	numItems := 1000
 
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		var m part.Map[uint64, int]
 		for i := range numItems {
 			k := uint64(i)

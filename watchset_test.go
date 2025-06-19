@@ -128,8 +128,7 @@ func benchmarkWatchSet(b *testing.B, numChans int) {
 		ws.Add(make(chan struct{}))
 	}
 
-	b.ResetTimer()
-	for range b.N {
+	for b.Loop() {
 		ws.Add(closedWatchChannel)
 		ws.Wait(context.TODO(), 0)
 	}
