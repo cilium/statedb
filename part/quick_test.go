@@ -2,6 +2,7 @@ package part_test
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"testing"
 	"testing/quick"
@@ -197,4 +198,57 @@ func TestQuick_ClosedWatch(t *testing.T) {
 	}
 
 	require.NoError(t, quick.Check(insert, quickConfig))
+}
+
+func TestQuick_Map(t *testing.T) {
+	type result struct {
+		old, new int
+	}
+
+	partMap := part.Map[uint8, int]{}
+	partCheck := func(del bool, key uint8, value int) (r result) {
+		var found bool
+		r.old, found = partMap.Get(key)
+		newPartMap := partMap
+		if del {
+			newPartMap = partMap.Delete(key)
+		} else {
+			newPartMap = partMap.Set(key, value)
+		}
+		r.new, _ = newPartMap.Get(key)
+		switch {
+		case !del && found:
+			// Keys equal when updating the value
+			require.True(t, partMap.EqualKeys(newPartMap), "EqualKeys %v %v\n%v\n%v",
+				r.old, r.new,
+				maps.Collect(partMap.All()), maps.Collect(newPartMap.All()),
+			)
+			// Equal if value stays the same
+			require.Equal(t, r.old == r.new, partMap.SlowEqual(newPartMap), "SlowEqual")
+		case !del && !found || del && found:
+			// Not equal on additions and deletions
+			require.False(t, partMap.EqualKeys(newPartMap), "EqualKeys %v %v\n%v\n%v",
+				r.old, r.new,
+				maps.Collect(partMap.All()), maps.Collect(newPartMap.All()),
+			)
+			require.False(t, partMap.SlowEqual(newPartMap), "SlowEqual")
+		}
+		partMap = newPartMap
+		return
+	}
+
+	// Compare against hash map.
+	hashMap := map[uint8]int{}
+	hashCheck := func(del bool, key uint8, value int) (r result) {
+		r.old = hashMap[key]
+		if del {
+			delete(hashMap, key)
+		} else {
+			hashMap[key] = value
+		}
+		r.new = hashMap[key]
+		return
+	}
+
+	require.NoError(t, quick.CheckEqual(partCheck, hashCheck, quickConfig))
 }

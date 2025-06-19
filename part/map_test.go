@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"maps"
 	"math/rand/v2"
 	"runtime"
 	"testing"
@@ -55,12 +56,14 @@ func TestStringMap(t *testing.T) {
 
 	// Set some values in two different ways.
 	m = m.Set("1_one", 1)
+	assert.Equal(t, 1, m.Len())
 	m = part.FromMap(m, map[string]int{
 		"2_two":   2,
 		"3_three": 3,
 	})
+	assert.Equal(t, 3, m.Len())
 
-	// Setting on a copy doeen't affect original
+	// Setting on a copy doesn't affect original
 	m.Set("4_four", 4)
 	_, ok = m.Get("4_four")
 	assert.False(t, ok, "Get non-existing")
@@ -78,6 +81,7 @@ func TestStringMap(t *testing.T) {
 
 	expected := kvs
 	for k, v := range m.All() {
+		t.Logf("%v %v", k, v)
 		kv := expected[0]
 		expected = expected[1:]
 		assert.EqualValues(t, kv.k, k)
@@ -117,6 +121,100 @@ func TestStringMap(t *testing.T) {
 	assert.False(t, ok, "Get after Delete")
 
 	assert.Equal(t, 2, m.Len())
+
+	var m3 part.Map[string, int]
+	bs, err := m.MarshalJSON()
+	assert.NoError(t, err)
+	assert.NoError(t, m3.UnmarshalJSON(bs))
+	assert.Equal(t, 2, m3.Len())
+	assert.True(t, m.SlowEqual(m3))
+
+	m3 = part.Map[string, int]{}
+	bs, err = yaml.Marshal(m)
+	assert.NoError(t, err)
+	assert.NoError(t, yaml.Unmarshal(bs, &m3))
+	assert.Equal(t, 2, m3.Len())
+	assert.True(t, m.SlowEqual(m3))
+}
+
+func TestSingletonMap(t *testing.T) {
+	var m part.Map[string, int]
+	m = m.Set("one", 1)
+	assert.Equal(t, 1, m.Len())
+	assert.False(t, m.SlowEqual(part.Map[string, int]{}))
+	assert.True(t, m.SlowEqual(m))
+
+	v, found := m.Get("nope")
+	assert.False(t, found)
+	assert.Zero(t, v)
+
+	v, found = m.Get("one")
+	assert.True(t, found)
+	assert.Equal(t, 1, v)
+
+	m2 := m.Set("one", 2)
+	v, found = m.Get("one")
+	assert.True(t, found)
+	assert.Equal(t, 1, v)
+	v, found = m2.Get("one")
+	assert.True(t, found)
+	assert.Equal(t, 2, v)
+	assert.True(t, m.EqualKeys(m2))
+	assert.True(t, m2.EqualKeys(m))
+	assert.False(t, m.SlowEqual(m2))
+	assert.False(t, m2.SlowEqual(m))
+	assert.True(t, m2.SlowEqual(m2))
+	m2 = m2.Delete("nope")
+	m2 = m2.Delete("one")
+	assert.Equal(t, 0, m2.Len())
+	_, found = m2.Get("one")
+	assert.False(t, found)
+	assert.False(t, m.EqualKeys(m2))
+	assert.False(t, m2.EqualKeys(m))
+	assert.False(t, m.SlowEqual(m2))
+	assert.False(t, m2.SlowEqual(m))
+	assert.Equal(t, 0, m2.Len())
+
+	x := maps.Collect(m.Prefix(""))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.Prefix("o"))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.Prefix("one"))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.Prefix("one1"))
+	assert.Len(t, x, 0)
+
+	x = maps.Collect(m.LowerBound(""))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.LowerBound("a"))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.LowerBound("one"))
+	assert.Equal(t, 1, x["one"])
+	x = maps.Collect(m.LowerBound("one1"))
+	assert.Len(t, x, 0)
+
+	m2 = part.Map[string, int]{}
+	m2 = part.FromMap(m2, nil)
+	assert.Equal(t, 0, m2.Len())
+
+	m2 = part.FromMap(m, nil)
+	assert.True(t, m.SlowEqual(m2))
+	assert.True(t, m2.SlowEqual(m))
+
+	m2 = part.FromMap(m, map[string]int{"one": 2})
+	assert.Equal(t, 1, m2.Len())
+	v, found = m2.Get("one")
+	assert.True(t, found)
+	assert.Equal(t, 2, v)
+
+	m2 = part.FromMap(m2, map[string]int{"two": 2})
+	assert.Equal(t, 2, m2.Len())
+	v, found = m2.Get("one")
+	assert.True(t, found)
+	assert.Equal(t, 2, v)
+	v, found = m2.Get("two")
+	assert.True(t, found)
+	assert.Equal(t, 2, v)
 }
 
 func TestUint64Map(t *testing.T) {
@@ -274,7 +372,7 @@ func TestMapMemoryUse(t *testing.T) {
 	// Do some thing with the maps to ensure they weren't GCd.
 	for _, m := range maps {
 		if m.Len() != 1 {
-			t.Fatalf("bad count")
+			t.Fatalf("bad count %d", m.Len())
 		}
 	}
 }
