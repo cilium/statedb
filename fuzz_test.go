@@ -510,7 +510,6 @@ func TestDB_Fuzz(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(numWorkers)
 	for i := range numWorkers {
-		i := i
 		go func() {
 			fuzzWorker(actionLog, i, numIterations)
 			wg.Done()
@@ -522,7 +521,6 @@ func TestDB_Fuzz(t *testing.T) {
 	var wg2 sync.WaitGroup
 	wg2.Add(numTrackers)
 	for i := range numTrackers {
-		i := i
 		go func() {
 			trackerWorker(i, stop)
 			wg2.Done()

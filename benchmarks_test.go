@@ -27,8 +27,8 @@ const numObjectsToInsert = 1000
 
 func BenchmarkDB_WriteTxn_1(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		_, _, err := table.Insert(txn, testObject{ID: 123})
 		if err != nil {
@@ -137,9 +137,7 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	}
 	txn.Commit()
 
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for _, id := range ids {
 			if doGetInsert {
@@ -168,9 +166,8 @@ func BenchmarkDB_RandomInsert(b *testing.B) {
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
 		ids[i], ids[j] = ids[j], ids[i]
 	})
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for _, id := range ids {
 			_, _, err := table.Insert(txn, testObject{ID: id, Tags: part.Set[string]{}})
@@ -206,9 +203,8 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
 		ids[i], ids[j] = ids[j], ids[i]
 	})
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for _, id := range ids {
 			tag := "odd"
@@ -229,9 +225,8 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 
 func BenchmarkDB_SequentialInsert(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for id := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: id})
@@ -249,9 +244,8 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 
 func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for id := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: id})
@@ -274,8 +268,8 @@ func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
 
 func BenchmarkDB_Changes_Baseline(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
+
+	for b.Loop() {
 		txn := db.WriteTxn(table)
 		for i := range uint64(numObjectsToInsert) {
 			_, _, err := table.Insert(txn, testObject{ID: uint64(i)})
@@ -303,8 +297,7 @@ func BenchmarkDB_Changes(b *testing.B) {
 	txn.Commit()
 	require.NoError(b, err)
 
-	b.ResetTimer()
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		// Create objects
 		txn = db.WriteTxn(table)
 		for i := range numObjectsToInsert {
@@ -371,9 +364,8 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 	rand.Shuffle(numObjectsToInsert, func(i, j int) {
 		queries[i], queries[j] = queries[j], queries[i]
 	})
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.ReadTxn()
 		for _, q := range queries {
 			_, _, ok := table.Get(txn, q)
@@ -397,10 +389,9 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	txn := db.ReadTxn()
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		for _, q := range queries {
 			_, _, ok := table.Get(txn, q)
 			if !ok {
@@ -420,10 +411,9 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 		require.NoError(b, err)
 	}
 	rtxn := txn.Commit()
-	b.ResetTimer()
 
 	q := tagsIndex.Query("test")
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		count := 0
 		for range table.Prefix(rtxn, q) {
 			count++
@@ -446,9 +436,8 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
-	for j := 0; j < b.N; j++ {
+	for b.Loop() {
 		txn := db.ReadTxn()
 		i := uint64(0)
 		for obj := range table.All(txn) {
@@ -476,10 +465,9 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	txn := db.ReadTxn()
-	for n := 0; n < b.N; n++ {
+	for b.Loop() {
 		for _, q := range queries {
 			_, _, ok := table.Get(txn, q)
 			if !ok {
