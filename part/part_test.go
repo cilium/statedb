@@ -1066,7 +1066,11 @@ func Benchmark_Replace_RootOnlyWatch(b *testing.B) {
 }
 
 func benchmark_Replace(b *testing.B, watching bool) {
-	tree := New[int](RootOnlyWatch)
+	var opts []Option
+	if watching {
+		opts = append(opts, RootOnlyWatch)
+	}
+	tree := New[int](opts...)
 	txn := tree.Txn()
 	for i := range numObjectsToInsert {
 		key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))

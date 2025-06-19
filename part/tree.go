@@ -9,10 +9,10 @@ package part
 // has an associated channel that is closed when that node is mutated.
 // This allows watching any part of the tree (any prefix) for changes.
 type Tree[T any] struct {
-	opts *options
 	root *header[T]
 	txn  *Txn[T]
 	size int // the number of objects in the tree
+	opts options
 }
 
 // New constructs a new tree.
@@ -24,10 +24,10 @@ func New[T any](opts ...Option) *Tree[T] {
 	t := &Tree[T]{
 		root: newNode4[T](),
 		size: 0,
-		opts: &o,
+		opts: o,
 	}
-	if !o.noCache {
-		t.txn = newTxn[T](&o)
+	if !o.noCache() {
+		t.txn = newTxn[T](o)
 	}
 	return t
 }
@@ -37,16 +37,16 @@ type Option func(*options)
 // RootOnlyWatch sets the tree to only have a watch channel on the root
 // node. This improves the speed at the cost of having a much more coarse
 // grained notifications.
-func RootOnlyWatch(o *options) { o.rootOnlyWatch = true }
+var RootOnlyWatch = (*options).setRootOnlyWatch
 
 // NoCache disables the mutated node cache
-func NoCache(o *options) { o.noCache = true }
+var NoCache = (*options).setNoCache
 
-func newTxn[T any](o *options) *Txn[T] {
+func newTxn[T any](o options) *Txn[T] {
 	txn := &Txn[T]{
 		watches: make(map[chan struct{}]struct{}),
 	}
-	if !o.noCache {
+	if !o.noCache() {
 		txn.mutated = &nodeMutated{}
 		txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
 	}
@@ -83,7 +83,7 @@ func (t *Tree[T]) Len() int {
 // value was found.
 func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	value, watch, ok := search(t.root, key)
-	if t.opts.rootOnlyWatch {
+	if t.opts.rootOnlyWatch() {
 		watch = t.root.watch
 	}
 	return value, watch, ok
@@ -94,7 +94,7 @@ func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // the given prefix are upserted or deleted.
 func (t *Tree[T]) Prefix(prefix []byte) (*Iterator[T], <-chan struct{}) {
 	iter, watch := prefixSearch(t.root, prefix)
-	if t.opts.rootOnlyWatch {
+	if t.opts.rootOnlyWatch() {
 		watch = t.root.watch
 	}
 	return iter, watch
@@ -150,9 +150,4 @@ func (t *Tree[T]) Iterator() *Iterator[T] {
 // PrintTree to the standard output. For debugging.
 func (t *Tree[T]) PrintTree() {
 	t.root.printTree(0)
-}
-
-type options struct {
-	rootOnlyWatch bool
-	noCache       bool
 }
