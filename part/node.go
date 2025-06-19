@@ -444,12 +444,12 @@ type leaf[T any] struct {
 	key   []byte
 }
 
-func newLeaf[T any](o *options, prefix, key []byte, value T) *leaf[T] {
+func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
 	leaf := &leaf[T]{key: key, value: value}
 	leaf.setPrefix(prefix)
 	leaf.setKind(nodeKindLeaf)
 
-	if !o.rootOnlyWatch {
+	if !o.rootOnlyWatch() {
 		leaf.watch = make(chan struct{})
 	}
 

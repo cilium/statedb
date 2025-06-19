@@ -10,8 +10,8 @@ import (
 // Txn is a transaction against a tree. It allows doing efficient
 // modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
-	opts *options
 	root *header[T]
+	opts options
 	size int // the number of objects in the tree
 
 	// mutated is the set of nodes mutated in this transaction
@@ -63,7 +63,7 @@ func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <
 	if !hadOld {
 		txn.size++
 	}
-	if txn.opts.rootOnlyWatch {
+	if txn.opts.rootOnlyWatch() {
 		watch = txn.root.watch
 	}
 	return
@@ -88,7 +88,7 @@ func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, w
 	if !hadOld {
 		txn.size++
 	}
-	if txn.opts.rootOnlyWatch {
+	if txn.opts.rootOnlyWatch() {
 		watch = txn.root.watch
 	}
 	return
@@ -117,7 +117,7 @@ func (txn *Txn[T]) RootWatch() <-chan struct{} {
 // value was found.
 func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	value, watch, ok := search(txn.root, key)
-	if txn.opts.rootOnlyWatch {
+	if txn.opts.rootOnlyWatch() {
 		watch = txn.root.watch
 	}
 	return value, watch, ok
@@ -129,7 +129,7 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 	txn.mutated.clear()
 	iter, watch := prefixSearch(txn.root, key)
-	if txn.opts.rootOnlyWatch {
+	if txn.opts.rootOnlyWatch() {
 		watch = txn.root.watch
 	}
 	return iter, watch
@@ -160,7 +160,7 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 // Tree.Txn().
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
 	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
-	if !txn.opts.noCache {
+	if !txn.opts.noCache() {
 		t.txn = txn
 	}
 	return t
@@ -188,7 +188,7 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 	if n.watch != nil {
 		txn.watches[n.watch] = struct{}{}
 	}
-	n = n.clone(!txn.opts.rootOnlyWatch || n == txn.root)
+	n = n.clone(!txn.opts.rootOnlyWatch() || n == txn.root)
 	nodeMutatedSet(txn.mutated, n)
 	return n
 }
@@ -225,7 +225,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				if this.watch != nil {
 					txn.watches[this.watch] = struct{}{}
 				}
-				this = this.promote(!txn.opts.rootOnlyWatch || this == root)
+				this = this.promote(!txn.opts.rootOnlyWatch() || this == root)
 				nodeMutatedSet(txn.mutated, this)
 			} else {
 				// Node is big enough, clone it so we can mutate it
@@ -298,7 +298,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	newNode := &node4[T]{}
 	newNode.setPrefix(common)
 	newNode.setKind(nodeKind4)
-	if !txn.opts.rootOnlyWatch {
+	if !txn.opts.rootOnlyWatch() {
 		newNode.watch = make(chan struct{})
 	}
 
