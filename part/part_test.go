@@ -1003,6 +1003,25 @@ func Test_lowerbound_bigger(t *testing.T) {
 	require.False(t, ok)
 }
 
+// Test that we can "fork" the tree even though we're reusing the txn allocation.
+func Test_fork_with_cache(t *testing.T) {
+	tree := New[uint64]()
+	_, _, tree = tree.Insert(uint64Key(1), 1)
+
+	txn1 := tree.Txn()
+	txn2 := tree.Txn()
+	txn1.Insert(uint64Key(2), 2)
+	txn2.Insert(uint64Key(3), 3)
+	tree2 := txn1.CommitOnly()
+	require.Equal(t, 2, tree2.Len())
+
+	txn2.Insert(uint64Key(4), 4)
+	tree3 := txn2.CommitOnly()
+	require.Equal(t, 1, tree.Len())
+	require.Equal(t, 2, tree2.Len())
+	require.Equal(t, 3, tree3.Len())
+}
+
 func Benchmark_Insert_RootOnlyWatch(b *testing.B) {
 	benchmark_Insert(b, RootOnlyWatch)
 }
