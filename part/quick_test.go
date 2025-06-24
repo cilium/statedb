@@ -1,6 +1,10 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright Authors of Cilium
+
 package part_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -9,6 +13,7 @@ import (
 
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 )
 
 var quickConfig = &quick.Config{
@@ -233,6 +238,19 @@ func TestQuick_Map(t *testing.T) {
 			)
 			require.False(t, partMap.SlowEqual(newPartMap), "SlowEqual")
 		}
+
+		bs, err := json.Marshal(newPartMap)
+		require.NoError(t, err, "json.Marshal")
+		var m part.Map[uint8, int]
+		require.NoError(t, json.Unmarshal(bs, &m), "json.Unmarshal")
+		require.True(t, m.SlowEqual(newPartMap), "SlowEqual after json.Marshal")
+
+		m = part.Map[uint8, int]{}
+		bs, err = yaml.Marshal(newPartMap)
+		require.NoError(t, err)
+		require.NoError(t, yaml.Unmarshal(bs, &m), "yaml.Unmarshal")
+		require.True(t, m.SlowEqual(newPartMap), "SlowEqual after yaml.Marshal")
+
 		partMap = newPartMap
 		return
 	}

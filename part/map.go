@@ -259,12 +259,23 @@ func (m Map[K, V]) Len() int {
 }
 
 func (m Map[K, V]) MarshalJSON() ([]byte, error) {
-	if m.tree == nil {
+	if m.tree == nil && m.singleton == nil {
 		return []byte("[]"), nil
 	}
 
 	var b bytes.Buffer
 	b.WriteRune('[')
+
+	if m.singleton != nil {
+		bs, err := json.Marshal(*m.singleton)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(bs)
+		b.WriteRune(']')
+		return b.Bytes(), nil
+	}
+
 	iter := m.tree.Iterator()
 	_, kv, ok := iter.Next()
 	for ok {
@@ -293,17 +304,32 @@ func (m *Map[K, V]) UnmarshalJSON(data []byte) error {
 	if d, ok := t.(json.Delim); !ok || d != '[' {
 		return fmt.Errorf("%T.UnmarshalJSON: expected '[' got %v", m, t)
 	}
+	if !dec.More() {
+		return nil
+	}
+
+	var kv mapKVPair[K, V]
+	err = dec.Decode(&kv)
+	if err != nil {
+		return err
+	}
+
+	if !dec.More() {
+		m.singleton = &kv
+		return nil
+	}
+
 	m.ensureTree()
 	txn := m.tree.Txn()
+	txn.Insert(m.keyToBytes(kv.Key), kv)
 	for dec.More() {
 		var kv mapKVPair[K, V]
 		err := dec.Decode(&kv)
 		if err != nil {
 			return err
 		}
-		txn.Insert(m.keyToBytes(kv.Key), mapKVPair[K, V]{kv.Key, kv.Value})
+		txn.Insert(m.keyToBytes(kv.Key), kv)
 	}
-
 	t, err = dec.Token()
 	if err != nil {
 		return err
@@ -312,12 +338,6 @@ func (m *Map[K, V]) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("%T.UnmarshalJSON: expected ']' got %v", m, t)
 	}
 	m.tree = txn.CommitOnly()
-
-	if m.tree.size == 1 {
-		_, kv, _ := m.tree.Iterator().Next()
-		m.singleton = &kv
-		m.tree = nil
-	}
 	return nil
 }
 
@@ -335,9 +355,18 @@ func (m *Map[K, V]) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.SequenceNode {
 		return fmt.Errorf("%T.UnmarshalYAML: expected sequence", m)
 	}
-	if len(value.Content) == 0 {
+	switch len(value.Content) {
+	case 0:
+		return nil
+	case 1:
+		var kv mapKVPair[K, V]
+		if err := value.Content[0].Decode(&kv); err != nil {
+			return err
+		}
+		m.singleton = &kv
 		return nil
 	}
+
 	m.ensureTree()
 	txn := m.tree.Txn()
 	for _, e := range value.Content {
