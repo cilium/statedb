@@ -215,6 +215,18 @@ func TestSingletonMap(t *testing.T) {
 	v, found = m2.Get("two")
 	assert.True(t, found)
 	assert.Equal(t, 2, v)
+
+	var m3 part.Map[string, int]
+	bs, err := m.MarshalJSON()
+	assert.NoError(t, err)
+	assert.NoError(t, m3.UnmarshalJSON(bs))
+	assert.True(t, m.SlowEqual(m3))
+
+	m3 = part.Map[string, int]{}
+	bs, err = yaml.Marshal(m)
+	assert.NoError(t, err)
+	assert.NoError(t, yaml.Unmarshal(bs, &m3))
+	assert.True(t, m.SlowEqual(m3))
 }
 
 func TestUint64Map(t *testing.T) {
