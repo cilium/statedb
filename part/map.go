@@ -10,7 +10,7 @@ import (
 	"iter"
 	"reflect"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Map of key-value pairs. The zero value is ready for use, provided
