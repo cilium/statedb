@@ -19,8 +19,8 @@ import (
 	"github.com/cilium/hive/script"
 	"github.com/liggitt/tabwriter"
 	"github.com/spf13/pflag"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/time/rate"
-	"gopkg.in/yaml.v3"
 )
 
 func ScriptCommands(db *DB) hive.ScriptCmdsOut {

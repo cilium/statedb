@@ -13,7 +13,7 @@ import (
 
 	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/require"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 var quickConfig = &quick.Config{
