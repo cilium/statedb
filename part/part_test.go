@@ -77,7 +77,7 @@ func Test_insertion_and_watches(t *testing.T) {
 	// N4() -- Insert(a, 1) -> N4() -- Insert(b, 2) -> N4()
 	//                         /                      /   \
 	//                      L(a, 1)             L(a, 1)    L(b, 2)
-	// The Get(a) channel closes, but not Prefix(a) since the prefix search
+	// The Get(a) channel stays open, but not Prefix(a) since the prefix search
 	// uses the root channel.
 	{
 		tree := New[int]()
@@ -149,6 +149,25 @@ func Test_insertion_and_watches(t *testing.T) {
 		assertClosed(t, w2)
 	}
 
+	// Regression test in which Get() returned the watch channel of a
+	// leaf with shorter key but matching prefix instead of the parent
+	// node channel.
+	{
+		tree := New[int]()
+
+		_, _, tree = tree.Insert([]byte("a"), 1)
+
+		_, w, found := tree.Get([]byte("a"))
+		assert.True(t, found)
+		_, w2, found := tree.Get([]byte("aa"))
+		assert.False(t, found)
+		assert.NotEqual(t, w, w2, "did not expect Get(aa) to return watch channel of Get(a)")
+		assertOpen(t, w2)
+
+		_, _, tree = tree.Insert([]byte("aa"), 2)
+		assertOpen(t, w)
+		assertClosed(t, w2)
+	}
 }
 
 func Test_commonPrefix(t *testing.T) {

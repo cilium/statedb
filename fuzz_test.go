@@ -318,7 +318,10 @@ func lowerboundAction(ctx actionContext) {
 
 func prefixAction(ctx actionContext) {
 	id := mkID()
-	iter := ctx.table.Prefix(ctx.txn, idIndex.Query(id))
+	iter, watch := ctx.table.PrefixWatch(ctx.txn, idIndex.Query(id))
+	if watch == nil {
+		panic("PrefixWatch return nil watch channel")
+	}
 	ctx.log.log("%s: Prefix(%s) => %d found", ctx.table.Name(), id, len(statedb.Collect(iter)))
 }
 
