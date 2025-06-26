@@ -4,6 +4,7 @@
 package part
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -23,38 +24,83 @@ var quickConfig = &quick.Config{
 func TestQuick_InsertGetPrefix(t *testing.T) {
 	var tree *Tree[string]
 	insert := func(key, value string) any {
+		watchChannels := []<-chan struct{}{}
+		for i := range len(key) {
+			_, watch := tree.Prefix([]byte(key)[:i])
+			watchChannels = append(watchChannels, watch)
+		}
+
+		_, watchBefore, _ := tree.Get([]byte(key))
+		if watchBefore == nil {
+			return "nil watch from Get()"
+		}
+
 		txn := tree.Txn()
-		_, _, watch := txn.InsertWatch([]byte(key), value)
-		if watch == nil {
+		_, _, watchInsert := txn.InsertWatch([]byte(key), value)
+		if watchInsert == nil {
 			return "nil watch from InsertWatch()"
 		}
-		val, watch2, found := txn.Get([]byte(key))
+
+		val, watchAfter, found := txn.Get([]byte(key))
 		if !found {
 			return "inserted value not found"
 		}
 		if val != value {
 			return fmt.Sprintf("mismatching value %q vs %q", val, value)
 		}
-		if watch != watch2 {
-			return fmt.Sprintf("mismatching channels %p vs %p", watch, watch2)
+		if watchAfter != watchInsert {
+			return fmt.Sprintf("mismatching channels %p vs %p", watchAfter, watchInsert)
 		}
 		tree = txn.Commit()
+
+		select {
+		case <-watchBefore:
+		default:
+			return "Get() watch channel did not close after Insert!"
+		}
+
+		// Check that all prefix watch channels closed
+		for _, ch := range watchChannels {
+			select {
+			case <-ch:
+			default:
+				return "prefix watch channel did not close"
+			}
+		}
+
 		return value
 	}
 
 	get := func(key, value string) any {
-		val, watch, _ := tree.Get([]byte(key))
+		val, watch, found := tree.Get([]byte(key))
 		if watch == nil {
 			panic("nil watch from Get()")
 		}
+
+		for i := range len(key) {
+			prefix := []byte(key)[:i]
+			iter, watch := tree.Prefix(prefix)
+			if watch == nil {
+				panic("nil watch from Prefix()")
+			}
+			if found {
+				// [key] exists, so each prefix search with
+				// a prefix of the key must return some result.
+				k, _, f := iter.Next()
+				if !f {
+					panic("prefix search returned no result")
+				}
+				if !bytes.HasPrefix(k, prefix) {
+					panic(fmt.Sprintf("prefix search with %q returned key %q", k, prefix))
+				}
+			}
+		}
+
 		if val != value {
 			return val
 		}
 
 		iter, watch := tree.Prefix([]byte(key))
-		if watch == nil {
-			panic("nil watch from Prefix()")
-		}
 		_, v, _ := iter.Next()
 		return v
 	}
