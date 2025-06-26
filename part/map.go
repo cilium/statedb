@@ -116,11 +116,15 @@ func (m Map[K, V]) Delete(key K) Map[K, V] {
 	if m.tree != nil {
 		txn := m.tree.Txn()
 		txn.Delete(m.keyToBytes(key))
-		// Map is a struct passed by value, so we can modify
-		// it without changing the caller's view of it.
-		m.tree = txn.CommitOnly()
-		if m.tree.Len() == 0 {
+		switch txn.Len() {
+		case 0:
 			m.tree = nil
+		case 1:
+			_, kv, _ := txn.Iterator().Next()
+			m.singleton = &kv
+			m.tree = nil
+		default:
+			m.tree = txn.CommitOnly()
 		}
 	}
 	return m

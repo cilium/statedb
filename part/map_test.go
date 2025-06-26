@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package part_test
+package part
 
 import (
 	"encoding/json"
@@ -12,14 +12,13 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 )
 
 func TestStringMap(t *testing.T) {
-	var m part.Map[string, int]
+	var m Map[string, int]
 
 	//
 	// Operations on empty map
@@ -57,7 +56,7 @@ func TestStringMap(t *testing.T) {
 	// Set some values in two different ways.
 	m = m.Set("1_one", 1)
 	assert.Equal(t, 1, m.Len())
-	m = part.FromMap(m, map[string]int{
+	m = FromMap(m, map[string]int{
 		"2_two":   2,
 		"3_three": 3,
 	})
@@ -122,14 +121,14 @@ func TestStringMap(t *testing.T) {
 
 	assert.Equal(t, 2, m.Len())
 
-	var m3 part.Map[string, int]
+	var m3 Map[string, int]
 	bs, err := m.MarshalJSON()
 	assert.NoError(t, err)
 	assert.NoError(t, m3.UnmarshalJSON(bs))
 	assert.Equal(t, 2, m3.Len())
 	assert.True(t, m.SlowEqual(m3))
 
-	m3 = part.Map[string, int]{}
+	m3 = Map[string, int]{}
 	bs, err = yaml.Marshal(m)
 	assert.NoError(t, err)
 	assert.NoError(t, yaml.Unmarshal(bs, &m3))
@@ -138,10 +137,34 @@ func TestStringMap(t *testing.T) {
 }
 
 func TestSingletonMap(t *testing.T) {
-	var m part.Map[string, int]
+	var m Map[string, int]
+
+	// check singleton properties
+	check := func(m Map[string, int]) {
+		switch m.Len() {
+		case 0:
+			require.Nil(t, m.singleton)
+			require.Nil(t, m.tree)
+		case 1:
+			require.NotNil(t, m.singleton)
+			require.Nil(t, m.tree)
+		default:
+			require.Nil(t, m.singleton)
+			require.NotNil(t, m.tree)
+		}
+		if m.singleton != nil {
+			require.Nil(t, m.tree, "Tree should not be set if singleton set")
+		}
+		if m.tree != nil {
+			require.Nil(t, m.singleton, "Singleton should not be set if tree set")
+		}
+	}
+	check(m)
+
 	m = m.Set("one", 1)
+	check(m)
 	assert.Equal(t, 1, m.Len())
-	assert.False(t, m.SlowEqual(part.Map[string, int]{}))
+	assert.False(t, m.SlowEqual(Map[string, int]{}))
 	assert.True(t, m.SlowEqual(m))
 
 	v, found := m.Get("nope")
@@ -153,6 +176,7 @@ func TestSingletonMap(t *testing.T) {
 	assert.Equal(t, 1, v)
 
 	m2 := m.Set("one", 2)
+	check(m2)
 	v, found = m.Get("one")
 	assert.True(t, found)
 	assert.Equal(t, 1, v)
@@ -165,7 +189,9 @@ func TestSingletonMap(t *testing.T) {
 	assert.False(t, m2.SlowEqual(m))
 	assert.True(t, m2.SlowEqual(m2))
 	m2 = m2.Delete("nope")
+	check(m2)
 	m2 = m2.Delete("one")
+	check(m2)
 	assert.Equal(t, 0, m2.Len())
 	_, found = m2.Get("one")
 	assert.False(t, found)
@@ -174,6 +200,19 @@ func TestSingletonMap(t *testing.T) {
 	assert.False(t, m.SlowEqual(m2))
 	assert.False(t, m2.SlowEqual(m))
 	assert.Equal(t, 0, m2.Len())
+
+	m2 = m2.Set("one", 1)
+	check(m2)
+	m2 = m2.Set("two", 2)
+	check(m2)
+	assert.Equal(t, 2, m2.Len())
+	m2 = m2.Delete("one")
+	check(m2)
+	assert.Equal(t, 1, m2.Len())
+	m2 = m2.Delete("two")
+	check(m2)
+	assert.Equal(t, 0, m2.Len())
+	check(m2)
 
 	x := maps.Collect(m.Prefix(""))
 	assert.Equal(t, 1, x["one"])
@@ -193,21 +232,25 @@ func TestSingletonMap(t *testing.T) {
 	x = maps.Collect(m.LowerBound("one1"))
 	assert.Len(t, x, 0)
 
-	m2 = part.Map[string, int]{}
-	m2 = part.FromMap(m2, nil)
+	m2 = Map[string, int]{}
+	m2 = FromMap(m2, nil)
+	check(m2)
 	assert.Equal(t, 0, m2.Len())
 
-	m2 = part.FromMap(m, nil)
+	m2 = FromMap(m, nil)
+	check(m2)
 	assert.True(t, m.SlowEqual(m2))
 	assert.True(t, m2.SlowEqual(m))
 
-	m2 = part.FromMap(m, map[string]int{"one": 2})
+	m2 = FromMap(m, map[string]int{"one": 2})
+	check(m2)
 	assert.Equal(t, 1, m2.Len())
 	v, found = m2.Get("one")
 	assert.True(t, found)
 	assert.Equal(t, 2, v)
 
-	m2 = part.FromMap(m2, map[string]int{"two": 2})
+	m2 = FromMap(m2, map[string]int{"two": 2})
+	check(m2)
 	assert.Equal(t, 2, m2.Len())
 	v, found = m2.Get("one")
 	assert.True(t, found)
@@ -216,23 +259,25 @@ func TestSingletonMap(t *testing.T) {
 	assert.True(t, found)
 	assert.Equal(t, 2, v)
 
-	var m3 part.Map[string, int]
+	var m3 Map[string, int]
 	bs, err := m.MarshalJSON()
 	assert.NoError(t, err)
 	assert.NoError(t, m3.UnmarshalJSON(bs))
 	assert.True(t, m.SlowEqual(m3))
+	check(m3)
 
-	m3 = part.Map[string, int]{}
+	m3 = Map[string, int]{}
 	bs, err = yaml.Marshal(m)
 	assert.NoError(t, err)
 	assert.NoError(t, yaml.Unmarshal(bs, &m3))
 	assert.True(t, m.SlowEqual(m3))
+	check(m3)
 }
 
 func TestUint64Map(t *testing.T) {
 	// TestStringMap tests most of the operations. We just check here that
 	// fromBytes and toBytes work and can iterate in the right order.
-	var m part.Map[uint64, int]
+	var m Map[uint64, int]
 	m = m.Set(42, 42)
 	m = m.Set(55, 55)
 	m = m.Set(72, 72)
@@ -257,9 +302,9 @@ func TestRegisterKeyType(t *testing.T) {
 	type testKey struct {
 		X string
 	}
-	part.RegisterKeyType(func(k testKey) []byte { return []byte(k.X) })
+	RegisterKeyType(func(k testKey) []byte { return []byte(k.X) })
 
-	var m part.Map[testKey, int]
+	var m Map[testKey, int]
 	m = m.Set(testKey{"hello"}, 123)
 
 	v, ok := m.Get(testKey{"hello"})
@@ -273,20 +318,20 @@ func TestRegisterKeyType(t *testing.T) {
 }
 
 func TestMapJSON(t *testing.T) {
-	var m part.Map[string, int]
+	var m Map[string, int]
 	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
 
 	bs, err := json.Marshal(m)
 	require.NoError(t, err, "Marshal")
 
-	var m2 part.Map[string, int]
+	var m2 Map[string, int]
 	err = json.Unmarshal(bs, &m2)
 	require.NoError(t, err, "Unmarshal")
 	require.True(t, m.SlowEqual(m2), "SlowEqual")
 }
 
 func TestMapYAMLStringKey(t *testing.T) {
-	var m part.Map[string, int]
+	var m Map[string, int]
 
 	bs, err := yaml.Marshal(m)
 	require.NoError(t, err, "Marshal")
@@ -298,7 +343,7 @@ func TestMapYAMLStringKey(t *testing.T) {
 	require.NoError(t, err, "Marshal")
 	require.Equal(t, "- k: bar\n  v: 2\n- k: baz\n  v: 3\n- k: foo\n  v: 1\n", string(bs))
 
-	var m2 part.Map[string, int]
+	var m2 Map[string, int]
 	err = yaml.Unmarshal(bs, &m2)
 	require.NoError(t, err, "Unmarshal")
 	require.True(t, m.SlowEqual(m2), "SlowEqual")
@@ -309,16 +354,16 @@ func TestMapYAMLStructKey(t *testing.T) {
 		A int    `yaml:"a"`
 		B string `yaml:"b"`
 	}
-	part.RegisterKeyType[key](func(k key) []byte {
+	RegisterKeyType[key](func(k key) []byte {
 		return fmt.Appendf(nil, "%d-%s", k.A, k.B)
 	})
-	var m part.Map[key, int]
+	var m Map[key, int]
 	m = m.Set(key{1, "one"}, 1).Set(key{2, "two"}, 2).Set(key{3, "three"}, 3)
 
 	bs, err := yaml.Marshal(m)
 	require.NoError(t, err, "Marshal")
 
-	var m2 part.Map[key, int]
+	var m2 Map[key, int]
 	err = yaml.Unmarshal(bs, &m2)
 	require.NoError(t, err, "Unmarshal")
 	require.True(t, m.SlowEqual(m2), "SlowEqual")
@@ -332,7 +377,7 @@ func Benchmark_Uint64Map_Random(b *testing.B) {
 		keys[k] = int(k)
 	}
 	for b.Loop() {
-		var m part.Map[uint64, int]
+		var m Map[uint64, int]
 		for k, v := range keys {
 			m = m.Set(k, v)
 			v2, ok := m.Get(k)
@@ -348,7 +393,7 @@ func Benchmark_Uint64Map_Sequential(b *testing.B) {
 	numItems := 1000
 
 	for b.Loop() {
-		var m part.Map[uint64, int]
+		var m Map[uint64, int]
 		for i := range numItems {
 			k := uint64(i)
 			m = m.Set(k, i)
@@ -368,7 +413,7 @@ func TestMapMemoryUse(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
 	numMaps := 10000
-	maps := make([]part.Map[uint64, int], numMaps)
+	maps := make([]Map[uint64, int], numMaps)
 
 	for i := range numMaps {
 		maps[i] = maps[i].Set(uint64(1), 1)
