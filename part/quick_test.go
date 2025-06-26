@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package part_test
+package part
 
 import (
 	"encoding/json"
@@ -11,7 +11,6 @@ import (
 	"testing"
 	"testing/quick"
 
-	"github.com/cilium/statedb/part"
 	"github.com/stretchr/testify/require"
 	"go.yaml.in/yaml/v3"
 )
@@ -22,7 +21,7 @@ var quickConfig = &quick.Config{
 }
 
 func TestQuick_InsertGetPrefix(t *testing.T) {
-	var tree *part.Tree[string]
+	var tree *Tree[string]
 	insert := func(key, value string) any {
 		txn := tree.Txn()
 		_, _, watch := txn.InsertWatch([]byte(key), value)
@@ -60,18 +59,18 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 		return v
 	}
 
-	tree = part.New[string]()
+	tree = New[string]()
 	require.NoError(t,
 		quick.CheckEqual(insert, get, quickConfig),
 	)
-	tree = part.New[string](part.RootOnlyWatch)
+	tree = New[string](RootOnlyWatch)
 	require.NoError(t,
 		quick.CheckEqual(insert, get, quickConfig),
 	)
 }
 
 func TestQuick_IteratorReuse(t *testing.T) {
-	tree := part.New[string]()
+	tree := New[string]()
 
 	iterate := func(key, value string, cloneFirst bool) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
@@ -81,7 +80,7 @@ func TestQuick_IteratorReuse(t *testing.T) {
 		}
 
 		prefixIter, _ := tree.Prefix([]byte(key))
-		iterators := []*part.Iterator[string]{
+		iterators := []*Iterator[string]{
 			tree.LowerBound([]byte(key)),
 			prefixIter,
 		}
@@ -89,7 +88,7 @@ func TestQuick_IteratorReuse(t *testing.T) {
 		for _, iter := range iterators {
 			iter2 := iter.Clone()
 
-			collect := func(it *part.Iterator[string]) (out []string) {
+			collect := func(it *Iterator[string]) (out []string) {
 				for k, v, ok := it.Next(); ok; k, v, ok = it.Next() {
 					out = append(out, string(k)+"="+v)
 				}
@@ -118,7 +117,7 @@ func TestQuick_IteratorReuse(t *testing.T) {
 }
 
 func TestQuick_Delete(t *testing.T) {
-	tree := part.New[string]()
+	tree := New[string]()
 
 	do := func(key, value string, delete bool) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
@@ -158,7 +157,7 @@ func TestQuick_Delete(t *testing.T) {
 }
 
 func TestQuick_ClosedWatch(t *testing.T) {
-	tree := part.New[string]()
+	tree := New[string]()
 	insert := func(key, value string) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
 		treeAfterInsert := tree
@@ -210,7 +209,27 @@ func TestQuick_Map(t *testing.T) {
 		old, new int
 	}
 
-	partMap := part.Map[uint8, int]{}
+	checkSingleton := func(m Map[uint8, int]) {
+		switch m.Len() {
+		case 0:
+			require.Nil(t, m.singleton)
+			require.Nil(t, m.tree)
+		case 1:
+			require.NotNil(t, m.singleton)
+			require.Nil(t, m.tree)
+		default:
+			require.Nil(t, m.singleton)
+			require.NotNil(t, m.tree)
+		}
+		if m.singleton != nil {
+			require.Nil(t, m.tree, "Tree should not be set if singleton set")
+		}
+		if m.tree != nil {
+			require.Nil(t, m.singleton, "Singleton should not be set if tree set")
+		}
+	}
+
+	partMap := Map[uint8, int]{}
 	partCheck := func(del bool, key uint8, value int) (r result) {
 		var found bool
 		r.old, found = partMap.Get(key)
@@ -220,6 +239,8 @@ func TestQuick_Map(t *testing.T) {
 		} else {
 			newPartMap = partMap.Set(key, value)
 		}
+		checkSingleton(newPartMap)
+
 		r.new, _ = newPartMap.Get(key)
 		switch {
 		case !del && found:
@@ -241,15 +262,17 @@ func TestQuick_Map(t *testing.T) {
 
 		bs, err := json.Marshal(newPartMap)
 		require.NoError(t, err, "json.Marshal")
-		var m part.Map[uint8, int]
+		var m Map[uint8, int]
 		require.NoError(t, json.Unmarshal(bs, &m), "json.Unmarshal")
 		require.True(t, m.SlowEqual(newPartMap), "SlowEqual after json.Marshal")
+		checkSingleton(m)
 
-		m = part.Map[uint8, int]{}
+		m = Map[uint8, int]{}
 		bs, err = yaml.Marshal(newPartMap)
 		require.NoError(t, err)
 		require.NoError(t, yaml.Unmarshal(bs, &m), "yaml.Unmarshal")
 		require.True(t, m.SlowEqual(newPartMap), "SlowEqual after yaml.Marshal")
+		checkSingleton(m)
 
 		partMap = newPartMap
 		return
