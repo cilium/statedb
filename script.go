@@ -107,6 +107,9 @@ func InitializedCmd(db *DB) script.Cmd {
 				"for e.g. a background reflector to have started watching before",
 				"inserting objects.",
 			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				return autocompleteTableName(db, before, cur)
+			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			timeout, err := s.Flags.GetDuration("timeout")
@@ -158,6 +161,49 @@ func InitializedCmd(db *DB) script.Cmd {
 	)
 }
 
+func autocompleteTableName(db *DB, before []string, cur string) []string {
+	var suggestions []string
+	for _, tbl := range db.GetTables(db.ReadTxn()) {
+		if cur == "" || strings.HasPrefix(tbl.Name(), cur) {
+			suggestions = append(suggestions, tbl.Name())
+		}
+	}
+	slices.Sort(suggestions)
+	return suggestions
+}
+
+func autocompleteColumnNames(db *DB, args []string, cur string) []string {
+	if len(args) < 1 {
+		return nil
+	}
+
+	tbl, _, err := getTable(db, args[0])
+	if err != nil {
+		return nil
+	}
+
+	parts := strings.Split(cur, ",")
+
+	var suggestions []string
+	for _, col := range tbl.TableHeader() {
+		if cur == "" {
+			suggestions = append(suggestions, col)
+			continue
+		}
+
+		if slices.Contains(parts, col) {
+			// Already specified, skip.
+			continue
+		}
+
+		if strings.HasPrefix(col, parts[len(parts)-1]) {
+			newList := append(parts[:len(parts)-1], col)
+			suggestions = append(suggestions, strings.Join(newList, ","))
+		}
+	}
+	return suggestions
+}
+
 func ShowCmd(db *DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
@@ -178,6 +224,23 @@ func ShowCmd(db *DB) script.Cmd {
 				"To only show specific columns use the '-columns' flag. The",
 				"columns are as specified by 'TableHeader()' method.",
 				"This flag is only supported with 'table' formatting.",
+			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
+			},
+			AutocompleteFlag: func(state *script.State, args []string, flag, cur string) []string {
+				switch flag {
+				case "format":
+					return []string{"table", "yaml", "json"}
+				case "columns":
+					return autocompleteColumnNames(db, args, cur)
+				}
+				return nil
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
@@ -242,6 +305,14 @@ func CompareCmd(db *DB) script.Cmd {
 				"from the file you do not want compared.",
 				"",
 				"The rows can be filtered with the -grep flag.",
+			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
@@ -358,6 +429,14 @@ func EmptyCmd(db *DB) script.Cmd {
 		script.CmdUsage{
 			Summary: "Assert that given table(s) are empty",
 			Args:    "table",
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
+			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			txn := db.ReadTxn()
@@ -384,6 +463,14 @@ func InsertCmd(db *DB) script.Cmd {
 				"Insert one or more objects into a table. The input files",
 				"are expected to be YAML.",
 			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
+			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			return insertOrDelete(true, db, s, args...)
@@ -400,6 +487,14 @@ func DeleteCmd(db *DB) script.Cmd {
 				"Delete one or more objects from the table. The input files",
 				"are expected to be YAML and need to specify enough of the",
 				"object to construct the primary key",
+			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
@@ -519,6 +614,23 @@ func queryCmd(db *DB, query int, summary string, detail []string) script.Cmd {
 				fs.Bool("delete", false, "Delete all matching objects")
 			},
 			Detail: detail,
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
+			},
+			AutocompleteFlag: func(state *script.State, args []string, flag, cur string) []string {
+				switch flag {
+				case "format":
+					return []string{"table", "yaml", "json"}
+				case "columns":
+					return autocompleteColumnNames(db, args, cur)
+				}
+				return nil
+			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			return runQueryCmd(query, db, s, args)
@@ -625,6 +737,14 @@ func WatchCmd(db *DB) script.Cmd {
 			Detail: []string{
 				"Watch a table for changes. Streams each insert or delete",
 				"that happens to the table.",
+			},
+			AutocompleteArgs: func(_ *script.State, before []string, cur string) []string {
+				// Only complete table names
+				if len(before) > 0 {
+					return nil
+				}
+
+				return autocompleteTableName(db, before, cur)
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
