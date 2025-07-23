@@ -1096,6 +1096,31 @@ func TestDB_Initialization(t *testing.T) {
 	}
 }
 
+func TestDB_InitializationWithWriteTxn(t *testing.T) {
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	// Perform a write transaction, e.g., to register a change iterator
+	wtxn := db.WriteTxn(table)
+	_, err := table.Changes(wtxn)
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	_ = table.RegisterInitializer(wtxn, "test1")
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+	init, initWatch := table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
+	require.Equal(t, []string{"test1"}, table.PendingInitializers(txn), "test1 should be pending")
+
+	select {
+	case <-initWatch:
+		require.Fail(t, "Initialized() watch channel should not be closed")
+	default:
+	}
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
