@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -112,20 +113,39 @@ const (
 	NO_INDEX_TAGS = false
 )
 
-func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject], *ExpVarMetrics) {
-	metrics := NewExpVarMetrics(false)
-	db, table := newTestDBWithMetrics(t, metrics, secondaryIndexers...)
-	return db, table, metrics
+type testDBOpt func(*testDBOpts)
+type testDBOpts struct {
+	metrics           Metrics
+	secondaryIndexers []Indexer[testObject]
 }
 
-func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject]) {
+func withMetrics(metrics Metrics) testDBOpt {
+	return func(tdo *testDBOpts) {
+		tdo.metrics = metrics
+	}
+}
+
+func withSecondaryIndexers(indexers ...Indexer[testObject]) testDBOpt {
+	return func(tdo *testDBOpts) {
+		tdo.secondaryIndexers = append(tdo.secondaryIndexers, indexers...)
+	}
+}
+
+func newTestDB(t testing.TB, opts ...testDBOpt) (*DB, RWTable[testObject]) {
 	var (
-		db *DB
+		db  *DB
+		tdo testDBOpts
 	)
-	table := newTestObjectTable(t, "test", secondaryIndexers...)
+
+	for _, opt := range opts {
+		opt(&tdo)
+	}
+
+	table := newTestObjectTable(t, "test", tdo.secondaryIndexers...)
 
 	h := hive.New(
-		cell.Provide(func() Metrics { return metrics }),
+		cell.Provide(func() Metrics { return cmp.Or(tdo.metrics, Metrics(&NopMetrics{})) }),
+		cell.Provide(func() RWTable[testObject] { return table }),
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) {
 			err := db_.RegisterTable(table)
@@ -182,7 +202,7 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 }
 
 func TestDB_InsertWatch(t *testing.T) {
-	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	txn := db.WriteTxn(table)
 	_, _, watch, err := table.InsertWatch(txn, testObject{ID: 42, Tags: part.NewSet("hello")})
@@ -210,7 +230,7 @@ func TestDB_InsertWatch(t *testing.T) {
 func TestDB_LowerBound_ByRevision(t *testing.T) {
 	t.Parallel()
 
-	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	{
 		txn := db.WriteTxn(table)
@@ -282,7 +302,7 @@ func TestDB_LowerBound_ByRevision(t *testing.T) {
 func TestDB_Prefix(t *testing.T) {
 	t.Parallel()
 
-	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	{
 		txn := db.WriteTxn(table)
@@ -340,7 +360,8 @@ func TestDB_Prefix(t *testing.T) {
 func TestDB_Changes(t *testing.T) {
 	t.Parallel()
 
-	db, table, metrics := newTestDB(t, tagsIndex)
+	metrics := NewExpVarMetrics(false)
+	db, table := newTestDB(t, withMetrics(metrics), withSecondaryIndexers(tagsIndex))
 
 	{
 		txn := db.WriteTxn(table)
@@ -589,7 +610,7 @@ func TestDB_Changes(t *testing.T) {
 func TestDB_Observable(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t)
+	db, table := newTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	events := stream.ToChannel(ctx, Observable(db, table))
 
@@ -633,7 +654,7 @@ func TestDB_Observable(t *testing.T) {
 func TestDB_NumObjects(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t)
+	db, table := newTestDB(t)
 	rtxn := db.ReadTxn()
 	assert.Equal(t, 0, table.NumObjects(rtxn))
 
@@ -656,7 +677,7 @@ func TestDB_NumObjects(t *testing.T) {
 func TestDB_All(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	{
 		txn := db.WriteTxn(table)
@@ -712,7 +733,7 @@ func TestDB_All(t *testing.T) {
 func TestDB_Modify(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	txn := db.WriteTxn(table)
 
@@ -750,7 +771,7 @@ func TestDB_Modify(t *testing.T) {
 func TestDB_Revision(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	startRevision := table.Revision(db.ReadTxn())
 
@@ -778,7 +799,7 @@ func TestDB_Revision(t *testing.T) {
 func TestDB_GetList(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	// Write test objects 1..10 to table with odd/even/odd/... tags.
 	{
@@ -878,7 +899,8 @@ func TestDB_GetList(t *testing.T) {
 func TestDB_CommitAbort(t *testing.T) {
 	t.Parallel()
 
-	dbX, table, metrics := newTestDB(t, tagsIndex)
+	metrics := NewExpVarMetrics(false)
+	dbX, table := newTestDB(t, withMetrics(metrics), withSecondaryIndexers(tagsIndex))
 	db := dbX.NewHandle("test-handle")
 
 	txn := db.WriteTxn(table)
@@ -920,7 +942,7 @@ func TestDB_CommitAbort(t *testing.T) {
 func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	// Updating a non-existing object fails and nothing is inserted.
 	wtxn := db.WriteTxn(table)
@@ -1013,7 +1035,7 @@ func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {
 func TestDB_ReadAfterWrite(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	txn := db.WriteTxn(table)
 
@@ -1040,7 +1062,7 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 func TestDB_Initialization(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	// Using Initialized() before any initializers are registered
 	// will return true and a closed channel.
@@ -1099,7 +1121,7 @@ func TestDB_Initialization(t *testing.T) {
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	buf := new(bytes.Buffer)
 	err := db.ReadTxn().WriteJSON(buf)

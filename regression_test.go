@@ -38,7 +38,7 @@ func Test_Regression_29324(t *testing.T) {
 		Unique:  false,
 	}
 
-	db, _, _ := newTestDB(t)
+	db, _ := newTestDB(t)
 	table, err := NewTable("objects", idIndex, tagIndex)
 	require.NoError(t, err)
 	require.NoError(t, db.RegisterTable(table))
@@ -80,7 +80,7 @@ func Test_Regression_29324(t *testing.T) {
 // wait on a watch channel that reflects the changes of a full iteration
 // and we might be stuck waiting even when there's unprocessed changes.
 func Test_Regression_Changes_Watch(t *testing.T) {
-	db, table, _ := newTestDB(t)
+	db, table := newTestDB(t)
 
 	wtxn := db.WriteTxn(table)
 	changeIter, err := table.Changes(wtxn)
@@ -198,7 +198,7 @@ func Test_Regression_Prefix_NonUnique(t *testing.T) {
 		Unique:  false,
 	}
 
-	db, _, _ := newTestDB(t)
+	db, _ := newTestDB(t)
 	table, err := NewTable("objects", idIndex, tagIndex)
 	require.NoError(t, err)
 	require.NoError(t, db.RegisterTable(table))

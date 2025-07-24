@@ -20,7 +20,7 @@ import (
 )
 
 func httpFixture(t *testing.T) (*DB, RWTable[testObject], *httptest.Server) {
-	db, table, _ := newTestDB(t, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	ts := httptest.NewServer(db.HTTPHandler())
 	t.Cleanup(ts.Close)

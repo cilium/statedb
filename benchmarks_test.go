@@ -26,7 +26,7 @@ import (
 const numObjectsToInsert = 1000
 
 func BenchmarkDB_WriteTxn_1(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	for b.Loop() {
 		txn := db.WriteTxn(table)
@@ -52,7 +52,7 @@ func BenchmarkDB_WriteTxn_1000(b *testing.B) {
 }
 
 func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	n := b.N
 	b.ResetTimer()
 
@@ -73,7 +73,7 @@ func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 }
 
 func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(b, withSecondaryIndexers(tagsIndex))
 	batchSize := 100
 	n := b.N
 	tagSet := part.NewSet("test")
@@ -95,14 +95,14 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 }
 
 func BenchmarkDB_NewWriteTxn(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(b, withSecondaryIndexers(tagsIndex))
 	for b.Loop() {
 		db.WriteTxn(table).Abort()
 	}
 }
 
 func BenchmarkDB_NewReadTxn(b *testing.B) {
-	db, _ := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, _ := newTestDB(b, withSecondaryIndexers(tagsIndex))
 	for b.Loop() {
 		if db.ReadTxn() == nil {
 			b.Fatalf("nil")
@@ -119,7 +119,7 @@ func BenchmarkDB_GetInsert(b *testing.B) {
 }
 
 func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	ids := []uint64{}
 	for i := range numObjectsToInsert {
@@ -158,7 +158,7 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 }
 
 func BenchmarkDB_RandomInsert(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	ids := []uint64{}
 	for i := range numObjectsToInsert {
 		ids = append(ids, uint64(i))
@@ -188,7 +188,7 @@ func BenchmarkDB_RandomInsert(b *testing.B) {
 //
 // This also uses a secondary index to make this a more realistic.
 func BenchmarkDB_RandomReplace(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(b, withSecondaryIndexers(tagsIndex))
 	ids := []uint64{}
 	txn := db.WriteTxn(table)
 	for i := range numObjectsToInsert {
@@ -224,7 +224,7 @@ func BenchmarkDB_RandomReplace(b *testing.B) {
 }
 
 func BenchmarkDB_SequentialInsert(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	for b.Loop() {
 		txn := db.WriteTxn(table)
@@ -243,7 +243,7 @@ func BenchmarkDB_SequentialInsert(b *testing.B) {
 }
 
 func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	for b.Loop() {
 		txn := db.WriteTxn(table)
@@ -267,7 +267,7 @@ func BenchmarkDB_SequentialInsert_Prefix(b *testing.B) {
 }
 
 func BenchmarkDB_Changes_Baseline(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	for b.Loop() {
 		txn := db.WriteTxn(table)
@@ -288,7 +288,7 @@ func BenchmarkDB_Changes_Baseline(b *testing.B) {
 }
 
 func BenchmarkDB_Changes(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	// Create the change iterator.
 	txn := db.WriteTxn(table)
@@ -351,7 +351,7 @@ func BenchmarkDB_Changes(b *testing.B) {
 }
 
 func BenchmarkDB_RandomLookup(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 
 	wtxn := db.WriteTxn(table)
 	queries := []Query[testObject]{}
@@ -378,7 +378,7 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 }
 
 func BenchmarkDB_SequentialLookup(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
 	queries := []Query[testObject]{}
@@ -403,7 +403,7 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 }
 
 func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(b, withSecondaryIndexers(tagsIndex))
 	tagSet := part.NewSet("test")
 	txn := db.WriteTxn(table)
 	for i := range numObjectsToInsert {
@@ -429,7 +429,7 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 const numObjectsIteration = 100000
 
 func BenchmarkDB_FullIteration_All(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	wtxn := db.WriteTxn(table)
 	for i := range numObjectsIteration {
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
@@ -454,7 +454,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 }
 
 func BenchmarkDB_FullIteration_Get(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
 	queries := []Query[testObject]{}
@@ -479,7 +479,7 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 }
 
 func BenchmarkDB_FullIteration_ReadTxnGet(b *testing.B) {
-	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	db, table := newTestDB(b)
 	wtxn := db.WriteTxn(table)
 	ids := []uint64{}
 	queries := []Query[testObject]{}

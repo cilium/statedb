@@ -64,7 +64,7 @@ func TestWatchSet(t *testing.T) {
 
 func TestWatchSetInQueries(t *testing.T) {
 	t.Parallel()
-	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
 
 	ws := NewWatchSet()
 	txn := db.ReadTxn()
