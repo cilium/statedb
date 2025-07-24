@@ -116,7 +116,7 @@ type RWTable[Obj any] interface {
 	// RegisterInitializer registers an initializer to the table. Returns
 	// a function to mark the initializer done. Once all initializers are
 	// done, Table[*].Initialized() will return true.
-	// This should only be used before the application has started.
+	// RegisterInitializer cannot be invoked after that the DB has started.
 	RegisterInitializer(txn WriteTxn, name string) func(WriteTxn)
 
 	// ToTable returns the Table[Obj] interface. Useful with cell.Provide
@@ -423,6 +423,8 @@ const (
 	GraveyardRevisionIndexPos = 3
 
 	SecondaryIndexStartPos = 4
+
+	dbStartedInitializer = "__db_started__"
 )
 
 // object is the format in which data is stored in the tables.

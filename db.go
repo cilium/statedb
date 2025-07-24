@@ -96,6 +96,7 @@ type dbState struct {
 	gcExited            chan struct{}
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
+	started             bool
 }
 
 type dbRoot = readTxn
@@ -173,9 +174,16 @@ func (db *DB) registerTable(table TableMeta, root *dbRoot) error {
 		}
 	}
 
+	entry := table.tableEntry()
+	if !db.started {
+		// Make sure that the table is not marked as initialized until the DB has
+		// been started, so that all other initializers can be registered in time.
+		entry.pendingInitializers = append(entry.pendingInitializers, dbStartedInitializer)
+	}
+
 	pos := len(*root)
 	table.setTablePos(pos)
-	*root = append(*root, table.tableEntry())
+	*root = append(*root, entry)
 	return nil
 }
 
@@ -270,11 +278,42 @@ func (db *DB) GetTable(txn ReadTxn, name string) TableMeta {
 // This starts the graveyard worker that deals with garbage collecting
 // deleted objects that are no longer necessary for Changes().
 func (db *DB) Start() error {
+	// We acquire the lock, rather than using an atomic variable, to ensure that
+	// all potential parallel [RegisterTable] operations have completed, and
+	// [db.removeDBStartedInitializer] can observe the complete list of tables
+	// that need to be marked as started.
+	db.mu.Lock()
+	db.started = true
+	db.mu.Unlock()
+
 	db.gcTrigger = make(chan struct{}, 1)
 	db.gcExited = make(chan struct{})
+	db.removeDBStartedInitializer()
 	db.ctx, db.cancel = context.WithCancel(context.Background())
 	go graveyardWorker(db, db.ctx, db.gcRateLimitInterval)
 	return nil
+}
+
+func (db *DB) removeDBStartedInitializer() {
+	// We are guaranteed to see the complete list of tables that need to be
+	// marked as started, even though additional ones may have potentially
+	// been registered in the meanwhile. This is not a problem, though, as
+	// these tables cannot have initializers associated with them.
+	tables := db.GetTables(db.ReadTxn())
+	if len(tables) == 0 {
+		return
+	}
+
+	txn := db.WriteTxn(tables[0], tables[1:]...).getTxn()
+	for _, tbl := range txn.modifiedTables {
+		if tbl != nil {
+			tbl.pendingInitializers = slices.DeleteFunc(
+				slices.Clone(tbl.pendingInitializers),
+				func(n string) bool { return n == dbStartedInitializer },
+			)
+		}
+	}
+	txn.Commit()
 }
 
 // Stop the background workers.

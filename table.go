@@ -239,6 +239,9 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 		if slices.Contains(table.pendingInitializers, name) {
 			panic(fmt.Sprintf("RegisterInitializer: %q already registered", name))
 		}
+		if !slices.Contains(table.pendingInitializers, dbStartedInitializer) {
+			panic(fmt.Sprintf("RegisterInitializer: cannot register %q once the DB has started", name))
+		}
 		table.pendingInitializers =
 			append(slices.Clone(table.pendingInitializers), name)
 		var once sync.Once

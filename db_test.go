@@ -117,6 +117,7 @@ type testDBOpt func(*testDBOpts)
 type testDBOpts struct {
 	metrics           Metrics
 	secondaryIndexers []Indexer[testObject]
+	cells             []cell.Cell
 }
 
 func withMetrics(metrics Metrics) testDBOpt {
@@ -128,6 +129,12 @@ func withMetrics(metrics Metrics) testDBOpt {
 func withSecondaryIndexers(indexers ...Indexer[testObject]) testDBOpt {
 	return func(tdo *testDBOpts) {
 		tdo.secondaryIndexers = append(tdo.secondaryIndexers, indexers...)
+	}
+}
+
+func withExtraCells(cells ...cell.Cell) testDBOpt {
+	return func(tdo *testDBOpts) {
+		tdo.cells = append(tdo.cells, cells...)
 	}
 }
 
@@ -156,6 +163,7 @@ func newTestDB(t testing.TB, opts ...testDBOpt) (*DB, RWTable[testObject]) {
 
 			db = db_
 		}),
+		cell.Group(tdo.cells...),
 	)
 
 	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
@@ -1062,29 +1070,39 @@ func TestDB_ReadAfterWrite(t *testing.T) {
 func TestDB_Initialization(t *testing.T) {
 	t.Parallel()
 
-	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex))
+	var done1, done2 func(WriteTxn)
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex), withExtraCells(
+		cell.Invoke(func(db *DB, table RWTable[testObject]) {
+			// Using Initialized() before any initializers are registered
+			// will return false and a wait channel.
+			init, initWatch := table.Initialized(db.ReadTxn())
+			require.False(t, init, "Initialized should be false")
+			select {
+			case <-initWatch:
+				t.Fatalf("Initialized watch channel should not be closed")
+			default:
+			}
 
-	// Using Initialized() before any initializers are registered
-	// will return true and a closed channel.
-	init, initWatch := table.Initialized(db.ReadTxn())
-	require.True(t, init, "Initialized should be true")
-	select {
-	case <-initWatch:
-	default:
-		t.Fatalf("Initialized watch channel should be closed")
-	}
+			wtxn := db.WriteTxn(table)
+			done1 = table.RegisterInitializer(wtxn, "test1")
+			done2 = table.RegisterInitializer(wtxn, "test2")
+			wtxn.Commit()
+		}),
+	))
 
-	wtxn := db.WriteTxn(table)
-	done1 := table.RegisterInitializer(wtxn, "test1")
-	done2 := table.RegisterInitializer(wtxn, "test2")
-	wtxn.Commit()
+	// Attempting to register an initializer once the DB has started should cause a panic
+	require.Panics(t, func() {
+		wtxn := db.WriteTxn(table)
+		defer wtxn.Abort()
+		table.RegisterInitializer(wtxn, "other")
+	})
 
 	txn := db.ReadTxn()
-	init, initWatch = table.Initialized(txn)
+	init, initWatch := table.Initialized(txn)
 	require.False(t, init, "Initialized should be false")
 	require.Equal(t, []string{"test1", "test2"}, table.PendingInitializers(txn), "test1, test2 should be pending")
 
-	wtxn = db.WriteTxn(table)
+	wtxn := db.WriteTxn(table)
 	done1(wtxn)
 	init, _ = table.Initialized(txn)
 	require.False(t, init, "Initialized should be false")
@@ -1099,6 +1117,11 @@ func TestDB_Initialization(t *testing.T) {
 	init, _ = table.Initialized(txn)
 	require.False(t, init, "Initialized should be false")
 	require.Equal(t, []string{"test2"}, table.PendingInitializers(txn), "test2 should be pending")
+	select {
+	case <-initWatch:
+		t.Fatalf("Initialized watch channel should not be closed")
+	default:
+	}
 
 	wtxn = db.WriteTxn(table)
 	done2(wtxn)
@@ -1115,6 +1138,66 @@ func TestDB_Initialization(t *testing.T) {
 	case <-initWatch:
 	default:
 		t.Fatalf("Initialized() watch channel was not closed")
+	}
+
+	// A table registered after the DB started is immediately marked as initialized
+	otherTable := newTestObjectTable(t, "test2")
+	require.NoError(t, db.RegisterTable(otherTable))
+	init, initWatch = otherTable.Initialized(db.ReadTxn())
+	require.True(t, init, "Initialized should be true")
+	select {
+	case <-initWatch:
+	default:
+		t.Fatalf("Initialized() watch channel was not closed")
+	}
+}
+
+func TestDB_InitializationWithoutInitializers(t *testing.T) {
+	t.Parallel()
+
+	var initWatch <-chan struct{}
+	db, table := newTestDB(t, withSecondaryIndexers(tagsIndex), withExtraCells(
+		cell.Invoke(func(db *DB, table RWTable[testObject]) {
+			// Using Initialized() before any initializers are registered
+			// will return false and a wait channel.
+			var init bool
+			init, initWatch = table.Initialized(db.ReadTxn())
+			require.False(t, init, "Initialized should be false")
+			select {
+			case <-initWatch:
+				t.Fatalf("Initialized watch channel should not be closed")
+			default:
+			}
+
+			// Performing a write transaction, e.g., to register a change iterator
+			// should not have any effect on the watch channel.
+			wtxn := db.WriteTxn(table)
+			_, err := table.Changes(wtxn)
+			require.NoError(t, err)
+			wtxn.Commit()
+
+			select {
+			case <-initWatch:
+				t.Fatalf("Initialized watch channel should not be closed")
+			default:
+			}
+		}),
+	))
+
+	// Now that the DB started, the watch channel should be closed.
+	select {
+	case <-initWatch:
+	default:
+		t.Fatalf("Initialized watch channel should be closed")
+	}
+
+	// Querying Initialized again should return true and a closed channel
+	init, initWatch := table.Initialized(db.ReadTxn())
+	require.True(t, init, "Initialized should be true")
+	select {
+	case <-initWatch:
+	default:
+		t.Fatalf("Initialized watch channel should be closed")
 	}
 }
 
