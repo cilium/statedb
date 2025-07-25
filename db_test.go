@@ -1096,6 +1096,113 @@ func TestDB_Initialization(t *testing.T) {
 	}
 }
 
+func TestDB_InitializationTransitions(t *testing.T) {
+	t.Parallel()
+
+	var (
+		requireClosed = func(t *testing.T, initWatch <-chan struct{}) {
+			t.Helper()
+			select {
+			case <-initWatch:
+			default:
+				t.Fatalf("Initialized() watch channel should be closed")
+			}
+		}
+		requireOpen = func(t *testing.T, initWatch <-chan struct{}) {
+			t.Helper()
+			select {
+			case <-initWatch:
+				t.Fatalf("Initialized() watch channel should not be closed")
+			default:
+			}
+		}
+	)
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	// Perform an unrelated write transaction, e.g., to register a change iterator
+	wtxn := db.WriteTxn(table)
+	_, err := table.Changes(wtxn)
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	done1 := table.RegisterInitializer(wtxn, "test1")
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+	init, initWatch := table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
+	requireOpen(t, initWatch)
+
+	wtxn = db.WriteTxn(table)
+	done1(wtxn)
+	wtxn.Commit()
+
+	// The initWatch channel should be closed now
+	requireClosed(t, initWatch)
+
+	// Old read transaction unaffected (but the returned channel is closed).
+	init, initWatch = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
+	requireClosed(t, initWatch)
+
+	txn = db.ReadTxn()
+	init, initWatch = table.Initialized(txn)
+	require.True(t, init, "Initialized should be true")
+	requireClosed(t, initWatch)
+
+	// Register new initializers
+	wtxn = db.WriteTxn(table)
+	done1 = table.RegisterInitializer(wtxn, "test1")
+	done2 := table.RegisterInitializer(wtxn, "test2")
+	wtxn.Commit()
+
+	// Old read transaction unaffected.
+	init, initWatch = table.Initialized(txn)
+	require.True(t, init, "Initialized should be true")
+	requireClosed(t, initWatch)
+
+	// A new read transaction returns not initialized, and an open watch channel
+	txn = db.ReadTxn()
+	init, initWatch = table.Initialized(txn)
+	require.False(t, init, "Initialized should be false")
+	requireOpen(t, initWatch)
+
+	// Mark one initializer done
+	wtxn = db.WriteTxn(table)
+	done2(wtxn)
+	wtxn.Commit()
+
+	requireOpen(t, initWatch)
+
+	// Register one more initializer
+	wtxn = db.WriteTxn(table)
+	done3 := table.RegisterInitializer(wtxn, "test3")
+	wtxn.Commit()
+
+	requireOpen(t, initWatch)
+
+	// Mark one more done
+	wtxn = db.WriteTxn(table)
+	done3(wtxn)
+	wtxn.Commit()
+
+	requireOpen(t, initWatch)
+
+	// Mark the third done as well
+	wtxn = db.WriteTxn(table)
+	done1(wtxn)
+	wtxn.Commit()
+
+	requireClosed(t, initWatch)
+
+	txn = db.ReadTxn()
+	init, initWatch = table.Initialized(txn)
+	require.True(t, init, "Initialized should be true")
+	requireClosed(t, initWatch)
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
