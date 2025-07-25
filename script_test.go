@@ -24,10 +24,8 @@ func TestScript(t *testing.T) {
 	h := hive.New(
 		Cell, // DB
 		cell.Invoke(func(db *DB) {
-			t1 := newTestObjectTable(t, "test1", tagsIndex)
-			require.NoError(t, db.RegisterTable(t1), "RegisterTable")
-			t2 := newTestObjectTable(t, "test2", tagsIndex)
-			require.NoError(t, db.RegisterTable(t2), "RegisterTable")
+			_ = newTestObjectTable(t, db, "test1", tagsIndex)
+			_ = newTestObjectTable(t, db, "test2", tagsIndex)
 		}),
 	)
 	t.Cleanup(func() {

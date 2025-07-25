@@ -64,11 +64,11 @@ func newNopHealth() (cell.Health, *nopHealth) {
 var _ cell.Health = &nopHealth{}
 
 func TestDerive(t *testing.T) {
-	var db *DB
-	inTable, err := NewTable("test", idIndex)
-	require.NoError(t, err)
-	outTable, err := NewTable("derived", derivedIdIndex)
-	require.NoError(t, err)
+	var (
+		db       *DB
+		inTable  RWTable[testObject]
+		outTable RWTable[derived]
+	)
 
 	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
 		t.Logf("transform(%v, %v)", obj, deleted)
@@ -95,12 +95,8 @@ func TestDerive(t *testing.T) {
 
 			cell.Provide(func(db_ *DB) (Table[testObject], RWTable[derived], error) {
 				db = db_
-				if err := db.RegisterTable(inTable); err != nil {
-					return nil, nil, err
-				}
-				if err := db.RegisterTable(outTable); err != nil {
-					return nil, nil, err
-				}
+				inTable = MustNewTable(db, "test", idIndex)
+				outTable = MustNewTable(db, "derived", derivedIdIndex)
 				return inTable, outTable, nil
 			}),
 
@@ -120,7 +116,7 @@ func TestDerive(t *testing.T) {
 
 	// Insert 1, 2 and 3 (skipped) and validate.
 	wtxn := db.WriteTxn(inTable)
-	_, _, err = inTable.Insert(wtxn, testObject{ID: 1})
+	_, _, err := inTable.Insert(wtxn, testObject{ID: 1})
 	require.NoError(t, err, "Insert failed")
 	_, _, err = inTable.Insert(wtxn, testObject{ID: 2})
 	require.NoError(t, err, "Insert failed")

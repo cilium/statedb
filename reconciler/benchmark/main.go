@@ -104,14 +104,10 @@ func main() {
 	}
 
 	var (
-		mt = &mockOps{}
-		db *statedb.DB
+		mt          = &mockOps{}
+		db          *statedb.DB
+		testObjects statedb.RWTable[*testObject]
 	)
-
-	testObjects, err := statedb.NewTable("test-objects", idIndex)
-	if err != nil {
-		panic(err)
-	}
 
 	hive := hive.New(
 		cell.SimpleHealthCell,
@@ -122,9 +118,10 @@ func main() {
 			"test",
 			"Test",
 
-			cell.Invoke(func(db_ *statedb.DB) error {
+			cell.Invoke(func(db_ *statedb.DB) (err error) {
 				db = db_
-				return db.RegisterTable(testObjects)
+				testObjects, err = statedb.NewTable(db, "test-objects", idIndex)
+				return err
 			}),
 			cell.Provide(
 				func() (*mockOps, reconciler.Operations[*testObject]) {
@@ -152,7 +149,7 @@ func main() {
 		),
 	)
 
-	err = hive.Start(logger, context.TODO())
+	err := hive.Start(logger, context.TODO())
 	if err != nil {
 		panic(err)
 	}

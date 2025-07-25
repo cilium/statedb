@@ -25,8 +25,8 @@ func TestCollectFilterMapToSeq(t *testing.T) {
 		FromKey: index.Int,
 		Unique:  true,
 	}
-	table, _ := NewTable("test", idIndex)
-	require.NoError(t, db.RegisterTable(table))
+	table, err := NewTable(db, "test", idIndex)
+	require.NoError(t, err)
 	db.Start()
 	defer db.Stop()
 

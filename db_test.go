@@ -97,8 +97,9 @@ var (
 	}
 )
 
-func newTestObjectTable(t testing.TB, name string, secondaryIndexers ...Indexer[testObject]) RWTable[testObject] {
+func newTestObjectTable(t testing.TB, db *DB, name string, secondaryIndexers ...Indexer[testObject]) RWTable[testObject] {
 	table, err := NewTable(
+		db,
 		name,
 		idIndex,
 		secondaryIndexers...,
@@ -120,16 +121,15 @@ func newTestDB(t testing.TB, secondaryIndexers ...Indexer[testObject]) (*DB, RWT
 
 func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...Indexer[testObject]) (*DB, RWTable[testObject]) {
 	var (
-		db *DB
+		db    *DB
+		table RWTable[testObject]
 	)
-	table := newTestObjectTable(t, "test", secondaryIndexers...)
 
 	h := hive.New(
 		cell.Provide(func() Metrics { return metrics }),
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) {
-			err := db_.RegisterTable(table)
-			require.NoError(t, err, "RegisterTable failed")
+			table = newTestObjectTable(t, db_, "test", secondaryIndexers...)
 
 			// Use a short GC interval.
 			db_.setGCRateLimitInterval(50 * time.Millisecond)
@@ -159,12 +159,12 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 		FromKey: index.Uint64,
 		Unique:  true,
 	}
-	table, _ := NewTable("test", idIndex)
-	require.NoError(t, db.RegisterTable(table), "RegisterTable")
+	table, err := NewTable(db, "test", idIndex)
+	require.NoError(t, err, "NewTable")
 
 	txn := db.WriteTxn(table)
 	obj := &testObject{ID: 1}
-	_, _, err := table.Insert(txn, obj)
+	_, _, err = table.Insert(txn, obj)
 	require.NoError(t, err, "Insert failed")
 	txn.Commit()
 
@@ -1280,6 +1280,8 @@ func Test_nonUniqueKey(t *testing.T) {
 }
 
 func Test_validateTableName(t *testing.T) {
+	db := New()
+
 	validNames := []string{
 		"a",
 		"abc123",
@@ -1295,12 +1297,12 @@ func Test_validateTableName(t *testing.T) {
 	}
 
 	for _, name := range validNames {
-		_, err := NewTable(name, idIndex)
+		_, err := NewTable(db, name, idIndex)
 		require.NoError(t, err, "NewTable(%s)", name)
 	}
 
 	for _, name := range invalidNames {
-		_, err := NewTable(name, idIndex)
+		_, err := NewTable(db, name, idIndex)
 		require.Error(t, err, "NewTable(%s)", name)
 	}
 }

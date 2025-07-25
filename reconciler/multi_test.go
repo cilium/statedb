@@ -71,8 +71,7 @@ var _ reconciler.Operations[*multiStatusObject] = &multiMockOps{}
 // TestMultipleReconcilers tests use of multiple reconcilers against
 // a single object.
 func TestMultipleReconcilers(t *testing.T) {
-	table, err := statedb.NewTable("objects", multiStatusIndex)
-	require.NoError(t, err, "NewTable")
+	var table statedb.RWTable[*multiStatusObject]
 
 	var ops1, ops2 multiMockOps
 	var db *statedb.DB
@@ -87,9 +86,10 @@ func TestMultipleReconcilers(t *testing.T) {
 				return r.NewGroup(h, lc)
 			},
 		),
-		cell.Invoke(func(db_ *statedb.DB) error {
+		cell.Invoke(func(db_ *statedb.DB) (err error) {
 			db = db_
-			return db.RegisterTable(table)
+			table, err = statedb.NewTable(db, "objects", multiStatusIndex)
+			return err
 		}),
 
 		cell.Module("test1", "First reconciler",

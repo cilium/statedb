@@ -523,15 +523,17 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 
 	var (
 		db     *DB
-		table1 = MustNewTable("test", idIndex)
-		table2 = MustNewTable("test2", id2Index)
+		table1 RWTable[testObject]
+		table2 RWTable[testObject2]
 	)
 
 	h := hive.New(
 		Cell, // DB
 		cell.Invoke(func(db_ *DB) error {
 			db = db_
-			return db.RegisterTable(table1, table2)
+			table1 = MustNewTable(db, "test", idIndex)
+			table2 = MustNewTable(db, "test2", id2Index)
+			return nil
 		}),
 	)
 

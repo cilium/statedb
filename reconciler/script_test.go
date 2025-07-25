@@ -40,12 +40,10 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 		reconcilerParams    reconciler.Params
 		reconcilerLifecycle = &cell.DefaultLifecycle{}
 		markInit            func()
+		testObjects         statedb.RWTable[*testObject]
 	)
 
 	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
-
-	testObjects, err := statedb.NewTable("test-objects", idIndex)
-	require.NoError(t, err, "NewTable")
 
 	hive := hive.New(
 		statedb.Cell,
@@ -70,10 +68,11 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 				}),
 
 			cell.Invoke(
-				func(db_ *statedb.DB, p_ reconciler.Params) error {
+				func(db_ *statedb.DB, p_ reconciler.Params) (err error) {
 					db = db_
 					reconcilerParams = p_
-					return db.RegisterTable(testObjects)
+					testObjects, err = statedb.NewTable(db, "test-objects", idIndex)
+					return err
 				},
 
 				func(lc cell.Lifecycle) {
