@@ -1198,6 +1198,27 @@ func Test_validateTableName(t *testing.T) {
 	}
 }
 
+func Test_getAcquiredInfo(t *testing.T) {
+	t.Parallel()
+	db, table, _ := newTestDB(t)
+
+	// No transaction performed so far.
+	require.Empty(t, table.getAcquiredInfo())
+
+	// Ongoing transaction
+	txn := db.WriteTxn(table)
+	require.Regexp(t, `^DB \(locked for [0-9.]+(u|m)s\)$`, table.getAcquiredInfo())
+	txn.Commit()
+
+	// Transaction completed
+	require.Regexp(t, `^DB \([0-9.]+(u|m)s ago, locked for [0-9.]+(u|m)s\)$`, table.getAcquiredInfo())
+
+	// Aborted transaction
+	txn = db.WriteTxn(table)
+	txn.Abort()
+	require.Regexp(t, `^DB \([0-9.]+(u|m)s ago, locked for [0-9.]+(u|m)s\)$`, table.getAcquiredInfo())
+}
+
 func eventuallyGraveyardIsEmpty(t testing.TB, db *DB) {
 	require.Eventually(t,
 		func() bool {
