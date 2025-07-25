@@ -252,6 +252,8 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 						slices.Clone(table.pendingInitializers),
 						func(n string) bool { return n == name },
 					)
+				} else {
+					panic(fmt.Sprintf("RegisterInitializer/MarkDone: Table %q not locked for writing", t.table))
 				}
 			})
 		}
