@@ -39,9 +39,8 @@ func Test_Regression_29324(t *testing.T) {
 	}
 
 	db, _, _ := newTestDB(t)
-	table, err := NewTable("objects", idIndex, tagIndex)
+	table, err := NewTable(db, "objects", idIndex, tagIndex)
 	require.NoError(t, err)
-	require.NoError(t, db.RegisterTable(table))
 
 	wtxn := db.WriteTxn(table)
 	table.Insert(wtxn, object{"foo", "aa"})
@@ -199,9 +198,8 @@ func Test_Regression_Prefix_NonUnique(t *testing.T) {
 	}
 
 	db, _, _ := newTestDB(t)
-	table, err := NewTable("objects", idIndex, tagIndex)
+	table, err := NewTable(db, "objects", idIndex, tagIndex)
 	require.NoError(t, err)
-	require.NoError(t, db.RegisterTable(table))
 
 	wtxn := db.WriteTxn(table)
 	table.Insert(wtxn, object{"aa", "a"})

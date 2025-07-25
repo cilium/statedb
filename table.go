@@ -21,19 +21,23 @@ import (
 	"github.com/cilium/statedb/index"
 )
 
-// NewTable creates a new table with given name and indexes.
-// Can fail if the indexes or the name are malformed.
+// NewTable creates a new table with given name and indexes, and registers it
+// with the database. Can fail if the indexes or the name are malformed, or a
+// table with the same name is already registered.
 // The name must match regex "^[a-z][a-z0-9_\\-]{0,30}$".
 //
 // To provide access to the table via Hive:
 //
 //	cell.Provide(
 //		// Provide statedb.RWTable[*MyObject]. Often only provided to the module with ProvidePrivate.
-//		statedb.NewTable[*MyObject]("my-objects", MyObjectIDIndex, MyObjectNameIndex),
+//		func(db *statedb.DB) (statedb.RWTable[*MyObject], error) {
+//			return NewTable(db, "my-objects", MyObjectIDIndex, MyObjectNameIndex)
+//		},
 //		// Provide the read-only statedb.Table[*MyObject].
 //		statedb.RWTable[*MyObject].ToTable,
 //	)
 func NewTable[Obj any](
+	db *DB,
 	tableName TableName,
 	primaryIndexer Indexer[Obj],
 	secondaryIndexers ...Indexer[Obj],
@@ -99,16 +103,18 @@ func NewTable[Obj any](
 			return nil, tableError(tableName, fmt.Errorf("index %q: %w", name, ErrReservedPrefix))
 		}
 	}
-	return table, nil
+	return table, db.registerTable(table)
 }
 
-// MustNewTable creates a new table with given name and indexes.
-// Panics if indexes are malformed.
+// MustNewTable creates a new table with given name and indexes, and registers
+// it with the database. Panics if indexes are malformed, or a table with the
+// same name is already registered.
 func MustNewTable[Obj any](
+	db *DB,
 	tableName TableName,
 	primaryIndexer Indexer[Obj],
 	secondaryIndexers ...Indexer[Obj]) RWTable[Obj] {
-	t, err := NewTable(tableName, primaryIndexer, secondaryIndexers...)
+	t, err := NewTable(db, tableName, primaryIndexer, secondaryIndexers...)
 	if err != nil {
 		panic(err)
 	}

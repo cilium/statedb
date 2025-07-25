@@ -66,12 +66,10 @@ var MemoStatusIndex = reconciler.NewStatusIndex((*Memo).GetStatus)
 // NewMemoTable creates and registers the memos table.
 func NewMemoTable(db *statedb.DB) (statedb.RWTable[*Memo], statedb.Index[*Memo, reconciler.StatusKind], error) {
 	tbl, err := statedb.NewTable(
+		db,
 		"memos",
 		MemoNameIndex,
 		MemoStatusIndex,
 	)
-	if err == nil {
-		err = db.RegisterTable(tbl)
-	}
 	return tbl, MemoStatusIndex, err
 }

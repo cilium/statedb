@@ -18,7 +18,6 @@ import (
 
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
-	"github.com/stretchr/testify/require"
 )
 
 // Run test with "--debug" for log output.
@@ -85,13 +84,13 @@ var valueIndex = statedb.Index[fuzzObj, uint64]{
 }
 
 var (
-	tableFuzz1  = statedb.MustNewTable("fuzz1", idIndex, valueIndex)
-	tableFuzz2  = statedb.MustNewTable("fuzz2", idIndex, valueIndex)
-	tableFuzz3  = statedb.MustNewTable("fuzz3", idIndex, valueIndex)
-	tableFuzz4  = statedb.MustNewTable("fuzz4", idIndex, valueIndex)
-	fuzzTables  = []statedb.TableMeta{tableFuzz1, tableFuzz2, tableFuzz3, tableFuzz4}
 	fuzzMetrics = statedb.NewExpVarMetrics(false)
-	fuzzDB      *statedb.DB
+	fuzzDB      = statedb.New(statedb.WithMetrics(fuzzMetrics))
+	tableFuzz1  = statedb.MustNewTable(fuzzDB, "fuzz1", idIndex, valueIndex)
+	tableFuzz2  = statedb.MustNewTable(fuzzDB, "fuzz2", idIndex, valueIndex)
+	tableFuzz3  = statedb.MustNewTable(fuzzDB, "fuzz3", idIndex, valueIndex)
+	tableFuzz4  = statedb.MustNewTable(fuzzDB, "fuzz4", idIndex, valueIndex)
+	fuzzTables  = []statedb.TableMeta{tableFuzz1, tableFuzz2, tableFuzz3, tableFuzz4}
 )
 
 func randomSubset[T any](xs []T) []T {
@@ -496,11 +495,6 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 
 func TestDB_Fuzz(t *testing.T) {
 	t.Parallel()
-
-	fuzzDB = statedb.New(statedb.WithMetrics(fuzzMetrics))
-	for _, tbl := range fuzzTables {
-		require.NoError(t, fuzzDB.RegisterTable(tbl))
-	}
 
 	fuzzDB.Start()
 	defer fuzzDB.Stop()

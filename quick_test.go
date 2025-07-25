@@ -100,10 +100,9 @@ func seqLen[A, B any](it iter.Seq2[A, B]) int {
 }
 
 func TestDB_Quick(t *testing.T) {
-	table, err := NewTable("test", aIndex, bIndex)
-	require.NoError(t, err, "NewTable")
 	db := New()
-	require.NoError(t, db.RegisterTable(table), "RegisterTable")
+	table, err := NewTable(db, "test", aIndex, bIndex)
+	require.NoError(t, err, "NewTable")
 
 	anyTable := AnyTable{table}
 
