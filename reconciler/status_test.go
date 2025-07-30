@@ -50,7 +50,7 @@ func TestStatusJSON(t *testing.T) {
 				UpdatedAt: time.Unix(1, 0).UTC(),
 				Error:     nil,
 			},
-			`{"kind":"Done","updated-at":"1970-01-01T00:00:01Z"}`,
+			`{"updated-at":"1970-01-01T00:00:01Z","kind":"Done"}`,
 		},
 		{
 			Status{
@@ -58,7 +58,7 @@ func TestStatusJSON(t *testing.T) {
 				UpdatedAt: time.Unix(2, 0).UTC(),
 				Error:     nil,
 			},
-			`{"kind":"Pending","updated-at":"1970-01-01T00:00:02Z"}`,
+			`{"updated-at":"1970-01-01T00:00:02Z","kind":"Pending"}`,
 		},
 		{
 			Status{
@@ -66,7 +66,7 @@ func TestStatusJSON(t *testing.T) {
 				UpdatedAt: time.Unix(3, 0).UTC(),
 				Error:     errp("some-error"),
 			},
-			`{"kind":"Error","updated-at":"1970-01-01T00:00:03Z","error":"some-error"}`,
+			`{"updated-at":"1970-01-01T00:00:03Z","error":"some-error","kind":"Error"}`,
 		},
 		{
 			Status{
@@ -74,7 +74,7 @@ func TestStatusJSON(t *testing.T) {
 				UpdatedAt: time.Unix(4, 0).UTC(),
 				Error:     nil,
 			},
-			`{"kind":"Refreshing","updated-at":"1970-01-01T00:00:04Z"}`,
+			`{"updated-at":"1970-01-01T00:00:04Z","kind":"Refreshing"}`,
 		},
 	}
 

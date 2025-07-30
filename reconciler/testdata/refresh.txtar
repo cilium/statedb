@@ -44,7 +44,7 @@ faulty: false
 updates: 1
 status:
     kind: Pending
-    updatedat: 2024-01-01T10:10:10.0+02:00
+    updated-at: 2024-01-01T10:10:10.0+02:00
     error: ""
     id: 2
 
@@ -54,7 +54,7 @@ faulty: false
 updates: 1
 status:
     kind: Done
-    updatedat: 2000-01-01T10:10:10.0+02:00
+    updated-at: 2000-01-01T10:10:10.0+02:00
     error: ""
     id: 1
 
