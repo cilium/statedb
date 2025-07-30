@@ -133,7 +133,7 @@ func (s StatusKind) Key() index.Key {
 type Status struct {
 	Kind      StatusKind `json:"kind" yaml:"kind"`
 	UpdatedAt time.Time  `json:"updated-at" yaml:"updated-at"`
-	Error     string     `json:"error,omitempty" yaml:"error,omitempty"`
+	Error     *string    `json:"error,omitempty" yaml:"error,omitempty"`
 
 	// id is a unique identifier for a pending object.
 	// The reconciler uses this to compare whether the object
@@ -149,9 +149,16 @@ func (s Status) IsPendingOrRefreshing() bool {
 
 func (s Status) String() string {
 	if s.Kind == StatusKindError {
-		return fmt.Sprintf("Error: %s (%s ago)", s.Error, internal.PrettySince(s.UpdatedAt))
+		return fmt.Sprintf("Error: %s (%s ago)", s.GetError(), internal.PrettySince(s.UpdatedAt))
 	}
 	return fmt.Sprintf("%s (%s ago)", s.Kind, internal.PrettySince(s.UpdatedAt))
+}
+
+func (s Status) GetError() string {
+	if s.Error == nil {
+		return ""
+	}
+	return *s.Error
 }
 
 var idGen atomic.Uint64
@@ -168,7 +175,7 @@ func StatusPending() Status {
 	return Status{
 		Kind:      StatusKindPending,
 		UpdatedAt: time.Now(),
-		Error:     "",
+		Error:     nil,
 		ID:        nextID(),
 	}
 }
@@ -185,7 +192,7 @@ func StatusRefreshing() Status {
 	return Status{
 		Kind:      StatusKindRefreshing,
 		UpdatedAt: time.Now(),
-		Error:     "",
+		Error:     nil,
 		ID:        nextID(),
 	}
 }
@@ -196,7 +203,7 @@ func StatusDone() Status {
 	return Status{
 		Kind:      StatusKindDone,
 		UpdatedAt: time.Now(),
-		Error:     "",
+		Error:     nil,
 		ID:        nextID(),
 	}
 }
@@ -204,10 +211,14 @@ func StatusDone() Status {
 // statusError constructs the status that marks the object
 // as failed to be reconciled.
 func StatusError(err error) Status {
+	errStr := "<nil>"
+	if err != nil {
+		errStr = err.Error()
+	}
 	return Status{
 		Kind:      StatusKindError,
 		UpdatedAt: time.Now(),
-		Error:     err.Error(),
+		Error:     &errStr,
 		ID:        nextID(),
 	}
 }
@@ -272,7 +283,7 @@ func (s StatusSet) String() string {
 		case StatusKindDone:
 			done = append(done, status.name)
 		case StatusKindError:
-			errored = append(errored, status.name+" ("+status.Error+")")
+			errored = append(errored, status.name+" ("+status.GetError()+")")
 		default:
 			pending = append(pending, status.name)
 		}

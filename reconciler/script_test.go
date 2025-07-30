@@ -273,7 +273,7 @@ func (t *testObject) TableRow() []string {
 		strconv.FormatUint(t.ID, 10),
 		strconv.FormatBool(t.Faulty),
 		string(t.Status.Kind),
-		t.Status.Error,
+		t.Status.GetError(),
 	}
 }
 

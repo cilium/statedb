@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func errp(s string) *string {
+	return &s
+}
+
 func TestStatusString(t *testing.T) {
 	now := time.Now()
 
-	s := Status{
-		Kind:      StatusKindPending,
-		UpdatedAt: now,
-		Error:     "",
-	}
+	s := StatusPending()
 	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 	s.UpdatedAt = now.Add(-time.Hour)
 	assert.Regexp(t, `Pending \([0-9]+\.[0-9]+h ago\)`, s.String())
@@ -28,16 +28,15 @@ func TestStatusString(t *testing.T) {
 	s = Status{
 		Kind:      StatusKindDone,
 		UpdatedAt: now,
-		Error:     "",
+		Error:     nil,
 	}
 	assert.Regexp(t, `Done \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 
-	s = Status{
-		Kind:      StatusKindError,
-		UpdatedAt: now,
-		Error:     "hey I'm an error",
-	}
+	s = StatusError(errors.New("hey I'm an error"))
 	assert.Regexp(t, `Error: hey I'm an error \([0-9]+\.[0-9]+.+s ago\)`, s.String())
+
+	s = StatusError(nil)
+	assert.Regexp(t, `Error: <nil> \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 }
 
 func TestStatusJSON(t *testing.T) {
@@ -49,7 +48,7 @@ func TestStatusJSON(t *testing.T) {
 			Status{
 				Kind:      StatusKindDone,
 				UpdatedAt: time.Unix(1, 0).UTC(),
-				Error:     "",
+				Error:     nil,
 			},
 			`{"kind":"Done","updated-at":"1970-01-01T00:00:01Z"}`,
 		},
@@ -57,7 +56,7 @@ func TestStatusJSON(t *testing.T) {
 			Status{
 				Kind:      StatusKindPending,
 				UpdatedAt: time.Unix(2, 0).UTC(),
-				Error:     "",
+				Error:     nil,
 			},
 			`{"kind":"Pending","updated-at":"1970-01-01T00:00:02Z"}`,
 		},
@@ -65,7 +64,7 @@ func TestStatusJSON(t *testing.T) {
 			Status{
 				Kind:      StatusKindError,
 				UpdatedAt: time.Unix(3, 0).UTC(),
-				Error:     "some-error",
+				Error:     errp("some-error"),
 			},
 			`{"kind":"Error","updated-at":"1970-01-01T00:00:03Z","error":"some-error"}`,
 		},
@@ -73,7 +72,7 @@ func TestStatusJSON(t *testing.T) {
 			Status{
 				Kind:      StatusKindRefreshing,
 				UpdatedAt: time.Unix(4, 0).UTC(),
-				Error:     "",
+				Error:     nil,
 			},
 			`{"kind":"Refreshing","updated-at":"1970-01-01T00:00:04Z"}`,
 		},
