@@ -39,7 +39,13 @@ func Test_Regression_29324(t *testing.T) {
 	}
 
 	db, _, _ := newTestDB(t)
-	table, err := NewTable(db, "objects", idIndex, tagIndex)
+	table, err := NewTableAny(
+		db,
+		"objects",
+		func() []string { return nil },
+		func(object) []string { return nil },
+		idIndex,
+		tagIndex)
 	require.NoError(t, err)
 
 	wtxn := db.WriteTxn(table)
@@ -198,7 +204,13 @@ func Test_Regression_Prefix_NonUnique(t *testing.T) {
 	}
 
 	db, _, _ := newTestDB(t)
-	table, err := NewTable(db, "objects", idIndex, tagIndex)
+	table, err := NewTableAny(
+		db,
+		"objects",
+		func() []string { return nil },
+		func(object) []string { return nil },
+		idIndex,
+		tagIndex)
 	require.NoError(t, err)
 
 	wtxn := db.WriteTxn(table)

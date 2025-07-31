@@ -39,9 +39,21 @@ type quickObj struct {
 	A, B string
 }
 
+// TableHeader implements TableWritable.
+func (q quickObj) TableHeader() []string {
+	return []string{"A", "B"}
+}
+
+// TableRow implements TableWritable.
+func (q quickObj) TableRow() []string {
+	return []string{q.A, q.B}
+}
+
 func (q quickObj) String() string {
 	return fmt.Sprintf("%x %x", []byte(q.A), []byte(q.B))
 }
+
+var _ TableWritable = quickObj{}
 
 var (
 	aIndex = Index[quickObj, string]{

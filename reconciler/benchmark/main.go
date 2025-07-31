@@ -41,6 +41,21 @@ type testObject struct {
 	status reconciler.Status
 }
 
+// TableHeader implements statedb.TableWritable.
+func (t testObject) TableHeader() []string {
+	return []string{"id", "status"}
+}
+
+// TableRow implements statedb.TableWritable.
+func (t testObject) TableRow() []string {
+	return []string{
+		fmt.Sprintf("%d", t.id),
+		t.status.String(),
+	}
+}
+
+var _ statedb.TableWritable = testObject{}
+
 func (t *testObject) GetStatus() reconciler.Status {
 	return t.status
 }

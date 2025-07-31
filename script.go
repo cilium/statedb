@@ -82,8 +82,8 @@ func DBCmd(db *DB) script.Cmd {
 			fmt.Fprintf(w, "Name\tObject count\tZombie objects\tIndexes\tInitializers\tGo type\tLast WriteTxn\n")
 			for _, tbl := range tbls {
 				idxs := strings.Join(tbl.Indexes(), ", ")
-				fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%v\t%T\t%s\n",
-					tbl.Name(), tbl.NumObjects(txn), tbl.numDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.proto(), tbl.getAcquiredInfo())
+				fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%v\t%s\t%s\n",
+					tbl.Name(), tbl.NumObjects(txn), tbl.numDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.typeName(), tbl.getAcquiredInfo())
 			}
 			w.Flush()
 			return nil, nil
@@ -746,7 +746,7 @@ func writeObjects(tbl *AnyTable, it iter.Seq2[any, Revision], w io.Writer, colum
 		fmt.Fprintf(tw, "%s\n", strings.Join(header, "\t"))
 
 		for obj := range it {
-			row := takeColumns(obj.(TableWritable).TableRow(), idxs)
+			row := takeColumns(tbl.TableRow(obj), idxs)
 			fmt.Fprintf(tw, "%s\n", strings.Join(row, "\t"))
 		}
 		return tw.Flush()

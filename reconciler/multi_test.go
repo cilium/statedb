@@ -6,6 +6,7 @@ package reconciler_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"iter"
 	"log/slog"
 	"sync/atomic"
@@ -27,6 +28,21 @@ type multiStatusObject struct {
 	ID       uint64
 	Statuses reconciler.StatusSet
 }
+
+// TableHeader implements statedb.TableWritable.
+func (m multiStatusObject) TableHeader() []string {
+	return []string{"ID", "Statuses"}
+}
+
+// TableRow implements statedb.TableWritable.
+func (m multiStatusObject) TableRow() []string {
+	return []string{
+		fmt.Sprintf("%d", m.ID),
+		m.Statuses.String(),
+	}
+}
+
+var _ statedb.TableWritable = multiStatusObject{}
 
 func (m *multiStatusObject) Clone() *multiStatusObject {
 	m2 := *m

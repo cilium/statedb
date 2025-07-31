@@ -29,6 +29,18 @@ type Memo struct {
 	Status  reconciler.Status // reconciliation status
 }
 
+// TableHeader implements statedb.TableWritable.
+func (memo Memo) TableHeader() []string {
+	return []string{"Name", "Content", "Status"}
+}
+
+// TableRow implements statedb.TableWritable.
+func (memo Memo) TableRow() []string {
+	return []string{memo.Name, memo.Content, memo.Status.String()}
+}
+
+var _ statedb.TableWritable = Memo{}
+
 // GetStatus returns the reconciliation status. Used to provide the
 // reconciler access to it.
 func (memo *Memo) GetStatus() reconciler.Status {
