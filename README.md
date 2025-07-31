@@ -56,6 +56,16 @@ type MyObject struct {
   Foo string
 }
 
+// Define header for a formatted table (db/show command)
+func (o *MyObject) TableHeader() []string {
+  return []string{"ID", "Foo"}
+}
+
+// Define how to show the object in a formatted table
+func (o *MyObject) TableRow() []string {
+  return []string{strconv.FormatUInt(uint64(o.ID), 10), o.Foo}
+}
+
 // Define how to index and query the object.
 var IDIndex = statedb.Index[*MyObject, uint32]{
   Name: "id",
@@ -164,6 +174,16 @@ type Tag = string
 type MyObject struct {
   ID ID              // Identifier
   Tags part.Set[Tag] // Set of tags
+}
+
+// Define header for a formatted table (db/show command)
+func (o *MyObject) TableHeader() []string {
+  return []string{"ID", "Foo"}
+}
+
+// Define how to show the object in a formatted table
+func (o *MyObject) TableRow() []string {
+  return []string{strconv.FormatUInt(uint64(o.ID), 10), o.Foo}
 }
 ```
 
