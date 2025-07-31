@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"testing"
@@ -24,6 +25,21 @@ type derived struct {
 	ID      uint64
 	Deleted bool
 }
+
+// TableHeader implements TableWritable.
+func (d derived) TableHeader() []string {
+	return []string{"ID", "Deleted"}
+}
+
+// TableRow implements TableWritable.
+func (d derived) TableRow() []string {
+	return []string{
+		fmt.Sprintf("%d", d.ID),
+		fmt.Sprintf("%v", d.Deleted),
+	}
+}
+
+var _ TableWritable = derived{}
 
 var derivedIdIndex = Index[derived, uint64]{
 	Name: "id",

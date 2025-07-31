@@ -503,7 +503,7 @@ func BenchmarkDB_FullIteration_ReadTxnGet(b *testing.B) {
 	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-type testObject2 testObject
+type testObject2 struct{ testObject }
 
 var (
 	id2Index = Index[testObject2, uint64]{
@@ -577,7 +577,7 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		seq, watch1 = table1.LowerBoundWatch(txn, ByRevision[testObject](revision))
 		wtxn = db.WriteTxn(table2)
 		for obj := range seq {
-			table2.Insert(wtxn, testObject2(obj))
+			table2.Insert(wtxn, testObject2{obj})
 		}
 		wtxn.Commit()
 		revision = table1.Revision(txn)

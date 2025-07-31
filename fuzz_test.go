@@ -55,6 +55,24 @@ type fuzzObj struct {
 	value uint64
 }
 
+// TableHeader implements statedb.TableWritable.
+func (f fuzzObj) TableHeader() []string {
+	return []string{
+		"id",
+		"value",
+	}
+}
+
+// TableRow implements statedb.TableWritable.
+func (f fuzzObj) TableRow() []string {
+	return []string{
+		f.id,
+		fmt.Sprintf("%d", f.value),
+	}
+}
+
+var _ statedb.TableWritable = fuzzObj{}
+
 func mkID() string {
 	// We use a string hex presentation instead of the raw uint64 so we get
 	// a wide range of different length keys and different prefixes.
