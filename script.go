@@ -66,7 +66,7 @@ func DBCmd(db *DB) script.Cmd {
 				"one    1",
 				"two    2",
 				"",
-				"> db/prefix -index=id example o",
+				"> db/prefix --index=id example o",
 				"Name   X",
 				"one    1",
 				"",
@@ -173,9 +173,9 @@ func ShowCmd(db *DB) script.Cmd {
 				"a file instead with the -o flag.",
 				"",
 				"By default the table is shown in the table format.",
-				"For YAML use '-format=yaml' and for JSON use '-format=json'",
+				"For YAML use '--format=yaml' and for JSON use '--format=json'",
 				"",
-				"To only show specific columns use the '-columns' flag. The",
+				"To only show specific columns use the '--columns' flag. The",
 				"columns are as specified by 'TableHeader()' method.",
 				"This flag is only supported with 'table' formatting.",
 			},
@@ -235,13 +235,13 @@ func CompareCmd(db *DB) script.Cmd {
 				"The comparison is retried until a timeout (1s default).",
 				"",
 				"The file should be formatted in the same style as",
-				"the output from 'db/show -format=table'. Indentation",
+				"the output from 'db/show --format=table'. Indentation",
 				"does not matter as long as header is aligned with the data.",
 				"",
 				"Not all columns need to be specified. Remove the columns",
 				"from the file you do not want compared.",
 				"",
-				"The rows can be filtered with the -grep flag.",
+				"The rows can be filtered with the --grep flag.",
 			},
 		},
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
@@ -691,7 +691,7 @@ func firstOfSeq2[A, B any](it iter.Seq2[A, B]) iter.Seq2[A, B] {
 
 func writeObjects(tbl *AnyTable, it iter.Seq2[any, Revision], w io.Writer, columns []string, format string) error {
 	if len(columns) > 0 && format != "table" {
-		return fmt.Errorf("-columns not supported with non-table formats")
+		return fmt.Errorf("--columns not supported with non-table formats")
 	}
 	switch format {
 	case "yaml":
