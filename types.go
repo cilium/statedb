@@ -310,7 +310,8 @@ type Index[Obj any, Key any] struct {
 	Name string
 
 	// FromObject extracts key(s) from the object. The key set
-	// can contain 0, 1 or more keys.
+	// can contain 0, 1 or more keys. Must contain exactly one
+	// key for primary indices.
 	FromObject func(obj Obj) index.KeySet
 
 	// FromKey converts the index key into a raw key.
