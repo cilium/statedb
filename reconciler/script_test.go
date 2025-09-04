@@ -34,13 +34,12 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 	log := hivetest.Logger(t)
 
 	var (
-		ops                 = &mockOps{}
-		db                  *statedb.DB
-		r                   reconciler.Reconciler[*testObject]
-		reconcilerParams    reconciler.Params
-		reconcilerLifecycle = &cell.DefaultLifecycle{}
-		markInit            func()
-		testObjects         statedb.RWTable[*testObject]
+		ops              = &mockOps{}
+		db               *statedb.DB
+		r                reconciler.Reconciler[*testObject]
+		reconcilerParams reconciler.Params
+		markInit         func()
+		testObjects      statedb.RWTable[*testObject]
 	)
 
 	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
@@ -65,7 +64,9 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 			cell.Provide(
 				func() reconciler.Metrics {
 					return expVarMetrics
-				}),
+				},
+				job.Registry.NewGroup,
+			),
 
 			cell.Invoke(
 				func(db_ *statedb.DB, p_ reconciler.Params) (err error) {
@@ -73,12 +74,6 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 					reconcilerParams = p_
 					testObjects, err = statedb.NewTable(db, "test-objects", idIndex)
 					return err
-				},
-
-				func(lc cell.Lifecycle) {
-					lc.Append(cell.Hook{
-						OnStop: func(ctx cell.HookContext) error { return reconcilerLifecycle.Stop(log, ctx) },
-					})
 				},
 
 				func(h *cell.SimpleHealth) {
@@ -128,7 +123,6 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 					return nil, fmt.Errorf("unexpected arg, expected 'with-prune', 'with-batchops' or 'with-refresh'")
 				}
 			}
-			reconcilerParams.Lifecycle = reconcilerLifecycle
 			r, err = reconciler.Register(
 				reconcilerParams,
 				testObjects,
@@ -141,7 +135,7 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 			if err != nil {
 				return nil, err
 			}
-			return nil, reconcilerLifecycle.Start(log, context.TODO())
+			return nil, nil
 		},
 	)
 
