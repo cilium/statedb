@@ -142,6 +142,7 @@ func main() {
 				func() (*mockOps, reconciler.Operations[*testObject]) {
 					return mt, mt
 				},
+				job.Registry.NewGroup,
 			),
 			cell.Invoke(func(params reconciler.Params) error {
 				_, err := reconciler.Register(

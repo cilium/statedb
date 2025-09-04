@@ -121,6 +121,10 @@ var Hive = hive.NewWithOptions(
 		cell.Config(Config{}),
 
 		cell.Provide(
+			// Provide a job.Group for the reconciler's jobs. Note that in cilium/cilium
+			// this is automatically provided as part of cell.Module.
+			job.Registry.NewGroup,
+
 			// Create and register the RWTable[*Memo]
 			NewMemoTable,
 
