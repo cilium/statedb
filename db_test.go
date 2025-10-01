@@ -838,6 +838,12 @@ func TestDB_GetList(t *testing.T) {
 	default:
 	}
 
+	// Test QueryFromKey
+	obj, rev, ok = table.Get(txn, idIndex.QueryFromKey(index.Uint64(1)))
+	require.True(t, ok, "expected Get(1) to return result")
+	require.NotZero(t, rev, "expected non-zero revision")
+	require.EqualValues(t, obj.ID, 1, "expected first obj.ID to equal 1")
+
 	// Modify the testObject(2) to trigger closing of the watch channels.
 	wtxn := db.WriteTxn(table)
 	_, hadOld, err := table.Insert(wtxn, testObject{ID: uint64(2), Tags: part.NewSet("even", "modified")})

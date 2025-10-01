@@ -383,6 +383,16 @@ func (i Index[Obj, Key]) QueryFromObject(obj Obj) Query[Obj] {
 	}
 }
 
+// QueryFromKey constructs a query against the index using the given
+// user-supplied key. Be careful when using this and prefer [Index.Query]
+// over this if possible.
+func (i Index[Obj, Key]) QueryFromKey(key index.Key) Query[Obj] {
+	return Query[Obj]{
+		index: i.Name,
+		key:   key,
+	}
+}
+
 func (i Index[Obj, Key]) ObjectToKey(obj Obj) index.Key {
 	return i.encodeKey(i.FromObject(obj).First())
 }
