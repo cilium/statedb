@@ -89,11 +89,11 @@ func TestHeaderLine(t *testing.T) {
 		require.Equal(t, tc.pos, pos)
 
 		// Split the header line with the parsed positions.
-		header := splitByPositions(tc.line, pos)
+		header := splitByPositions(tc.line, pos, false)
 		require.Equal(t, tc.names, header)
 
 		// Join the headers with the positions.
-		line := joinByPositions(header, pos)
+		line := joinByPositions(header, pos, false)
 		require.Equal(t, strings.TrimRight(tc.line, " \t"), line)
 
 		// Test retrievals
@@ -105,7 +105,7 @@ func TestHeaderLine(t *testing.T) {
 
 			row := slices.Clone(header)
 			cols := takeColumns(row, idxs)
-			line := joinByPositions(cols, pos)
+			line := joinByPositions(cols, pos, false)
 			require.Equal(t, line, r.header)
 		}
 	}
