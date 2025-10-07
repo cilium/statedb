@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,6 +79,7 @@ func DBCmd(db *DB) script.Cmd {
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			txn := db.ReadTxn()
 			tbls := db.GetTables(txn)
+			slices.SortFunc(tbls, func(a, b TableMeta) int { return cmp.Compare(a.Name(), b.Name()) })
 			w := newTabWriter(s.LogWriter())
 			fmt.Fprintf(w, "Name\tObject count\tZombie objects\tIndexes\tInitializers\tGo type\tLast WriteTxn\n")
 			for _, tbl := range tbls {
