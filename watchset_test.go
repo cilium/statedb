@@ -22,9 +22,9 @@ func TestWatchSet(t *testing.T) {
 	// Empty watch set, cancelled context.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	ch, err := ws.Wait(ctx, time.Second)
+	chs, err := ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, ch)
+	require.Empty(t, chs)
 
 	// Few channels, cancelled context.
 	ch1 := make(chan struct{})
@@ -33,9 +33,35 @@ func TestWatchSet(t *testing.T) {
 	ws.Add(ch1, ch2, ch3)
 	ctx, cancel = context.WithCancel(context.Background())
 	cancel()
-	ch, err = ws.Wait(ctx, time.Second)
+	chs, err = ws.Wait(ctx, time.Second)
 	require.ErrorIs(t, err, context.Canceled)
-	require.Nil(t, ch)
+	require.Empty(t, chs)
+
+	// Few channels, timed out context. With tiny 'settleTime' we wait for the context to cancel.
+	duration := 10 * time.Millisecond
+	ctx, cancel = context.WithTimeout(context.Background(), duration)
+	t0 := time.Now()
+	chs, err = ws.Wait(ctx, time.Nanosecond)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Empty(t, chs)
+	require.True(t, time.Since(t0) > duration, "expected to wait until context cancels")
+	cancel()
+
+	// One closed channel. Should wait until 'settleTime' expires.
+	close(ch1)
+	t0 = time.Now()
+	chs, err = ws.Wait(context.Background(), duration)
+	require.NoError(t, err)
+	require.ElementsMatch(t, chs, []<-chan struct{}{ch1})
+	require.True(t, time.Since(t0) > duration, "expected to wait until settle time expires")
+
+	// One closed channel, 0 wait time.
+	ws = NewWatchSet()
+	ws.Add(ch2)
+	close(ch2)
+	chs, err = ws.Wait(context.Background(), 0)
+	require.NoError(t, err)
+	require.ElementsMatch(t, chs, []<-chan struct{}{ch2})
 
 	// Many channels
 	for _, numChans := range []int{2, 16, 31, 1024} {
