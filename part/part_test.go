@@ -1280,3 +1280,27 @@ func Benchmark_Hashmap_Get_Bytes(b *testing.B) {
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
+
+func Benchmark_Delete_Random(b *testing.B) {
+	tree := New[int](RootOnlyWatch)
+	numObjects := 100000
+	keys := []uint64{}
+	for j := range numObjects {
+		_, _, tree = tree.Insert(uint64Key(uint64(j)), j)
+		keys = append(keys, uint64(j))
+	}
+	b.ResetTimer()
+
+	// Shuffle the keys for random deletion order
+	rand.Shuffle(len(keys), func(i, j int) {
+		keys[i], keys[j] = keys[j], keys[i]
+	})
+
+	for b.Loop() {
+		txn := tree.Txn()
+		for _, k := range keys {
+			txn.Delete(uint64Key(k))
+		}
+	}
+	b.ReportMetric(float64(numObjects*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
