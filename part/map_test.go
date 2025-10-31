@@ -274,6 +274,96 @@ func TestSingletonMap(t *testing.T) {
 	check(m3)
 }
 
+func TestMapTxn(t *testing.T) {
+	var m Map[string, int]
+
+	// Empty map
+	txn := m.Txn()
+	v, found := txn.Get("bar")
+	assert.False(t, found)
+	assert.Equal(t, 0, v)
+	assert.Equal(t, 0, txn.Len())
+
+	tree := txn.Commit()
+	assert.Equal(t, 0, tree.Len())
+	assert.Nil(t, tree.tree)
+	assert.Nil(t, tree.singleton)
+
+	// Add foo=>42
+	txn = m.Txn()
+	txn.Set("foo", 42)
+	assert.Equal(t, 1, txn.Len())
+	v, found = txn.Get("foo")
+	assert.True(t, found)
+	assert.Equal(t, 42, v)
+	v, found = txn.Get("bar")
+	assert.False(t, found)
+	assert.Equal(t, 0, v)
+
+	tree = txn.Commit()
+	assert.Equal(t, 1, tree.Len())
+	assert.Nil(t, tree.tree)
+	assert.NotNil(t, tree.singleton)
+	v, found = tree.Get("foo")
+	assert.True(t, found)
+	assert.Equal(t, 42, v)
+
+	// Set foo=>17, bar=>88
+	txn = m.Txn()
+	txn.Set("foo", 17)
+	txn.Set("bar", 88)
+
+	// Old value should be unmodified
+	v, found = tree.Get("foo")
+	assert.True(t, found)
+	assert.Equal(t, 42, v)
+
+	assert.Equal(t, 2, txn.Len())
+	v, found = txn.Get("foo")
+	assert.True(t, found)
+	assert.Equal(t, 17, v)
+	v, found = txn.Get("bar")
+	assert.True(t, found)
+	assert.Equal(t, 88, v)
+
+	mp := maps.Collect(txn.Prefix(""))
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"foo": 17, "bar": 88}, mp)
+	mp = maps.Collect(txn.Prefix("f"))
+	assert.Len(t, mp, 1)
+	assert.Equal(t, map[string]int{"foo": 17}, mp)
+
+	mp = maps.Collect(txn.LowerBound(""))
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"foo": 17, "bar": 88}, mp)
+	mp = maps.Collect(txn.LowerBound("c"))
+	assert.Len(t, mp, 1)
+	assert.Equal(t, map[string]int{"foo": 17}, mp)
+
+	mp = maps.Collect(txn.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"foo": 17, "bar": 88}, mp)
+
+	tree = txn.Commit()
+	assert.Equal(t, 2, tree.Len())
+	assert.NotNil(t, tree.tree)
+	assert.Nil(t, tree.singleton)
+	mp = maps.Collect(tree.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"foo": 17, "bar": 88}, mp)
+
+	txn = m.Txn()
+	txn.Set("foo", 17)
+	txn.Set("bar", 88)
+	txn.Delete("foo")
+	assert.Equal(t, 1, txn.Len())
+	v, found = txn.Get("foo")
+	assert.False(t, found)
+	v, found = txn.Get("bar")
+	assert.True(t, found)
+	assert.Equal(t, 88, v)
+}
+
 func TestUint64Map(t *testing.T) {
 	// TestStringMap tests most of the operations. We just check here that
 	// fromBytes and toBytes work and can iterate in the right order.
@@ -401,6 +491,79 @@ func Benchmark_Uint64Map_Sequential(b *testing.B) {
 			if !ok || v != i {
 				b.Fatalf("Get did not return value")
 			}
+		}
+	}
+	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
+}
+
+func Benchmark_Uint64Map_Sequential_Insert(b *testing.B) {
+	numItems := 1000
+
+	for b.Loop() {
+		var m Map[uint64, int]
+		for i := range numItems {
+			k := uint64(i)
+			m = m.Set(k, i)
+		}
+		if m.Len() != numItems {
+			b.Fatalf("expected %d items, got %d", numItems, m.Len())
+		}
+	}
+	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
+}
+
+func Benchmark_Uint64Map_Sequential_Txn_Insert(b *testing.B) {
+	numItems := 1000
+	for b.Loop() {
+		var m Map[uint64, int]
+		txn := m.Txn()
+		for i := range numItems {
+			k := uint64(i)
+			txn.Set(k, i)
+		}
+		m = txn.Commit()
+		if m.Len() != numItems {
+			b.Fatalf("expected %d items, got %d", numItems, m.Len())
+		}
+	}
+	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
+}
+
+func Benchmark_Uint64Map_Random_Insert(b *testing.B) {
+	numItems := 1000
+	keys := map[uint64]int{}
+	for len(keys) < numItems {
+		k := uint64(rand.Int64())
+		keys[k] = int(k)
+	}
+	for b.Loop() {
+		var m Map[uint64, int]
+		for k, v := range keys {
+			m = m.Set(k, v)
+		}
+		if m.Len() != numItems {
+			b.Fatalf("expected %d items, got %d", numItems, m.Len())
+		}
+	}
+	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
+}
+
+func Benchmark_Uint64Map_Random_Txn_Insert(b *testing.B) {
+	numItems := 1000
+	keys := map[uint64]int{}
+	for len(keys) < numItems {
+		k := uint64(rand.Int64())
+		keys[k] = int(k)
+	}
+	for b.Loop() {
+		var m Map[uint64, int]
+		txn := m.Txn()
+		for k, v := range keys {
+			txn.Set(k, v)
+		}
+		m = txn.Commit()
+		if m.Len() != numItems {
+			b.Fatalf("expected %d items, got %d", numItems, m.Len())
 		}
 	}
 	b.ReportMetric(float64(numItems*b.N)/b.Elapsed().Seconds(), "items/sec")
