@@ -407,6 +407,8 @@ type MapTxn[K, V any] struct {
 	txn              *Txn[mapKVPair[K, V]]
 }
 
+// Commit the transaction returning a new map.
+// The transaction can be used again for further modifications.
 func (txn MapTxn[K, V]) Commit() (m Map[K, V]) {
 	m.bytesFromKeyFunc = txn.bytesFromKeyFunc
 	switch txn.txn.Len() {

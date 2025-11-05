@@ -159,6 +159,7 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 // To close the watch channels call Notify(). You must call Notify() before
 // Tree.Txn().
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
+	txn.mutated.clear()
 	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
 	if !txn.opts.noCache() {
 		t.txn = txn
