@@ -45,6 +45,7 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		txn := tree.Txn()
 		txn.Insert([]byte("abc"), 1)
+
 		_, _, watch_ab := txn.InsertWatch([]byte("ab"), 2)
 		txn.Insert([]byte("abd"), 3)
 		tree = txn.CommitAndNotify()
@@ -62,6 +63,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		assertOpen(t, w4)
 
 		_, _, tree = tree.Insert([]byte("ab"), 42)
+
 		assertClosed(t, w)
 		assertClosed(t, w2)
 		assertClosed(t, watch_ab)
@@ -161,6 +163,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		assert.True(t, found)
 		_, w2, found := tree.Get([]byte("aa"))
 		assert.False(t, found)
+
 		assert.NotEqual(t, w, w2, "did not expect Get(aa) to return watch channel of Get(a)")
 		assertOpen(t, w2)
 
@@ -225,18 +228,59 @@ func uint32Key(n uint32) []byte {
 
 func Test_simple_delete(t *testing.T) {
 	tree := New[uint64]()
+
+	_, _, found := tree.Get(uint64Key(1))
+	require.False(t, found)
+
 	txn := tree.Txn()
 
 	_, hadOld := txn.Insert(uint64Key(1), 1)
 	require.False(t, hadOld)
 
-	_, hadOld = txn.Insert(uint64Key(2), 2)
-	require.False(t, hadOld)
+	_, watch, found := txn.Get(uint64Key(1))
+	require.True(t, found)
+
+	select {
+	case <-watch:
+	default:
+	}
 
 	_, hadOld = txn.Delete(uint64Key(1))
 	require.True(t, hadOld)
 
-	_, _, ok := txn.Get(uint64Key(1))
+	_, hadOld = txn.Delete(uint64Key(1))
+	require.False(t, hadOld)
+
+	_, _, found = txn.Get(uint64Key(1))
+	require.False(t, found)
+
+	tree = txn.CommitAndNotify()
+
+	select {
+	case <-watch:
+	}
+
+	txn = tree.Txn()
+
+	_, hadOld = txn.Insert(uint64Key(1), 1)
+	require.False(t, hadOld)
+
+	_, hadOld = txn.Insert(uint64Key(2), 2)
+	require.False(t, hadOld)
+
+	_, hadOld = txn.Insert(uint64Key(3), 3)
+	require.False(t, hadOld)
+
+	_, hadOld = txn.Insert(uint64Key(4), 4)
+	require.False(t, hadOld)
+
+	_, hadOld = txn.Insert(uint64Key(5), 5)
+	require.False(t, hadOld)
+
+	_, hadOld = txn.Delete(uint64Key(5))
+	require.True(t, hadOld)
+
+	_, _, ok := txn.Get(uint64Key(5))
 	require.False(t, ok)
 }
 
@@ -1046,6 +1090,25 @@ func Test_fork_with_cache(t *testing.T) {
 	// Transaction allocation is reused when it has been already committed.
 	txn3 := tree3.Txn()
 	require.Same(t, txn2, txn3)
+}
+
+func TestEmptyKey(t *testing.T) {
+	// Must be able to insert empty key into empty tree
+	tree := New[int]()
+	_, _, tree = tree.Insert([]byte(""), 1)
+	require.Equal(t, 1, tree.Len())
+	_, _, tree = tree.Insert([]byte(""), 1)
+	require.Equal(t, 1, tree.Len())
+
+	v, _, found := tree.Get([]byte(""))
+	require.True(t, found)
+	require.Equal(t, 1, v)
+
+	// Must be able to insert empty key into non-empty tree
+	tree = New[int]()
+	_, _, tree = tree.Insert([]byte("foo"), 2)
+	_, _, tree = tree.Insert([]byte(""), 1)
+	require.Equal(t, 2, tree.Len())
 }
 
 func Benchmark_Insert_RootOnlyWatch(b *testing.B) {

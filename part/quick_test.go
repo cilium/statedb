@@ -43,7 +43,7 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 
 		val, watchAfter, found := txn.Get([]byte(key))
 		if !found {
-			return "inserted value not found"
+			return fmt.Sprintf("inserted value not found for %q", key)
 		}
 		if val != value {
 			return fmt.Sprintf("mismatching value %q vs %q", val, value)

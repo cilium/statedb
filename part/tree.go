@@ -4,6 +4,7 @@
 package part
 
 import "sync/atomic"
+import "fmt"
 
 // Tree is a persistent (immutable) adaptive radix tree. It supports
 // map-like operations on values keyed by []byte and additionally
@@ -11,10 +12,11 @@ import "sync/atomic"
 // has an associated channel that is closed when that node is mutated.
 // This allows watching any part of the tree (any prefix) for changes.
 type Tree[T any] struct {
-	root    *header[T]
-	size    int // the number of objects in the tree
-	opts    options
-	prevTxn atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
+	root      *header[T]
+	rootWatch chan struct{}
+	size      int // the number of objects in the tree
+	opts      options
+	prevTxn   atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
 }
 
 // New constructs a new tree.
@@ -24,9 +26,10 @@ func New[T any](opts ...Option) *Tree[T] {
 		opt(&o)
 	}
 	t := &Tree[T]{
-		root: newNode4[T](),
-		size: 0,
-		opts: o,
+		root:      nil,
+		rootWatch: make(chan struct{}),
+		size:      0,
+		opts:      o,
 	}
 	return t
 }
@@ -64,11 +67,13 @@ func (t *Tree[T]) Txn() *Txn[T] {
 		txn = prevTxn
 		txn.mutated.clear()
 		clear(txn.watches)
+		txn.dirty = false
 	} else {
 		txn = newTxn[T](t.opts)
 	}
 	txn.opts = t.opts
 	txn.root = t.root
+	txn.rootWatch = t.rootWatch
 	txn.size = t.size
 	return txn
 }
@@ -83,9 +88,9 @@ func (t *Tree[T]) Len() int {
 // modification to the key) and boolean which is true if
 // value was found.
 func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
-	value, watch, ok := search(t.root, key)
+	value, watch, ok := search(t.root, t.rootWatch, key)
 	if t.opts.rootOnlyWatch() {
-		watch = t.root.watch
+		watch = t.rootWatch
 	}
 	return value, watch, ok
 }
@@ -94,9 +99,9 @@ func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // given prefix, and a channel that closes when any objects matching
 // the given prefix are upserted or deleted.
 func (t *Tree[T]) Prefix(prefix []byte) (*Iterator[T], <-chan struct{}) {
-	iter, watch := prefixSearch(t.root, prefix)
+	iter, watch := prefixSearch(t.root, t.rootWatch, prefix)
 	if t.opts.rootOnlyWatch() {
-		watch = t.root.watch
+		watch = t.rootWatch
 	}
 	return iter, watch
 }
@@ -105,7 +110,7 @@ func (t *Tree[T]) Prefix(prefix []byte) (*Iterator[T], <-chan struct{}) {
 // Since this is the channel associated with the root, this closes
 // when there are any changes to the tree.
 func (t *Tree[T]) RootWatch() <-chan struct{} {
-	return t.root.watch
+	return t.rootWatch
 }
 
 // LowerBound returns an iterator for all keys that have a value
@@ -150,5 +155,6 @@ func (t *Tree[T]) Iterator() *Iterator[T] {
 
 // PrintTree to the standard output. For debugging.
 func (t *Tree[T]) PrintTree() {
+	fmt.Printf("rootWatch: %p %v\n", t.rootWatch, isClosedChan(t.rootWatch))
 	t.root.printTree(0)
 }
