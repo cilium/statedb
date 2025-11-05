@@ -437,17 +437,18 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 	size := parent.size()
 	// Check if the node should be demoted.
 	switch {
-	case parent.kind() == nodeKind256 && size <= 49:
+	case (parent.kind() == nodeKind256 || parent.kind() == nodeKindDynamic) && size <= 49:
 		demoted := (&node48[T]{header: *parent}).self()
 		demoted.setKind(nodeKind48)
 		demoted.setSize(size - 1)
 		n48 := demoted.node48()
 		n48.leaf = parent.getLeaf()
-		children := n48.children[:0]
-		for k, n := range parent.node256().children[:] {
-			if k != index && n != nil {
-				n48.index[k] = int8(len(children))
-				children = append(children, n)
+		idx := 0
+		for i, child := range parent.children() {
+			if child != nil && i != index {
+				n48.children[idx] = child
+				n48.index[child.key()] = int8(idx)
+				idx++
 			}
 		}
 		return demoted

@@ -1304,3 +1304,48 @@ func Benchmark_Delete_Random(b *testing.B) {
 	}
 	b.ReportMetric(float64(numObjects*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
+
+func TestNodeDynamic(t *testing.T) {
+	n := nodeDynamic[int]{}
+
+	for i := range 256 {
+		p, idx := n.getChild(byte(i))
+		require.Nil(t, p)
+		require.Equal(t, 0, idx)
+	}
+
+	idxs := []int{}
+	for i := range 10 {
+		idxs = append(idxs, i)
+	}
+	rand.Shuffle(10, func(i, j int) {
+		idxs[i], idxs[j] = idxs[j], idxs[i]
+	})
+
+	for _, i := range idxs {
+		n2 := &node4[int]{}
+		n2.setPrefix([]byte{byte(i)})
+		n.setChild(byte(i), n2.self())
+		p, _ := n.getChild(byte(i))
+		require.NotNil(t, p)
+	}
+
+	for i := range 10 {
+		p, idx := n.getChild(byte(i))
+		require.Equal(t, p.prefix(), []byte{byte(i)})
+		require.Equal(t, i, idx)
+	}
+
+	for i := range 10 {
+		p, idx := n.getChild(byte(i))
+		require.Equal(t, p.prefix(), []byte{byte(i)})
+		require.Equal(t, 0, idx)
+		n.removeChild(idx)
+	}
+
+	for i := range 256 {
+		p, idx := n.getChild(byte(i))
+		require.Nil(t, p)
+		require.Equal(t, 0, idx)
+	}
+}

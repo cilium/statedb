@@ -6,6 +6,8 @@ package part
 import (
 	"bytes"
 	"fmt"
+	"math/bits"
+	"slices"
 	"sort"
 	"strings"
 	"unsafe"
@@ -20,6 +22,7 @@ const (
 	nodeKind16
 	nodeKind48
 	nodeKind256
+	nodeKindDynamic
 )
 
 // header is the common header shared by all node kinds.
@@ -67,7 +70,7 @@ func (n *header[T]) cap() int {
 		return 16
 	case nodeKind48:
 		return 48
-	case nodeKind256:
+	case nodeKind256, nodeKindDynamic:
 		return 256
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
@@ -90,6 +93,8 @@ func (n *header[T]) getLeaf() *leaf[T] {
 		return n.node48().leaf
 	case nodeKind256:
 		return n.node256().leaf
+	case nodeKindDynamic:
+		return n.nodeDynamic().leaf
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -107,6 +112,8 @@ func (n *header[T]) setLeaf(l *leaf[T]) {
 		n.node48().leaf = l
 	case nodeKind256:
 		n.node256().leaf = l
+	case nodeKindDynamic:
+		n.nodeDynamic().leaf = l
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -140,6 +147,10 @@ func (n *header[T]) node256() *node256[T] {
 	return (*node256[T])(unsafe.Pointer(n))
 }
 
+func (n *header[T]) nodeDynamic() *nodeDynamic[T] {
+	return (*nodeDynamic[T])(unsafe.Pointer(n))
+}
+
 // clone returns a shallow clone of the node.
 // We are working on the assumption here that only
 // value-types are mutated in the returned clone.
@@ -161,6 +172,10 @@ func (n *header[T]) clone(watch bool) *header[T] {
 	case nodeKind256:
 		nCopy256 := *n.node256()
 		nCopy = (&nCopy256).self()
+	case nodeKindDynamic:
+		nCopyDyn := *n.nodeDynamic()
+		nCopyDyn.children = slices.Clone(nCopyDyn.children)
+		nCopy = (&nCopyDyn).self()
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -209,23 +224,39 @@ func (n *header[T]) promote(watch bool) *header[T] {
 			node48.watch = make(chan struct{})
 		}
 		return node48.self()
-	case nodeKind48:
-		node48 := n.node48()
-		node256 := &node256[T]{header: *n}
-		node256.setKind(nodeKind256)
-		node256.leaf = n.getLeaf()
 
-		// Since Node256 has children indexed directly, iterate over the children
-		// to assign them to the right index.
-		for _, child := range node48.children[:node48.size()] {
-			node256.children[child.prefix()[0]] = child
+	case nodeKind48:
+		nodeDyn := &nodeDynamic[T]{header: *n}
+		nodeDyn.setKind(nodeKindDynamic)
+		nodeDyn.leaf = n.getLeaf()
+		nodeDyn.children = make([]*header[T], 0, n.size()+nodeDynamicHeadroom)
+		for _, child := range n.children() {
+			nodeDyn.setChild(child.key(), child)
 		}
 		if watch {
-			node256.watch = make(chan struct{})
+			nodeDyn.watch = make(chan struct{})
 		}
-		return node256.self()
+		return nodeDyn.self()
+
+		/*
+			node48 := n.node48()
+			node256 := &node256[T]{header: *n}
+			node256.setKind(nodeKind256)
+			node256.leaf = n.getLeaf()
+
+			// Since Node256 has children indexed directly, iterate over the children
+			// to assign them to the right index.
+			for _, child := range node48.children[:node48.size()] {
+				node256.children[child.prefix()[0]] = child
+			}
+			if watch {
+				node256.watch = make(chan struct{})
+			}
+			return node256.self()*/
 	case nodeKind256:
 		panic("BUG: should not need to promote node256")
+	case nodeKindDynamic:
+		panic("BUG: should not need to promote nodeDynamic")
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -276,7 +307,9 @@ func (n *header[T]) children() []*header[T] {
 	case nodeKind48:
 		return n.node48().children[0:n.size():48]
 	case nodeKind256:
-		return n.node256().children[:]
+		return n.node256().children[:n.size()]
+	case nodeKindDynamic:
+		return n.nodeDynamic().children
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -321,6 +354,8 @@ func (n *header[T]) findIndex(key byte) (*header[T], int) {
 		return children[idx], idx
 	case nodeKind256:
 		return n.node256().children[key], int(key)
+	case nodeKindDynamic:
+		return n.nodeDynamic().getChild(key)
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -364,6 +399,9 @@ func (n *header[T]) find(key byte) *header[T] {
 		return n48.children[idx]
 	case nodeKind256:
 		return n.node256().children[key]
+	case nodeKindDynamic:
+		child, _ := n.nodeDynamic().getChild(key)
+		return child
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -399,6 +437,8 @@ func (n *header[T]) insert(idx int, child *header[T]) {
 		n48.index[child.key()] = int8(idx)
 	case nodeKind256:
 		n.node256().children[child.key()] = child
+	case nodeKindDynamic:
+		n.nodeDynamic().setChild(child.key(), child)
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -435,6 +475,10 @@ func (n *header[T]) remove(idx int) {
 		children[newSize] = nil
 	case nodeKind256:
 		n.node256().children[idx] = nil
+
+	case nodeKindDynamic:
+		n.nodeDynamic().removeChild(idx)
+
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
@@ -542,4 +586,118 @@ func commonPrefix(a, b []byte) []byte {
 		}
 	}
 	return a[:n]
+}
+
+type bitmap64 uint64
+
+func (bm *bitmap64) set(bit byte) {
+	*bm |= bitmap64(1) << bit
+}
+
+func (bm *bitmap64) clear(bit byte) {
+	*bm &= ^(bitmap64(1) << bit)
+}
+
+func (bm *bitmap64) get(bit byte) bool {
+	return (*bm)&(bitmap64(1)<<bit) > 0
+}
+
+// index returns the number of bits set in bitmap prior to the 'k'th bit
+// and 'true' if the 'k'th bit is already set in the bitmap
+func (bm *bitmap64) index(bit byte) (int, bool) {
+	bitmask := bitmap64(1) << bit
+	isSet := (*bm)&bitmask > 0
+
+	// create a uint64 mask with all bits prior 'bit' set and count them
+	mask := uint64(bitmask - 1)
+	idx := bits.OnesCount64(uint64(*bm) & mask)
+	return idx, isSet
+}
+
+type bitmap256 [4]bitmap64
+
+func (bm *bitmap256) set(k byte) {
+	word := k >> 6
+	bit := k & 0x3F
+	bm[word].set(bit)
+}
+
+func (bm *bitmap256) clear(k byte) {
+	word := k >> 6
+	bit := k & 0x3F
+	bm[word].clear(bit)
+}
+
+func (bm *bitmap256) get(k byte) bool {
+	word := k >> 6
+	bit := k & 0x3F
+	return bm[word].get(bit)
+}
+
+// index returns the number of bits set in bitmap prior to the 'k'th bit
+// and 'true' if the 'k'th bit is already set in the bitmap
+func (bm *bitmap256) index(k byte) (int, bool) {
+	word := k >> 6  // 0-3
+	bit := k & 0x3F // 0-63
+	idx, isSet := bm[word].index(bit)
+
+	// count bits in prior words
+	for i := range word {
+		idx += bits.OnesCount64(uint64(bm[i]))
+	}
+	return idx, isSet
+}
+
+// node is the size of 8 * 8 bytes
+// bitmap: 4 * 8 bytes
+// children slice header: 3 * 8 bytes
+// value pointer: 1 * 8 bytes
+//
+// likely better use smaller node types for small number of children?
+type nodeDynamic[T any] struct {
+	header[T]
+	bits     bitmap256
+	leaf     *leaf[T] // non-nil if this node contains a value
+	children []*header[T]
+}
+
+const nodeDynamicHeadroom = 5
+
+func (n *nodeDynamic[T]) setChild(k byte, child *header[T]) {
+	idx, exists := n.bits.index(k)
+	if !exists {
+		var children []*header[T]
+		if cap(n.children) > len(n.children) {
+			children = n.children[0 : len(n.children)+1]
+			if idx < len(n.children) {
+				copy(children[idx+1:], children[idx:len(n.children)])
+			}
+			children[idx] = child
+			n.children = children
+		} else {
+			children = make([]*header[T], 0, len(n.children)+1+nodeDynamicHeadroom)
+			children = append(children, n.children[:idx]...)
+			children = append(children, child)
+			n.children = append(children, n.children[idx:]...)
+		}
+		n.bits.set(k)
+	} else {
+		n.children[idx] = child
+	}
+}
+
+func (n *nodeDynamic[T]) getChild(k byte) (*header[T], int) {
+	idx, exists := n.bits.index(k)
+	if !exists {
+		return nil, idx
+	}
+	return n.children[idx], idx
+}
+
+func (n *nodeDynamic[T]) removeChild(idx int) {
+	key := n.children[idx].key()
+	copy(n.children[idx:], n.children[idx+1:])
+	n.children[len(n.children)-1] = nil
+	n.children = n.children[:len(n.children)-1]
+	n.bits.clear(key)
 }
