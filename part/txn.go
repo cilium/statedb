@@ -10,7 +10,11 @@ import (
 // Txn is a transaction against a tree. It allows doing efficient
 // modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
-	root *header[T]
+	root      *header[T]
+	rootWatch chan struct{}
+
+	dirty bool
+
 	opts options
 	size int // the number of objects in the tree
 
@@ -41,9 +45,10 @@ func (txn *Txn[T]) Clone() Ops[T] {
 	// further modifications in this transaction.
 	txn.mutated.clear()
 	return &Tree[T]{
-		opts: txn.opts,
-		root: txn.root,
-		size: txn.size,
+		opts:      txn.opts,
+		root:      txn.root,
+		rootWatch: txn.rootWatch,
+		size:      txn.size,
 	}
 }
 
@@ -63,7 +68,7 @@ func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <
 		txn.size++
 	}
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.root.watch
+		watch = txn.rootWatch
 	}
 	return
 }
@@ -88,7 +93,7 @@ func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, w
 		txn.size++
 	}
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.root.watch
+		watch = txn.rootWatch
 	}
 	return
 }
@@ -107,7 +112,7 @@ func (txn *Txn[T]) Delete(key []byte) (old T, hadOld bool) {
 // Since this is the channel associated with the root, this closes
 // when there are any changes to the tree.
 func (txn *Txn[T]) RootWatch() <-chan struct{} {
-	return txn.root.watch
+	return txn.rootWatch
 }
 
 // Get fetches the value associated with the given key.
@@ -115,9 +120,9 @@ func (txn *Txn[T]) RootWatch() <-chan struct{} {
 // modification to the key) and boolean which is true if
 // value was found.
 func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
-	value, watch, ok := search(txn.root, key)
+	value, watch, ok := search(txn.root, txn.rootWatch, key)
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.root.watch
+		watch = txn.rootWatch
 	}
 	return value, watch, ok
 }
@@ -127,9 +132,9 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // the given prefix are upserted or deleted.
 func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 	txn.mutated.clear()
-	iter, watch := prefixSearch(txn.root, key)
+	iter, watch := prefixSearch(txn.root, txn.rootWatch, key)
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.root.watch
+		watch = txn.rootWatch
 	}
 	return iter, watch
 }
@@ -154,13 +159,22 @@ func (txn *Txn[T]) CommitAndNotify() *Tree[T] {
 	return txn.Commit()
 }
 
-// Commit the transaction without notifying.
-// To close the watch channels call Notify().
-// You must call Notify() before Tree.Txn() if watch channels
-// are used.
+// Commit the transaction, but do not close the
+// watch channels. Returns the new tree.
+// To close the watch channels call Notify(). You must call Notify() before
+// Tree.Txn().
 func (txn *Txn[T]) Commit() *Tree[T] {
+	newRootWatch := txn.rootWatch
+	if txn.dirty {
+		newRootWatch = make(chan struct{})
+	}
+	t := &Tree[T]{
+		opts:      txn.opts,
+		root:      txn.root,
+		rootWatch: newRootWatch,
+		size:      txn.size,
+	}
 	txn.mutated.clear()
-	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
 	// Store this txn in the tree to reuse the allocation next time.
 	t.prevTxn.Store(txn)
 	return t
@@ -174,6 +188,10 @@ func (txn *Txn[T]) Notify() {
 		close(ch)
 	}
 	clear(txn.watches)
+	if txn.dirty && txn.rootWatch != nil {
+		close(txn.rootWatch)
+		txn.rootWatch = nil
+	}
 }
 
 // PrintTree to the standard output. For debugging.
@@ -188,7 +206,7 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 	if n.watch != nil {
 		txn.watches[n.watch] = struct{}{}
 	}
-	n = n.clone(!txn.opts.rootOnlyWatch() || n == txn.root)
+	n = n.clone(!txn.opts.rootOnlyWatch())
 	nodeMutatedSet(txn.mutated, n)
 	return n
 }
@@ -198,7 +216,14 @@ func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, had
 }
 
 func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
+	txn.dirty = true
 	fullKey := key
+
+	if root == nil {
+		var zero T
+		leaf := newLeaf(txn.opts, key, fullKey, mod(zero))
+		return zero, false, leaf.watch, leaf.self()
+	}
 
 	// Start recursing from the root to find the insertion point.
 	// Point [thisp] to the root we're returning. It'll be replaced by a clone of the root when we recurse into it.
@@ -209,13 +234,14 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	// it, we do it and return. If an existing node exists where the key should go, then
 	// we stop. 'this' points to that node, and 'thisp' to its memory location. It has
 	// not been cloned.
-	for !this.isLeaf() && bytes.HasPrefix(key, this.prefix()) {
-		// Prefix matched. Consume it and go further.
-		key = key[this.prefixLen:]
-		if len(key) == 0 {
-			// Our key matches this node or we reached a leaf node.
+	for len(key) > 0 && !this.isLeaf() && bytes.HasPrefix(key, this.prefix()) {
+		if len(key) == int(this.prefixLen) {
+			// Exact match
 			break
 		}
+
+		// Prefix matched. Consume it and go further.
+		key = key[this.prefixLen:]
 
 		child, idx := this.findIndex(key[0])
 		if child == nil {
@@ -225,7 +251,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				if this.watch != nil {
 					txn.watches[this.watch] = struct{}{}
 				}
-				this = this.promote(!txn.opts.rootOnlyWatch() || this == root)
+				this = this.promote()
 				nodeMutatedSet(txn.mutated, this)
 			} else {
 				// Node is big enough, clone it so we can mutate it
@@ -254,7 +280,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	// have been cloned.
 	//
 	// Check first if it's an exact match.
-	if len(key) == 0 || len(key) == len(common) && len(key) == int(this.prefixLen) {
+	if len(key) == len(common) && len(key) == int(this.prefixLen) {
 		this = txn.cloneNode(this)
 		*thisp = this
 		if leaf := this.getLeaf(); leaf != nil {
@@ -265,8 +291,8 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				leaf = txn.cloneNode(leaf.self()).getLeaf()
 				this.setLeaf(leaf)
 			}
-			leaf.value = mod(oldValue)
 			watch = leaf.watch
+			leaf.value = mod(oldValue)
 		} else {
 			// Set the leaf
 			var zero T
@@ -288,7 +314,6 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	} else {
 		this = txn.cloneNode(this)
 	}
-	*thisp = this
 	this.setPrefix(this.prefix()[len(common):])
 	key = key[len(common):]
 
@@ -318,14 +343,14 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		newNode.setSize(1)
 
 	case this.key() < key[0]:
-		// target node has smaller key then new leaf
+		// target node has smaller key than new leaf
 		newNode.children[0] = this
 		newNode.keys[0] = this.key()
 		newNode.children[1] = newLeaf.self()
 		newNode.keys[1] = key[0]
 		newNode.setSize(2)
 	default:
-		// new leaf has smaller key then target node
+		// new leaf has smaller key than target node
 		newNode.children[0] = newLeaf.self()
 		newNode.keys[0] = key[0]
 		newNode.children[1] = this
@@ -345,6 +370,10 @@ type deleteParent[T any] struct {
 }
 
 func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool, newRoot *header[T]) {
+	if root == nil {
+		return
+	}
+
 	// Reuse the same slice in the transaction to hold the parents in order to avoid
 	// allocations. Pre-allocate 32 levels to cover most of the use-cases without
 	// reallocation.
@@ -381,6 +410,8 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 		}
 	}
 
+	txn.dirty = true
+
 	oldValue = leaf.value
 	hadOld = true
 
@@ -392,8 +423,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	if target == root {
 		// Target is the root, clear it.
 		if root.isLeaf() || newRoot.size() == 0 {
-			// Replace leaf or empty root with a node4
-			newRoot = newNode4[T]()
+			newRoot = nil
 		} else {
 			newRoot = txn.cloneNode(root)
 			newRoot.setLeaf(nil)
