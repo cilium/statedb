@@ -362,6 +362,21 @@ func TestMapTxn(t *testing.T) {
 	v, found = txn.Get("bar")
 	assert.True(t, found)
 	assert.Equal(t, 88, v)
+	tree = txn.Commit()
+
+	// Transaction can be reused after commit
+	txn.Set("baz", 99)
+	mp = maps.Collect(txn.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
+	mp = maps.Collect(tree.All())
+	assert.Len(t, mp, 1)
+	assert.Equal(t, map[string]int{"bar": 88}, mp)
+
+	tree = txn.Commit()
+	mp = maps.Collect(tree.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
 }
 
 func TestUint64Map(t *testing.T) {
