@@ -151,14 +151,14 @@ func (txn *Txn[T]) Iterator() *Iterator[T] {
 // closing the watch channels of all modified nodes.
 func (txn *Txn[T]) CommitAndNotify() *Tree[T] {
 	txn.Notify()
-	return txn.CommitOnly()
+	return txn.Commit()
 }
 
-// CommitOnly the transaction, but do not close the
-// watch channels. Returns the new tree.
-// To close the watch channels call Notify(). You must call Notify() before
-// Tree.Txn().
-func (txn *Txn[T]) CommitOnly() *Tree[T] {
+// Commit the transaction without notifying.
+// To close the watch channels call Notify().
+// You must call Notify() before Tree.Txn() if watch channels
+// are used.
+func (txn *Txn[T]) Commit() *Tree[T] {
 	txn.mutated.clear()
 	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
 	// Store this txn in the tree to reuse the allocation next time.

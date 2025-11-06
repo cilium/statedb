@@ -1034,11 +1034,11 @@ func Test_fork_with_cache(t *testing.T) {
 	require.NotSame(t, txn1, txn2)
 	txn1.Insert(uint64Key(2), 2)
 	txn2.Insert(uint64Key(3), 3)
-	tree2 := txn1.CommitOnly()
+	tree2 := txn1.Commit()
 	require.Equal(t, 2, tree2.Len())
 
 	txn2.Insert(uint64Key(4), 4)
-	tree3 := txn2.CommitOnly()
+	tree3 := txn2.Commit()
 	require.Equal(t, 1, tree.Len())
 	require.Equal(t, 2, tree2.Len())
 	require.Equal(t, 3, tree3.Len())
