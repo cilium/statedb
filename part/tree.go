@@ -3,16 +3,18 @@
 
 package part
 
+import "sync/atomic"
+
 // Tree is a persistent (immutable) adaptive radix tree. It supports
 // map-like operations on values keyed by []byte and additionally
 // prefix searching and lower bound searching. Each node in the tree
 // has an associated channel that is closed when that node is mutated.
 // This allows watching any part of the tree (any prefix) for changes.
 type Tree[T any] struct {
-	root *header[T]
-	txn  *Txn[T]
-	size int // the number of objects in the tree
-	opts options
+	root    *header[T]
+	size    int // the number of objects in the tree
+	opts    options
+	prevTxn atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
 }
 
 // New constructs a new tree.
@@ -56,15 +58,12 @@ func newTxn[T any](o options) *Txn[T] {
 // nodes. Only a single transaction can be in flight at a time.
 func (t *Tree[T]) Txn() *Txn[T] {
 	var txn *Txn[T]
-	if t.txn != nil {
-		txn = t.txn
+
+	// Reuse the previous txn allocation if possible
+	if prevTxn := t.prevTxn.Swap(nil); prevTxn != nil {
+		txn = prevTxn
 		txn.mutated.clear()
 		clear(txn.watches)
-
-		// Clear the txn from the original tree. This 'txn' will be passed
-		// on to the tree produced by Commit*() allowing reuse of it later
-		// in that lineage.
-		t.txn = nil
 	} else {
 		txn = newTxn[T](t.opts)
 	}
