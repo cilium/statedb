@@ -119,7 +119,7 @@ func (t *Tree[T]) LowerBound(key []byte) *Iterator[T] {
 func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree *Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Insert(key, value)
-	tree = txn.Commit()
+	tree = txn.CommitAndNotify()
 	return
 }
 
@@ -130,7 +130,7 @@ func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree *Tree[T]
 func (t *Tree[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool, tree *Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Modify(key, mod)
-	tree = txn.Commit()
+	tree = txn.CommitAndNotify()
 	return
 }
 
@@ -139,7 +139,7 @@ func (t *Tree[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool, tree *T
 func (t *Tree[T]) Delete(key []byte) (old T, hadOld bool, tree *Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Delete(key)
-	tree = txn.Commit()
+	tree = txn.CommitAndNotify()
 	return
 }
 

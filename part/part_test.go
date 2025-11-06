@@ -47,7 +47,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		txn.Insert([]byte("abc"), 1)
 		_, _, watch_ab := txn.InsertWatch([]byte("ab"), 2)
 		txn.Insert([]byte("abd"), 3)
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 		assertOpen(t, watch_ab)
 
 		_, w, f := tree.Get([]byte("ab"))
@@ -112,7 +112,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		txn.Insert([]byte("ab"), 3)
 		assertOpen(t, w) // shouldn't close until commit
 		assertOpen(t, w2)
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 
 		assertOpen(t, w)
 		assertClosed(t, w2)
@@ -131,7 +131,7 @@ func Test_insertion_and_watches(t *testing.T) {
 		txn.Insert([]byte("a"), 1)
 		txn.Insert([]byte("aa"), 2)
 		txn.Insert([]byte("ab"), 3)
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 
 		_, w, f := tree.Get([]byte("ab"))
 		assert.True(t, f)
@@ -269,7 +269,7 @@ func Test_delete(t *testing.T) {
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 		assert.Equal(t, len(keys), tree.Len())
 
 		// Delete the keys in random order.
@@ -288,7 +288,7 @@ func Test_delete(t *testing.T) {
 			_, _, ok = txn.Get(uint64Key(i))
 			assert.False(t, ok)
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 
 		assert.Equal(t, 0, tree.Len())
 		for _, i := range keys {
@@ -313,7 +313,7 @@ func Test_delete(t *testing.T) {
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 		assert.Equal(t, len(keys), tree.Len())
 
 		// Do few rounds of lookups and deletions.
@@ -408,7 +408,7 @@ func Test_delete(t *testing.T) {
 		_, _, ok := iter.Next()
 		assert.False(t, ok)
 
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 
 		// Check that all the watch channels closed
 		for _, watch := range watches {
@@ -510,7 +510,7 @@ func Test_modify(t *testing.T) {
 		require.True(t, hadOld)
 		require.Equal(t, i+1, old)
 	}
-	tree = txn.Commit()
+	tree = txn.CommitAndNotify()
 
 	v, _, ok = tree.Get(key)
 	require.True(t, ok)
@@ -695,7 +695,7 @@ func Test_txn(t *testing.T) {
 	next(true, 4)
 	next(false, 0)
 
-	_ = txn.Commit() // Ignore the new tree
+	_ = txn.CommitAndNotify() // Ignore the new tree
 
 	// Original tree should be untouched.
 	for i := 1; i <= 3; i++ {
@@ -966,7 +966,7 @@ func Test_iterate(t *testing.T) {
 
 			n--
 			if n <= 0 {
-				tree = txn.Commit()
+				tree = txn.CommitAndNotify()
 				txn = tree.Txn()
 				n = rand.Intn(20)
 			}
@@ -995,7 +995,7 @@ func Test_closed_chan_regression(t *testing.T) {
 	txn := tree.Txn()
 	txn.Delete(hexKey(uint64(3)))
 	txn.Delete(hexKey(uint64(1)))
-	tree = txn.Commit()
+	tree = txn.CommitAndNotify()
 
 	// No reachable channel should be closed
 	for _, c := range tree.root.children() {
@@ -1064,7 +1064,7 @@ func benchmark_Insert(b *testing.B, opts ...Option) {
 			key := binary.BigEndian.AppendUint32(nil, uint32(numObjectsToInsert+i))
 			txn.Insert(key, numObjectsToInsert+i)
 		}
-		txn.Commit()
+		txn.CommitAndNotify()
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
@@ -1089,7 +1089,7 @@ func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 				txn.Modify(key, func(x int) int { return x })
 			}
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 	}
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
@@ -1154,14 +1154,14 @@ func benchmark_txn_batch(b *testing.B, batchSize int) {
 		for j := range batchSize {
 			txn.Insert(uint64Key(uint64(j)), j)
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 		n -= batchSize
 	}
 	txn := tree.Txn()
 	for j := 0; j < n; j++ {
 		txn.Insert(uint64Key(uint64(j)), j)
 	}
-	txn.Commit()
+	txn.CommitAndNotify()
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 

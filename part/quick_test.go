@@ -51,7 +51,7 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 		if watchAfter != watchInsert {
 			return fmt.Sprintf("mismatching channels %p vs %p", watchAfter, watchInsert)
 		}
-		tree = txn.Commit()
+		tree = txn.CommitAndNotify()
 
 		select {
 		case <-watchBefore:

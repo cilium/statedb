@@ -147,8 +147,9 @@ func (txn *Txn[T]) Iterator() *Iterator[T] {
 	return newIterator(txn.root)
 }
 
-// Commit the transaction and produce the new tree.
-func (txn *Txn[T]) Commit() *Tree[T] {
+// CommitAndNotify commits the transaction and notifies by
+// closing the watch channels of all modified nodes.
+func (txn *Txn[T]) CommitAndNotify() *Tree[T] {
 	txn.Notify()
 	return txn.CommitOnly()
 }
