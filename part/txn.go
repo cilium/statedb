@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"slices"
 )
 
 // Txn is a transaction against a tree. It allows doing efficient
@@ -426,10 +427,20 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	}
 
 	if target == root {
-		// Target is the root, clear it.
-		if root.isLeaf() || newRoot.size() == 0 {
+		switch {
+		case root.isLeaf() || root.size() == 0:
+			// Root is a leaf or node without children
 			newRoot = nil
-		} else {
+		case root.size() == 1:
+			// Root is a non-leaf node with single child. We can replace
+			// the root with the child.
+			child := root.children()[0]
+			childClone := child.clone(false)
+			childClone.watch = child.watch
+			childClone.setPrefix(slices.Concat(root.prefix(), childClone.prefix()))
+			newRoot = childClone
+		default:
+			// Root is a non-leaf node with many children. Just drop the leaf.
 			newRoot = txn.cloneNode(root)
 			newRoot.setLeaf(nil)
 		}
@@ -441,7 +452,19 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	index := len(parents) - 1
 	this := &parents[index]
 	parent := &parents[index-1]
-	if this.node.size() > 0 {
+	if this.node.size() == 1 {
+		// The target node is not a leaf node and has only a single
+		// child. Shift the child up.
+		if this.node.watch != nil {
+			txn.watches[this.node.watch] = struct{}{}
+		}
+		child := this.node.children()[0]
+		childClone := child.clone(false)
+		childClone.watch = child.watch
+		childClone.setPrefix(slices.Concat(this.node.prefix(), childClone.prefix()))
+		parent.node = txn.cloneNode(parent.node)
+		parent.node.children()[this.index] = childClone
+	} else if this.node.size() > 0 {
 		// The target node is not a leaf node and has children.
 		// Drop the leaf.
 		this.node = txn.cloneNode(this.node)
@@ -459,8 +482,13 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	for index > 0 {
 		parent = &parents[index-1]
 		this = &parents[index]
-		parent.node = txn.cloneNode(parent.node)
-		parent.node.children()[this.index] = this.node
+		if this.node == nil {
+			// Node is gone, can remove it completely.
+			parent.node = txn.removeChild(parent.node, this.index)
+		} else {
+			parent.node = txn.cloneNode(parent.node)
+			parent.node.children()[this.index] = this.node
+		}
 		index--
 	}
 
@@ -470,8 +498,25 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 
 func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 	size := parent.size()
-	// Check if the node should be demoted.
 	switch {
+	case size == 2 && parent.getLeaf() == nil:
+		// Only one child remains and no leaf. Replace the node with the
+		// remaining child.
+		if parent.kind() != nodeKind4 {
+			panic("expected node4")
+		}
+		remainingIndex := 0
+		if index == 0 {
+			remainingIndex = 1
+		}
+
+		child := parent.node4().children[remainingIndex]
+		// Clone for prefix adjustment, but leave watch alone.
+		childClone := child.clone(false)
+		childClone.watch = child.watch
+		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
+		return childClone
+
 	case parent.kind() == nodeKind256 && size <= 49:
 		demoted := (&node48[T]{header: *parent}).self()
 		demoted.setKind(nodeKind48)
