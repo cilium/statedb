@@ -1027,8 +1027,11 @@ func Test_fork_with_cache(t *testing.T) {
 	tree := New[uint64]()
 	_, _, tree = tree.Insert(uint64Key(1), 1)
 
+	// Taking two transactions against the same tree forks the
+	// resulting trees without them affecting each other.
 	txn1 := tree.Txn()
 	txn2 := tree.Txn()
+	require.NotSame(t, txn1, txn2)
 	txn1.Insert(uint64Key(2), 2)
 	txn2.Insert(uint64Key(3), 3)
 	tree2 := txn1.CommitOnly()
@@ -1039,6 +1042,10 @@ func Test_fork_with_cache(t *testing.T) {
 	require.Equal(t, 1, tree.Len())
 	require.Equal(t, 2, tree2.Len())
 	require.Equal(t, 3, tree3.Len())
+
+	// Transaction allocation is reused when it has been already committed.
+	txn3 := tree3.Txn()
+	require.Same(t, txn2, txn3)
 }
 
 func Benchmark_Insert_RootOnlyWatch(b *testing.B) {

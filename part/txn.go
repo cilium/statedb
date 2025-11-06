@@ -44,7 +44,6 @@ func (txn *Txn[T]) Clone() Ops[T] {
 		opts: txn.opts,
 		root: txn.root,
 		size: txn.size,
-		txn:  nil,
 	}
 }
 
@@ -161,9 +160,8 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 func (txn *Txn[T]) CommitOnly() *Tree[T] {
 	txn.mutated.clear()
 	t := &Tree[T]{opts: txn.opts, root: txn.root, size: txn.size}
-	if !txn.opts.noCache() {
-		t.txn = txn
-	}
+	// Store this txn in the tree to reuse the allocation next time.
+	t.prevTxn.Store(txn)
 	return t
 }
 
