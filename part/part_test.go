@@ -284,6 +284,21 @@ func Test_simple_delete(t *testing.T) {
 	require.False(t, ok)
 }
 
+func Test_delete_compress(t *testing.T) {
+	tree := New[uint64]()
+
+	// With two elements we have node4 with to children
+	_, _, tree = tree.Insert(uint64Key(1), 1)
+	_, _, tree = tree.Insert(uint64Key(2), 2)
+	require.True(t, tree.root.kind() == nodeKind4)
+
+	// Removing the other element the tree compresses down
+	// to a single leaf.
+	_, _, tree = tree.Delete(uint64Key(2))
+	require.True(t, tree.root.kind() == nodeKindLeaf)
+	require.Equal(t, tree.root.getLeaf().fullKey(), uint64Key(1))
+}
+
 func Test_delete(t *testing.T) {
 	tree := New[uint64]()
 
