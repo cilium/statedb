@@ -5,6 +5,8 @@ package part
 
 import (
 	"bytes"
+	"fmt"
+	"os"
 )
 
 // Txn is a transaction against a tree. It allows doing efficient
@@ -64,6 +66,7 @@ func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
 // key changes again.
 func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <-chan struct{}) {
 	old, hadOld, watch, txn.root = txn.insert(txn.root, key, value)
+	validateTree(txn.root, nil, txn.watches)
 	if !hadOld {
 		txn.size++
 	}
@@ -89,6 +92,7 @@ func (txn *Txn[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool) {
 // when the key changes again.
 func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, watch <-chan struct{}) {
 	old, hadOld, watch, txn.root = txn.modify(txn.root, key, mod)
+	validateTree(txn.root, nil, txn.watches)
 	if !hadOld {
 		txn.size++
 	}
@@ -102,6 +106,7 @@ func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, w
 // Returns the old value if it exists.
 func (txn *Txn[T]) Delete(key []byte) (old T, hadOld bool) {
 	old, hadOld, txn.root = txn.delete(txn.root, key)
+	validateTree(txn.root, nil, txn.watches)
 	if hadOld {
 		txn.size--
 	}
@@ -516,5 +521,81 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 		parent = txn.cloneNode(parent)
 		parent.remove(index)
 		return parent
+	}
+}
+
+var runValidation = func() bool {
+	if os.Getenv("PART_VALIDATE") != "" {
+		return true
+	}
+	return false
+}()
+
+// validateTree checks that the resulting tree is well-formed and panics
+// if it is not.
+func validateTree[T any](node *header[T], parents []*header[T], watches map[chan struct{}]struct{}) {
+	if !runValidation {
+		return
+	}
+
+	if node == nil {
+		return
+	}
+	assert := func(b bool, msg string) {
+		if !b {
+			node.printTree(0)
+			panic(msg)
+		}
+	}
+
+	// A leaf node's key is the sum of all prefixes in path
+	if leaf := node.getLeaf(); leaf != nil {
+		var fullKey []byte
+		for _, p := range parents {
+			fullKey = append(fullKey, p.prefix()...)
+		}
+		fullKey = append(fullKey, node.prefix()...)
+
+		assert(bytes.Equal(leaf.fullKey(), fullKey),
+			fmt.Sprintf("leaf's key does not match sum of prefixes, expected %x, got %x",
+				leaf.fullKey(), fullKey))
+
+		// If a leaf's watch channel is to be closed then parent's should be
+		// marked closed too. The case where node is a leaf is handled below.
+		if !node.isLeaf() {
+			if _, found := watches[leaf.watch]; found {
+				_, found := watches[node.watch]
+				assert(found, "node's watch channel not marked for closing when leaf is")
+			}
+		}
+	}
+
+	// Nodes without a leaf must have size 2 or greater.
+	assert(node.getLeaf() != nil || node.size() > 1,
+		"node with single child has no leaf")
+
+	// Node16 must have occupancy higher than 4
+	assert(node.kind() != nodeKind256 || node.size() > 4, "node16 has fewer children than 17")
+
+	// Node48 must have occupancy higher than 16
+	assert(node.kind() != nodeKind256 || node.size() > 16, "node48 has fewer children than 17")
+
+	// Node256 must have occupancy higher than 48
+	assert(node.kind() != nodeKind256 || node.size() > 48, "node256 has fewer children than 49")
+
+	// Nodes that have a watch channel that is to be closed must
+	// also have all their parent's watch channels to be closed.
+	if _, found := watches[node.watch]; found {
+		for _, p := range parents {
+			_, found := watches[p.watch]
+			assert(found, "parent watch channel not marked for closing")
+		}
+	}
+	parents = append(parents, node)
+
+	for _, child := range node.children() {
+		if child != nil {
+			validateTree(child, parents, watches)
+		}
 	}
 }
