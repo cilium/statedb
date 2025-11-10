@@ -39,8 +39,9 @@ func TestMain(m *testing.M) {
 }
 
 type testObject struct {
-	ID   uint64
-	Tags part.Set[string]
+	ID   uint64           `json:"id" yaml:"id"`
+	Key  string           `json:"key,omitempty" yaml:"key,omitempty"`
+	Tags part.Set[string] `json:"tags" yaml:"tags"`
 }
 
 func (t testObject) getID() uint64 {
@@ -83,6 +84,16 @@ var (
 		},
 		FromKey:    index.Uint64,
 		FromString: index.Uint64String,
+		Unique:     true,
+	}
+
+	keyIndex = Index[testObject, string]{
+		Name: "key",
+		FromObject: func(t testObject) index.KeySet {
+			return index.NewKeySet(index.String(t.Key))
+		},
+		FromKey:    index.String,
+		FromString: index.FromString,
 		Unique:     true,
 	}
 
@@ -1207,6 +1218,81 @@ func TestDB_InitializationTransitions(t *testing.T) {
 	init, initWatch = table.Initialized(txn)
 	require.True(t, init, "Initialized should be true")
 	requireClosed(t, initWatch)
+}
+
+func TestDB_EmptyKeys(t *testing.T) {
+	db := New()
+	table, err := NewTable(
+		db,
+		"test",
+		keyIndex,
+		tagsIndex,
+	)
+	require.NoError(t, err, "NewTable[testObject]")
+
+	// Do the tests twice, one with empty table and again with a non-empty
+	// table.
+	for range 2 {
+		// Object with an empty primary key and non-empty secondary key
+		wtxn := db.WriteTxn(table)
+		table.Insert(wtxn, testObject{Tags: part.NewSet("test")})
+		obj, _, found := table.Get(wtxn, keyIndex.Query(""))
+		require.True(t, found)
+		require.Equal(t, "", obj.Key)
+		require.Equal(t, []string{"test"}, slices.Collect(obj.Tags.All()))
+		obj, _, found = table.Get(wtxn, tagsIndex.Query("test"))
+		require.True(t, found)
+		require.Equal(t, "", obj.Key)
+		require.Equal(t, []string{"test"}, slices.Collect(obj.Tags.All()))
+		for obj := range table.Prefix(wtxn, keyIndex.Query("")) {
+			require.Equal(t, "", obj.Key)
+			require.Equal(t, []string{"test"}, slices.Collect(obj.Tags.All()))
+			break
+		}
+		wtxn.Abort()
+
+		// Object with an empty primary key and empty secondary key
+		wtxn = db.WriteTxn(table)
+		table.Insert(wtxn, testObject{Tags: part.NewSet("")})
+		obj, _, found = table.Get(wtxn, keyIndex.Query(""))
+		require.True(t, found)
+		require.Equal(t, "", obj.Key)
+		require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+		obj, _, found = table.Get(wtxn, tagsIndex.Query(""))
+		require.True(t, found)
+		require.Equal(t, "", obj.Key)
+		require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+		for obj := range table.Prefix(wtxn, keyIndex.Query("")) {
+			require.Equal(t, "", obj.Key)
+			require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+			break
+		}
+		for obj := range table.Prefix(wtxn, tagsIndex.Query("")) {
+			require.Equal(t, "", obj.Key)
+			require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+			break
+		}
+		wtxn.Abort()
+
+		// Object with non-empty primary key and empty secondary key
+		wtxn = db.WriteTxn(table)
+		table.Insert(wtxn, testObject{Key: "test", Tags: part.NewSet("")})
+		obj, _, found = table.Get(wtxn, keyIndex.Query("test"))
+		require.True(t, found)
+		require.Equal(t, "test", obj.Key)
+		require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+		obj, _, found = table.Get(wtxn, tagsIndex.Query(""))
+		require.True(t, found)
+		require.Equal(t, "test", obj.Key)
+		require.Equal(t, []string{""}, slices.Collect(obj.Tags.All()))
+		wtxn.Abort()
+
+		// Insert another object and try again.
+		wtxn = db.WriteTxn(table)
+		table.Insert(wtxn, testObject{Key: "non-empty", Tags: part.NewSet("non-empty")})
+		wtxn.Commit()
+	}
+
 }
 
 func TestWriteJSON(t *testing.T) {
