@@ -230,7 +230,7 @@ type action func(ctx actionContext)
 func insertAction(ctx actionContext) {
 	id := mkID()
 	value := mkValue()
-	ctx.log.log("%s: Insert %s", ctx.table.Name(), id)
+	ctx.log.log("%s: Insert %s (%d)", ctx.table.Name(), id, value)
 	ctx.table.Insert(ctx.txn, fuzzObj{id, value})
 	e := actionLogEntry{ctx.table, actInsert, id, value}
 	ctx.actLog.append(e)
@@ -239,9 +239,12 @@ func insertAction(ctx actionContext) {
 
 func deleteAction(ctx actionContext) {
 	id := mkID()
-	ctx.log.log("%s: Delete %s", ctx.table.Name(), id)
-	ctx.table.Delete(ctx.txn, fuzzObj{id, 0})
-	e := actionLogEntry{ctx.table, actDelete, id, 0}
+	old, _, err := ctx.table.Delete(ctx.txn, fuzzObj{id, 0})
+	if err != nil {
+		panic(err)
+	}
+	ctx.log.log("%s: Delete %s (%d)", ctx.table.Name(), id, old.value)
+	e := actionLogEntry{ctx.table, actDelete, id, old.value}
 	ctx.actLog.append(e)
 	ctx.txnLog.latest[tableAndID{ctx.table.Name(), id}] = e
 }
@@ -291,13 +294,16 @@ func listAction(ctx actionContext) {
 	values := ctx.table.List(ctx.txn, valueIndex.Query(value))
 	ctx.log.log("%s: List(%d)", ctx.table.Name(), value)
 	for obj := range values {
+		if obj.value != value {
+			panic(fmt.Sprintf("List(%d) returned object with value %d", value, obj.value))
+		}
 		if e, ok2 := ctx.txnLog.latest[tableAndID{ctx.table.Name(), obj.id}]; ok2 {
 			if e.act == actInsert {
 				if e.value != obj.value {
-					panic("List() did not return the last write")
+					panic(fmt.Sprintf("List() did not return the last write of %s, expected %d, got %d", obj.id, e.value, obj.value))
 				}
 				if obj.value != value {
-					panic(fmt.Sprintf("Get() returned object with wrong value, expected %d, got %d", value, obj.value))
+					panic(fmt.Sprintf("List() returned object with wrong value, expected %d, got %d", value, obj.value))
 				}
 			} else if e.act == actDelete {
 				panic("List() returned value even though it was deleted")

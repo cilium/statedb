@@ -52,6 +52,11 @@ func (txn *Txn[T]) Clone() Ops[T] {
 	}
 }
 
+// Txn forks the transaction
+func (txn *Txn[T]) Txn() *Txn[T] {
+	panic("unimplemented")
+}
+
 // Insert or update the tree with the given key and value.
 // Returns the old value if it exists.
 func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {

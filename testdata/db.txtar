@@ -122,6 +122,7 @@ db/cmp test1 empty.table
 # Delete with get
 db/insert test1 obj1.yaml
 db/cmp test1 obj1.table
+db/get test1 1
 db/get --delete test1 1
 db/cmp test1 empty.table
 
@@ -136,6 +137,7 @@ db/cmp test1 empty.table
 db/insert test1 obj1.yaml
 db/insert test1 obj2.yaml
 db/cmp test1 objs.table
+db/lowerbound --index=id test1 2
 db/lowerbound --index=id --delete test1 2
 db/cmp test1 obj1.table
 

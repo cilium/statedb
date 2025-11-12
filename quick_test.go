@@ -226,7 +226,7 @@ func TestDB_Quick(t *testing.T) {
 		// not be the one that we just inserted.
 		obj, _, found = table.Get(rtxn, bIndex.Query(b))
 		if !found || obj.B != b {
-			t.Logf("Get(%q) via bIndex not found (%v) or wrong B (%q vs %q)", b, found, obj.B, b)
+			t.Logf("Get(%x) via bIndex not found (%v) or wrong B (%x vs %x)", b, found, obj.B, b)
 			return false
 		}
 
@@ -248,7 +248,7 @@ func TestDB_Quick(t *testing.T) {
 		visited := map[string]struct{}{}
 		for obj := range table.Prefix(rtxn, bIndex.Query(b)) {
 			if !strings.HasPrefix(obj.B, b) {
-				t.Logf("Prefix() via bIndex has wrong prefix")
+				t.Logf("Prefix() via bIndex has wrong prefix, expected %x, got %x", b, obj.B)
 				return false
 			}
 			if _, found := visited[obj.A]; found {
@@ -295,7 +295,7 @@ func TestDB_Quick(t *testing.T) {
 		// defined by the "B" key first and then by the "A" key.
 		if !isOrdered(t, false, table.Prefix(rtxn, bIndex.Query(""))) {
 			t.Logf("Prefix() via bIndex wrong order")
-			rtxn.mustIndexReadTxn(table, table.indexPos("b")).PrintTree()
+			//rtxn.mustIndexReadTxn(table, table.indexPos("b")).PrintTree()
 			return false
 		}
 		if !isOrdered(t, false, table.LowerBound(rtxn, bIndex.Query(""))) {

@@ -14,6 +14,8 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+
+	"github.com/cilium/statedb/index"
 )
 
 // NewRemoteTable creates a new handle for querying a remote StateDB table over the HTTP.
@@ -50,7 +52,13 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	errChanSend := make(chan error, 1)
 	errChan = errChanSend
 
-	key := base64.StdEncoding.EncodeToString(q.key)
+	ikey, ok := q.key.(index.Key)
+	if !ok {
+		errChanSend <- fmt.Errorf("invalid key type %T", q.key)
+		return
+	}
+
+	key := base64.StdEncoding.EncodeToString(ikey)
 	queryReq := QueryRequest{
 		Key:        key,
 		Table:      t.tableName,

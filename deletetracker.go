@@ -35,11 +35,10 @@ func (dt *deleteTracker[Obj]) getRevision() uint64 {
 // Deleted returns an iterator for deleted objects in this table starting from
 // 'minRevision'. The deleted objects are not garbage-collected unless 'Mark' is
 // called!
-func (dt *deleteTracker[Obj]) deleted(txn ReadTxn, minRevision Revision) Iterator[Obj] {
+func (dt *deleteTracker[Obj]) deleted(txn ReadTxn, minRevision Revision) *iterator[Obj] {
 	indexEntry := txn.root()[dt.table.tablePos()].indexes[GraveyardRevisionIndexPos]
-	indexTxn := indexReadTxn{indexEntry.tree, indexEntry.unique}
-	iter := indexTxn.LowerBound(index.Uint64(minRevision))
-	return &iterator[Obj]{iter}
+	objs, _ := indexEntry.index.lowerBound(index.Uint64(minRevision))
+	return seqToIterator[Obj](objs)
 }
 
 // Mark the revision up to which deleted objects have been processed. This sets

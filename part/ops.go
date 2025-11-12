@@ -32,6 +32,9 @@ type Ops[T any] interface {
 	// Iterator returns an iterator for all objects.
 	Iterator() *Iterator[T]
 
+	// Txn constructs a new transaction
+	Txn() *Txn[T]
+
 	// PrintTree to the standard output. For debugging.
 	PrintTree()
 }
