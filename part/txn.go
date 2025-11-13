@@ -493,7 +493,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	return
 }
 
-func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
+func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[T]) {
 	size := parent.size()
 	switch {
 	case size == 2 && parent.getLeaf() == nil:
@@ -512,11 +512,13 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 		childClone := child.clone(false)
 		childClone.watch = child.watch
 		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
-		nodeMutatedSet(txn.mutated, childClone)
-		return childClone
+		newParent = childClone
 
 	case parent.kind() == nodeKind256 && size <= 49:
 		demoted := (&node48[T]{header: *parent}).self()
+		if parent.watch != nil {
+			demoted.watch = make(chan struct{})
+		}
 		demoted.setKind(nodeKind48)
 		demoted.setSize(size - 1)
 		n48 := demoted.node48()
@@ -528,10 +530,12 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				children = append(children, n)
 			}
 		}
-		nodeMutatedSet(txn.mutated, demoted)
-		return demoted
+		newParent = demoted
 	case parent.kind() == nodeKind48 && size <= 17:
 		demoted := (&node16[T]{header: *parent}).self()
+		if parent.watch != nil {
+			demoted.watch = make(chan struct{})
+		}
 		demoted.setKind(nodeKind16)
 		demoted.setSize(size - 1)
 		n16 := demoted.node16()
@@ -544,10 +548,12 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				idx++
 			}
 		}
-		nodeMutatedSet(txn.mutated, demoted)
-		return demoted
+		newParent = demoted
 	case parent.kind() == nodeKind16 && size <= 5:
 		demoted := (&node4[T]{header: *parent}).self()
+		if parent.watch != nil {
+			demoted.watch = make(chan struct{})
+		}
 		demoted.setKind(nodeKind4)
 		demoted.setSize(size - 1)
 		n16 := parent.node16()
@@ -561,13 +567,17 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				idx++
 			}
 		}
-		nodeMutatedSet(txn.mutated, demoted)
-		return demoted
+		newParent = demoted
 	default:
-		parent = txn.cloneNode(parent)
-		parent.remove(index)
-		return parent
+		newParent = txn.cloneNode(parent)
+		newParent.remove(index)
+		return newParent
 	}
+	if parent.watch != nil {
+		txn.watches[parent.watch] = struct{}{}
+	}
+	nodeMutatedSet(txn.mutated, newParent)
+	return newParent
 }
 
 var runValidation = os.Getenv("PART_VALIDATE") != ""
