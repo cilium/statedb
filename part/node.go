@@ -507,12 +507,6 @@ type node256[T any] struct {
 	children [256]*header[T]
 }
 
-func newNode4[T any]() *header[T] {
-	n := &node4[T]{header: header[T]{watch: make(chan struct{})}}
-	n.setKind(nodeKind4)
-	return n.self()
-}
-
 func search[T any](root *header[T], rootWatch <-chan struct{}, key []byte) (value T, watch <-chan struct{}, ok bool) {
 	this := root
 	watch = rootWatch
