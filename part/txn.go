@@ -360,6 +360,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		newNode.setSize(2)
 	}
 	*thisp = newNode.self()
+	nodeMutatedSet(txn.mutated, newNode.self())
 
 	return
 }
@@ -511,6 +512,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 		childClone := child.clone(false)
 		childClone.watch = child.watch
 		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
+		nodeMutatedSet(txn.mutated, childClone)
 		return childClone
 
 	case parent.kind() == nodeKind256 && size <= 49:
@@ -526,6 +528,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				children = append(children, n)
 			}
 		}
+		nodeMutatedSet(txn.mutated, demoted)
 		return demoted
 	case parent.kind() == nodeKind48 && size <= 17:
 		demoted := (&node16[T]{header: *parent}).self()
@@ -541,6 +544,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				idx++
 			}
 		}
+		nodeMutatedSet(txn.mutated, demoted)
 		return demoted
 	case parent.kind() == nodeKind16 && size <= 5:
 		demoted := (&node4[T]{header: *parent}).self()
@@ -557,6 +561,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 				idx++
 			}
 		}
+		nodeMutatedSet(txn.mutated, demoted)
 		return demoted
 	default:
 		parent = txn.cloneNode(parent)
