@@ -13,6 +13,7 @@ import (
 // Txn is a transaction against a tree. It allows doing efficient
 // modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
+	oldRoot   *header[T]
 	root      *header[T]
 	rootWatch chan struct{}
 
@@ -166,6 +167,8 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 	newRootWatch := txn.rootWatch
 	if txn.dirty {
 		newRootWatch = make(chan struct{})
+		validateTree(txn.oldRoot, nil, nil)
+		validateTree(txn.root, nil, txn.watches)
 	}
 	t := &Tree[T]{
 		opts:      txn.opts,
@@ -562,12 +565,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) *header[T] {
 	}
 }
 
-var runValidation = func() bool {
-	if os.Getenv("PART_VALIDATE") != "" {
-		return true
-	}
-	return false
-}()
+var runValidation = os.Getenv("PART_VALIDATE") != ""
 
 // validateTree checks that the resulting tree is well-formed and panics
 // if it is not.
@@ -579,10 +577,10 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 	if node == nil {
 		return
 	}
-	assert := func(b bool, msg string) {
+	assert := func(b bool, f string, args ...any) {
 		if !b {
 			node.printTree(0)
-			panic(msg)
+			panic(fmt.Sprintf(f, args...))
 		}
 	}
 
@@ -595,8 +593,8 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 		fullKey = append(fullKey, node.prefix()...)
 
 		assert(bytes.Equal(leaf.fullKey(), fullKey),
-			fmt.Sprintf("leaf's key does not match sum of prefixes, expected %x, got %x",
-				leaf.fullKey(), fullKey))
+			"leaf's key does not match sum of prefixes, expected %x, got %x",
+			leaf.fullKey(), fullKey)
 
 		// If a leaf's watch channel is to be closed then parent's should be
 		// marked closed too. The case where node is a leaf is handled below.
@@ -624,11 +622,36 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 	// Nodes that have a watch channel that is to be closed must
 	// also have all their parent's watch channels to be closed.
 	if _, found := watches[node.watch]; found {
-		for _, p := range parents {
+		select {
+		case <-node.watch:
+			panic("node's watch channel marked for closing but is already closed!")
+		default:
+		}
+		for i, p := range parents {
 			_, found := watches[p.watch]
-			assert(found, "parent watch channel not marked for closing")
+			if !found {
+				p.printTree(0)
+				panic(fmt.Sprintf("parent %p (%d) watch channel (%p) not marked for closing (child %p, watch %p)", p, i, p.watch, node, node.watch))
+			}
+
 		}
 	}
+
+	// If a node's watch channel is closed then all the parents must be
+	// closed as well.
+	select {
+	case <-node.watch:
+		for _, p := range parents {
+			select {
+			case <-p.watch:
+			default:
+				p.printTree(0)
+				panic(fmt.Sprintf("parent watch channel (%p) not marked for closing (child %p)", p.watch, node.watch))
+			}
+		}
+	default:
+	}
+
 	parents = append(parents, node)
 
 	for _, child := range node.children() {
