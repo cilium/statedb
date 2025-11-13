@@ -524,7 +524,9 @@ func search[T any](root *header[T], rootWatch <-chan struct{}, key []byte) (valu
 		if len(key) == 0 {
 			if leaf := this.getLeaf(); leaf != nil {
 				value = leaf.value
-				watch = leaf.watch
+				if leaf.watch != nil {
+					watch = leaf.watch
+				}
 				ok = true
 			}
 			return

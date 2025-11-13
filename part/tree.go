@@ -3,8 +3,10 @@
 
 package part
 
-import "sync/atomic"
-import "fmt"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // Tree is a persistent (immutable) adaptive radix tree. It supports
 // map-like operations on values keyed by []byte and additionally
@@ -89,9 +91,6 @@ func (t *Tree[T]) Len() int {
 // value was found.
 func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	value, watch, ok := search(t.root, t.rootWatch, key)
-	if t.opts.rootOnlyWatch() {
-		watch = t.rootWatch
-	}
 	return value, watch, ok
 }
 
@@ -99,11 +98,7 @@ func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // given prefix, and a channel that closes when any objects matching
 // the given prefix are upserted or deleted.
 func (t *Tree[T]) Prefix(prefix []byte) (*Iterator[T], <-chan struct{}) {
-	iter, watch := prefixSearch(t.root, t.rootWatch, prefix)
-	if t.opts.rootOnlyWatch() {
-		watch = t.rootWatch
-	}
-	return iter, watch
+	return prefixSearch(t.root, t.rootWatch, prefix)
 }
 
 // RootWatch returns a watch channel for the root of the tree.

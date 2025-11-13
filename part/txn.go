@@ -127,9 +127,6 @@ func (txn *Txn[T]) RootWatch() <-chan struct{} {
 // value was found.
 func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 	value, watch, ok := search(txn.root, txn.rootWatch, key)
-	if txn.opts.rootOnlyWatch() {
-		watch = txn.rootWatch
-	}
 	return value, watch, ok
 }
 
@@ -138,11 +135,7 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // the given prefix are upserted or deleted.
 func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
 	txn.mutated.clear()
-	iter, watch := prefixSearch(txn.root, txn.rootWatch, key)
-	if txn.opts.rootOnlyWatch() {
-		watch = txn.rootWatch
-	}
-	return iter, watch
+	return prefixSearch(txn.root, txn.rootWatch, key)
 }
 
 // LowerBound returns an iterator for all objects that have a
