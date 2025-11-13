@@ -15,22 +15,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var quickConfig = &quick.Config{
-	MaxCount: 5000,
-
-	// Make 1-8 byte long strings as input data. Keep the strings shorter
-	// than the default quick value generation to hit the more interesting cases
-	// often.
-	Values: func(args []reflect.Value, rand *rand.Rand) {
-		for i := range args {
-			numBytes := 1 + rand.Intn(8)
-			bs := make([]byte, numBytes)
-			rand.Read(bs)
-			args[i] = reflect.ValueOf(string(bs))
-		}
-	},
-}
-
 // Use an object with strings for both primary and secondary
 // indexing. With non-unique indexes we'll create a composite
 // key out of them by concatenation and thus we need test that
@@ -118,16 +102,75 @@ func TestDB_Quick(t *testing.T) {
 
 	anyTable := AnyTable{table}
 
-	numExpected := 0
-
-	check := func(a, b string) bool {
-		txn := db.WriteTxn(table)
-		_, hadOld, err := table.Insert(txn, quickObj{a, b})
-		require.NoError(t, err, "Insert")
-		if !hadOld {
-			numExpected++
+	values := map[string]string{}
+	pickRandom := func() string {
+		if len(values) == 0 || rand.Intn(10) == 0 {
+			return "nonexisting"
 		}
-		if numExpected != table.NumObjects(txn) {
+		n := rand.Intn(len(values))
+		for a := range values {
+			if n <= 0 {
+				return a
+			}
+			n--
+		}
+		return ""
+	}
+
+	numInserted, numRemoved := 0, 0
+
+	check := func(a, b string, remove bool) bool {
+		txn := db.WriteTxn(table)
+		if remove {
+			key := pickRandom()
+			expected, found := values[key]
+			actual, hadOld, err := table.Delete(txn, quickObj{A: key})
+			if err != nil {
+				t.Logf("delete error: %s", err)
+				return false
+			}
+			if found {
+				if !hadOld {
+					t.Logf("object was inserted but not found when removing")
+					return false
+				}
+				if actual.B != expected {
+					t.Logf("removed object value mismatch %q vs %q", expected, actual.B)
+				}
+				delete(values, key)
+				numRemoved++
+			} else {
+				if hadOld {
+					t.Logf("object was removed when it should have not existed")
+					return false
+				}
+			}
+			txn.Commit()
+			return true
+		}
+
+		old, hadOld, err := table.Insert(txn, quickObj{a, b})
+		require.NoError(t, err, "Insert")
+		numInserted++
+
+		expected, found := values[a]
+		if found {
+			if !hadOld {
+				t.Logf("object was updated but old value not returned")
+				return false
+			}
+			if old.B != expected {
+				t.Logf("insert returned wrong old object, %q vs %q", expected, old.B)
+			}
+		} else {
+			if hadOld {
+				t.Logf("insert returned old value when it should not have existed")
+				return false
+			}
+		}
+		values[a] = b
+
+		if len(values) != table.NumObjects(txn) {
 			t.Logf("wrong object count")
 			return false
 		}
@@ -135,7 +178,7 @@ func TestDB_Quick(t *testing.T) {
 		txn.Commit()
 		rtxn := db.ReadTxn()
 
-		if numExpected != table.NumObjects(rtxn) {
+		if len(values) != table.NumObjects(rtxn) {
 			t.Logf("wrong object count")
 			return false
 		}
@@ -144,15 +187,15 @@ func TestDB_Quick(t *testing.T) {
 		// Check queries against the primary index
 		//
 
-		if numExpected != seqLen(table.All(rtxn)) {
+		if len(values) != seqLen(table.All(rtxn)) {
 			t.Logf("All() via aIndex wrong length")
 			return false
 		}
-		if numExpected != seqLen(table.Prefix(rtxn, aIndex.Query(""))) {
+		if len(values) != seqLen(table.Prefix(rtxn, aIndex.Query(""))) {
 			t.Logf("Prefix() via aIndex wrong length")
 			return false
 		}
-		if numExpected != seqLen(table.LowerBound(rtxn, aIndex.Query(""))) {
+		if len(values) != seqLen(table.LowerBound(rtxn, aIndex.Query(""))) {
 			t.Logf("LowerBound() via aIndex wrong length")
 			return false
 		}
@@ -212,12 +255,12 @@ func TestDB_Quick(t *testing.T) {
 		//
 
 		// Non-unique indexes return the same number of objects as we've inserted.
-		if numExpected != seqLen(table.Prefix(rtxn, bIndex.Query(""))) {
+		if len(values) != seqLen(table.Prefix(rtxn, bIndex.Query(""))) {
 			t.Logf("Prefix() via bIndex wrong length")
 			return false
 		}
 
-		if numExpected != seqLen(table.LowerBound(rtxn, bIndex.Query(""))) {
+		if len(values) != seqLen(table.LowerBound(rtxn, bIndex.Query(""))) {
 			t.Logf("LowerBound() via bIndex wrong length")
 			return false
 		}
@@ -305,7 +348,28 @@ func TestDB_Quick(t *testing.T) {
 		return true
 	}
 
-	require.NoError(t, quick.Check(check, quickConfig))
+	require.NoError(t, quick.Check(check, &quick.Config{
+		MaxCount: 5000,
+
+		// Make 1-8 byte long strings as input data. Keep the strings shorter
+		// than the default quick value generation to hit the more interesting cases
+		// often.
+		Values: func(args []reflect.Value, rand *rand.Rand) {
+			if len(args) != 3 {
+				panic("unexpected args count")
+			}
+			for i := range args[:2] {
+				numBytes := 1 + rand.Intn(8)
+				bs := make([]byte, numBytes)
+				rand.Read(bs)
+				args[i] = reflect.ValueOf(string(bs))
+			}
+			// Remove 33% of the time
+			args[2] = reflect.ValueOf(rand.Intn(3) == 1)
+		},
+	}))
+
+	t.Logf("%d objects after check, %d inserts, %d removals", len(values), numInserted, numRemoved)
 }
 
 func Test_Quick_nonUniqueKey(t *testing.T) {
