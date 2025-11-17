@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/cilium/statedb/internal"
 	"github.com/cilium/statedb/part"
@@ -177,17 +177,46 @@ type genTable[Obj any] struct {
 	primaryAnyIndexer    anyIndexer
 	secondaryAnyIndexers map[string]anyIndexer
 	indexPositions       map[string]int
-	lastWriteTxn         atomic.Pointer[writeTxn]
 	tableHeaderFunc      func() []string
 	tableRowFunc         func(Obj) []string
+	lastWriteTxn         acquiredInfo
 }
 
-func (t *genTable[Obj]) acquired(txn *writeTxn) {
-	t.lastWriteTxn.Store(txn)
+type acquiredInfo struct {
+	mu         sync.Mutex
+	handle     string
+	acquiredAt time.Time
+	duration   time.Duration
+}
+
+func (t *genTable[Obj]) acquired(txn *writeTxnState) {
+	t.lastWriteTxn.mu.Lock()
+	t.lastWriteTxn.handle = txn.handle
+	t.lastWriteTxn.acquiredAt = txn.acquiredAt
+	t.lastWriteTxn.mu.Unlock()
+}
+
+func (t *genTable[Obj]) released() {
+	t.lastWriteTxn.mu.Lock()
+	t.lastWriteTxn.duration = time.Since(t.lastWriteTxn.acquiredAt)
+	t.lastWriteTxn.mu.Unlock()
 }
 
 func (t *genTable[Obj]) getAcquiredInfo() string {
-	return t.lastWriteTxn.Load().acquiredInfo()
+	t.lastWriteTxn.mu.Lock()
+	defer t.lastWriteTxn.mu.Unlock()
+	info := &t.lastWriteTxn
+	if info.handle == "" {
+		return ""
+	}
+
+	since := internal.PrettySince(info.acquiredAt)
+	if info.duration == 0 {
+		// Still locked
+		return fmt.Sprintf("%s (locked for %s)", info.handle, since)
+	}
+	dur := time.Duration(info.duration)
+	return fmt.Sprintf("%s (%s ago, locked for %s)", info.handle, since, internal.PrettyDuration(dur))
 }
 
 func (t *genTable[Obj]) tableEntry() tableEntry {

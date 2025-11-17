@@ -252,7 +252,8 @@ type tableInternal interface {
 	typeName() string                       // Returns the 'Obj' type as string
 	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
 	numDeletedObjects(txn ReadTxn) int      // Number of objects in graveyard
-	acquired(*writeTxn)
+	acquired(*writeTxnState)
+	released()
 	getAcquiredInfo() string
 	tableHeader() []string
 	tableRowAny(any) []string
@@ -269,7 +270,7 @@ type ReadTxn interface {
 }
 
 type WriteTxn interface {
-	getTxn() *writeTxn
+	getTxn() *writeTxnState
 
 	// WriteTxn is always also a ReadTxn
 	ReadTxn
