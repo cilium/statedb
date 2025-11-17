@@ -109,7 +109,8 @@ func TestWatchSetInQueries(t *testing.T) {
 	table.Insert(wtxn, testObject{ID: 1})
 	table.Insert(wtxn, testObject{ID: 2})
 	table.Insert(wtxn, testObject{ID: 3})
-	txn = wtxn.Commit()
+	wtxn.Commit()
+	txn = db.ReadTxn()
 
 	// The 'watchAll' channel should now have closed and Wait() returns.
 	ws.Add(watchAll)

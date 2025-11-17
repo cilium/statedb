@@ -491,7 +491,7 @@ func (txn *writeTxn) Abort() {
 
 // Commit the transaction. Returns a ReadTxn that is the snapshot of the database at the
 // point of commit.
-func (txn *writeTxn) Commit() ReadTxn {
+func (txn *writeTxn) Commit() {
 	runtime.SetFinalizer(txn, nil)
 
 	// We operate here under the following properties:
@@ -515,7 +515,7 @@ func (txn *writeTxn) Commit() ReadTxn {
 	// If db is nil, this transaction has already been committed or aborted, and
 	// thus there is nothing to do.
 	if txn.db == nil {
-		return nil
+		return
 	}
 
 	txn.duration.Store(uint64(time.Since(txn.acquiredAt)))
@@ -525,17 +525,21 @@ func (txn *writeTxn) Commit() ReadTxn {
 	// Commit each individual changed index to each table.
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
-	txnToNotify := []*part.Txn[object]{}
 	for _, table := range txn.modifiedTables {
 		if table == nil {
 			continue
 		}
+		// Check if tables become initialized. We close the channel only after
+		// we've swapped in the new root so that one cannot get a snapshot of
+		// an uninitialized table after observing the channel closing.
+		if !table.initialized && len(table.pendingInitializers) == 0 {
+			close(table.initWatchChan)
+			table.initialized = true
+		}
 		for i := range table.indexes {
 			txn := table.indexes[i].txn
 			if txn != nil {
-				table.indexes[i].tree = txn.Commit()
-				table.indexes[i].txn = nil
-				txnToNotify = append(txnToNotify, txn)
+				txn.Notify()
 			}
 		}
 
@@ -546,10 +550,72 @@ func (txn *writeTxn) Commit() ReadTxn {
 		db.metrics.Revision(name, table.revision)
 	}
 
-	// Acquire the lock on the root tree to sequence the updates to it. We can acquire
-	// it after we've built up the new table entries above, since changes to those were
-	// protected by each table lock (that we're holding here).
+	txn.db.metrics.WriteTxnDuration(
+		txn.handle,
+		txn.tableNames,
+		time.Since(txn.acquiredAt))
+
+	// See if we can defer finalizing the write transaction.
+	if txn.db.openWriteTxn.CompareAndSwap(nil, txn) {
+		return
+	}
 	db.mu.Lock()
+	defer db.mu.Unlock()
+	txn.finalize()
+}
+
+// Commit the transaction. Returns a ReadTxn that is the snapshot of the database at the
+// point of commit.
+func (txn *writeTxn) finalize() {
+	// We operate here under the following properties:
+	//
+	// - Each table that we're modifying has its SortableMutex locked and held by
+	//   the caller (via WriteTxn()). Concurrent updates to other tables are
+	//   allowed (but not to the root pointer), and thus there may be multiple parallel
+	//   Commit()'s in progress, but each of those will only process work for tables
+	//   they have locked, until root is to be updated.
+	//
+	// - Modifications to the root pointer (db.root) are made with the db.mu acquired,
+	//   and thus changes to it are always performed sequentially. The root pointer is
+	//   updated atomically, and thus readers see either an old root or a new root.
+	//   Both the old root and new root are immutable after they're made available via
+	//   the root pointer.
+	//
+	// - As the root is atomically swapped to a new immutable tree of tables of indexes,
+	//   a reader can acquire an immutable snapshot of all data in the database with a
+	//   simpler atomic pointer load.
+
+	// If db is nil, this transaction has already been committed or aborted, and
+	// thus there is nothing to do.
+	if txn.db == nil {
+		return
+	}
+
+	txn.duration.Store(uint64(time.Since(txn.acquiredAt)))
+
+	db := txn.db
+
+	// Commit each individual changed index to each table.
+	// We don't notify yet (CommitOnly) as the root needs to be updated
+	// first as otherwise readers would wake up too early.
+	for _, table := range txn.modifiedTables {
+		if table == nil {
+			continue
+		}
+		for i := range table.indexes {
+			txn := table.indexes[i].txn
+			if txn != nil {
+				table.indexes[i].tree = txn.Commit()
+				table.indexes[i].txn = nil
+			}
+		}
+
+		// Update metrics
+		name := table.meta.Name()
+		db.metrics.GraveyardObjectCount(name, table.numDeletedObjects())
+		db.metrics.ObjectCount(name, table.numObjects())
+		db.metrics.Revision(name, table.revision)
+	}
 
 	// Since the root may have changed since the pointer was last read in WriteTxn(),
 	// load it again and modify the latest version that we now have immobilised by
@@ -557,18 +623,9 @@ func (txn *writeTxn) Commit() ReadTxn {
 	root := *db.root.Load()
 	root = slices.Clone(root)
 
-	var initChansToClose []chan struct{}
-
 	// Insert the modified tables into the root tree of tables.
 	for pos, table := range txn.modifiedTables {
 		if table != nil {
-			// Check if tables become initialized. We close the channel only after
-			// we've swapped in the new root so that one cannot get a snapshot of
-			// an uninitialized table after observing the channel closing.
-			if !table.initialized && len(table.pendingInitializers) == 0 {
-				initChansToClose = append(initChansToClose, table.initWatchChan)
-				table.initialized = true
-			}
 			root[pos] = *table
 		}
 	}
@@ -577,21 +634,9 @@ func (txn *writeTxn) Commit() ReadTxn {
 	// atomically store it.
 	txn.dbRoot = root
 	db.root.Store(&root)
-	db.mu.Unlock()
-
-	// Now that new root is committed, we can notify readers by closing the watch channels of
-	// mutated radix tree nodes in all changed indexes and on the root itself.
-	for _, txn := range txnToNotify {
-		txn.Notify()
-	}
 
 	// With the root pointer updated, we can now release the tables for the next write transaction.
 	txn.smus.Unlock()
-
-	// Notify table initializations
-	for _, ch := range initChansToClose {
-		close(ch)
-	}
 
 	txn.db.metrics.WriteTxnDuration(
 		txn.handle,
@@ -599,7 +644,6 @@ func (txn *writeTxn) Commit() ReadTxn {
 		time.Since(txn.acquiredAt))
 
 	txn.reset()
-	return readTxn(root)
 }
 
 // WriteJSON marshals out the database as JSON into the given writer.

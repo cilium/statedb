@@ -287,8 +287,7 @@ type WriteTxn interface {
 
 	// Commit the changes in the current transaction to the target tables.
 	// This is a no-op if Abort() or Commit() has already been called.
-	// Returns a ReadTxn for reading the database at the time of commit.
-	Commit() ReadTxn
+	Commit()
 }
 
 type Query[Obj any] struct {

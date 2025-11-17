@@ -96,6 +96,7 @@ type dbState struct {
 	gcExited            chan struct{}
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
+	openWriteTxn        atomic.Pointer[writeTxn]
 }
 
 type dbRoot = readTxn
@@ -163,6 +164,15 @@ func (db *DB) registerTable(table TableMeta) error {
 //
 // The returned ReadTxn is not thread-safe.
 func (db *DB) ReadTxn() ReadTxn {
+	if txn := db.openWriteTxn.Load(); txn != nil {
+		// Close the previously open WriteTxn
+		db.mu.Lock()
+		if db.openWriteTxn.CompareAndSwap(txn, nil) {
+			txn.finalize()
+		}
+		db.mu.Unlock()
+	}
+
 	return (*readTxn)(db.root.Load())
 }
 
@@ -174,6 +184,29 @@ func (db *DB) ReadTxn() ReadTxn {
 // The returned WriteTxn is not thread-safe.
 func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 	allTables := append(tables, table)
+
+	if txn := db.openWriteTxn.Load(); txn != nil {
+		// Close the previously open WriteTxn
+		db.mu.Lock()
+		if db.openWriteTxn.CompareAndSwap(txn, nil) {
+			// Can we reuse this?
+			num := 0
+			for _, t := range allTables {
+				if slices.Contains(txn.tableNames, t.Name()) {
+					num++
+					break
+				}
+			}
+			if num == len(allTables) {
+				db.mu.Unlock()
+				return txn
+			}
+
+			txn.finalize()
+		}
+		db.mu.Unlock()
+	}
+
 	smus := internal.SortableMutexes{}
 	for _, table := range allTables {
 		smus = append(smus, table.sortableMutex())

@@ -187,11 +187,19 @@ func (txn *Txn[T]) Commit() *Tree[T] {
 // Tree.Txn() is used again.
 func (txn *Txn[T]) Notify() {
 	for ch := range txn.watches {
-		close(ch)
+		select {
+		case <-ch:
+		default:
+			close(ch)
+		}
 	}
 	clear(txn.watches)
 	if txn.dirty && txn.rootWatch != nil {
-		close(txn.rootWatch)
+		select {
+		case <-txn.rootWatch:
+		default:
+			close(txn.rootWatch)
+		}
 		txn.rootWatch = nil
 	}
 }

@@ -410,7 +410,8 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 		_, _, err := table.Insert(txn, testObject{ID: uint64(i), Tags: tagSet})
 		require.NoError(b, err)
 	}
-	rtxn := txn.Commit()
+	txn.Commit()
+	rtxn := db.ReadTxn()
 
 	q := tagsIndex.Query("test")
 	for b.Loop() {

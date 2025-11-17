@@ -374,7 +374,8 @@ func TestDB_Changes(t *testing.T) {
 	require.NoError(t, err, "failed to create ChangeIterator")
 	iter2, err := table.Changes(wtxn)
 	require.NoError(t, err, "failed to create ChangeIterator")
-	txn0 := wtxn.Commit()
+	wtxn.Commit()
+	txn0 := db.ReadTxn()
 
 	assert.EqualValues(t, 2, expvarInt(metrics.DeleteTrackerCountVar.Get("test")), "DeleteTrackerCount")
 

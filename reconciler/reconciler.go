@@ -39,7 +39,8 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 	// Create the change iterator to watch for inserts and deletes to the table.
 	wtxn := r.DB.WriteTxn(r.config.Table)
 	changeIterator, err := r.config.Table.Changes(wtxn)
-	txn := wtxn.Commit()
+	wtxn.Commit()
+	txn := r.DB.ReadTxn()
 	if err != nil {
 		return fmt.Errorf("watching for changes failed: %w", err)
 	}
