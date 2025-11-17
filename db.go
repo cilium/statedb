@@ -195,12 +195,12 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 		smus:           smus,
 	}
 
-	var tableNames []string
-	for _, table := range tables {
+	tableNames := make([]string, len(tables))
+	for i, table := range tables {
 		tableEntry := root[table.tablePos()]
 		tableEntry.indexes = slices.Clone(tableEntry.indexes)
 		tableEntries[table.tablePos()] = &tableEntry
-		tableNames = append(tableNames, table.Name())
+		tableNames[i] = table.Name()
 
 		db.metrics.WriteTxnTableAcquisition(
 			db.handleName,
