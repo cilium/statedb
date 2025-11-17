@@ -469,7 +469,7 @@ func fuzzWorker(realActionLog *realActionLog, worker int, iterations int) {
 	log := newDebugLogger(worker)
 	for iterations > 0 {
 		targets := randomSubset(fuzzTables)
-		txn := fuzzDB.WriteTxn(targets[0], targets[1:]...)
+		txn := fuzzDB.WriteTxn(targets...)
 		txnActionLog := &txnActionLog{
 			latest: map[tableAndID]actionLogEntry{},
 		}

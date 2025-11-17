@@ -172,11 +172,10 @@ func (db *DB) ReadTxn() ReadTxn {
 // it until Commit() is called. To discard the changes call Abort().
 //
 // The returned WriteTxn is not thread-safe.
-func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
-	allTables := append(tables, table)
-	smus := internal.SortableMutexes{}
-	for _, table := range allTables {
-		smus = append(smus, table.sortableMutex())
+func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
+	smus := make(internal.SortableMutexes, len(tables))
+	for i, table := range tables {
+		smus[i] = table.sortableMutex()
 		if table.tablePos() < 0 {
 			panic(tableError(table.Name(), ErrTableNotRegistered))
 		}
@@ -197,7 +196,7 @@ func (db *DB) WriteTxn(table TableMeta, tables ...TableMeta) WriteTxn {
 	}
 
 	var tableNames []string
-	for _, table := range allTables {
+	for _, table := range tables {
 		tableEntry := root[table.tablePos()]
 		tableEntry.indexes = slices.Clone(tableEntry.indexes)
 		tableEntries[table.tablePos()] = &tableEntry
