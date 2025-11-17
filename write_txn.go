@@ -27,6 +27,7 @@ type writeTxn struct {
 	duration   atomic.Uint64 // the transaction duration after it finished
 
 	modifiedTables []*tableEntry            // table entries being modified
+	numTxns        int                      // number of index transactions opened
 	smus           internal.SortableMutexes // the (sorted) table locks
 	tableNames     []string
 }
@@ -114,6 +115,7 @@ func (txn *writeTxn) indexWriteTxn(meta TableMeta, indexPos int) (indexTxn, erro
 	indexEntry := &table.indexes[indexPos]
 	if indexEntry.txn == nil {
 		indexEntry.txn = indexEntry.tree.Txn()
+		txn.numTxns++
 	}
 	indexEntry.clone = nil
 	return indexTxn{indexEntry.txn, indexEntry.unique}, nil
@@ -525,7 +527,7 @@ func (txn *writeTxn) Commit() ReadTxn {
 	// Commit each individual changed index to each table.
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
-	txnToNotify := []*part.Txn[object]{}
+	txnToNotify := make([]*part.Txn[object], 0, txn.numTxns)
 	for _, table := range txn.modifiedTables {
 		if table == nil {
 			continue
