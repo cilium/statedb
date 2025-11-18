@@ -330,7 +330,7 @@ func (r *partIndexTxn) reindex(idKey index.Key, old *object, new *object) {
 						oldKey = encodeNonUniqueKey(idKey, oldKey)
 					}
 					_, hadOld := r.txn.Delete(oldKey)
-					if !hadOld {
+					if !unique && !hadOld {
 						panic("BUG: delete did not find old object")
 					}
 				}

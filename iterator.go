@@ -71,6 +71,12 @@ func Just[A any](x A) iter.Seq[A] {
 	}
 }
 
+func Just2[A, B any](a A, b B) iter.Seq2[A, B] {
+	return func(yield func(A, B) bool) {
+		yield(a, b)
+	}
+}
+
 func objSeq[Obj any](iter iter.Seq[*object]) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
 		for iobj := range iter {
