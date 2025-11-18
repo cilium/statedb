@@ -5,6 +5,7 @@ package statedb
 
 import (
 	"context"
+	"fmt"
 	"iter"
 	"log/slog"
 	"math/rand"
@@ -462,6 +463,30 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+	for b.Loop() {
+		for _, q := range queries {
+			_, _, ok := table.Get(txn, q)
+			if !ok {
+				b.Fatalf("Object not found")
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_FullIteration_Get_Secondary(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, keyIndex)
+	wtxn := db.WriteTxn(table)
+	queries := []Query[testObject]{}
+	for i := range numObjectsIteration {
+		key := fmt.Sprintf("%d", i)
+		queries = append(queries, keyIndex.Query(key))
+		_, _, err := table.Insert(wtxn, testObject{ID: uint64(i), Key: key})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
