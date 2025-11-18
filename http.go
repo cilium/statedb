@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cilium/statedb/part"
+	"github.com/cilium/statedb/index"
 )
 
 func (db *DB) HTTPHandler() http.Handler {
@@ -122,30 +122,18 @@ type QueryResponse struct {
 	Err string `json:"err,omitempty"`
 }
 
-func runQuery(indexTxn indexReadTxn, lowerbound bool, queryKey []byte, onObject func(object) error) {
-	var iter *part.Iterator[object]
-	if !indexTxn.unique {
-		queryKey = encodeNonUniqueBytes(queryKey)
-	}
+func runQuery(reader tableIndexReader, lowerbound bool, queryKey index.Key, onObject func(object) error) {
+	var newIter func() tableIndexIterator
 	if lowerbound {
-		iter = indexTxn.LowerBound(queryKey)
+		newIter, _ = reader.lowerBound(queryKey)
 	} else {
-		iter, _ = indexTxn.Prefix(queryKey)
+		newIter, _ = reader.list(queryKey)
 	}
-	var match func([]byte) bool
-	switch {
-	case lowerbound:
-		match = func([]byte) bool { return true }
-	case indexTxn.unique:
-		match = func(k []byte) bool { return len(k) == len(queryKey) }
-	default:
-		match = func(k []byte) bool {
-			return nonUniqueKey(k).secondaryLen() == len(queryKey)
-		}
-	}
-	for key, obj, ok := iter.Next(); ok; key, obj, ok = iter.Next() {
-		if !match(key) {
-			continue
+	iter := newIter()
+	for {
+		_, obj, ok := iter.Next()
+		if !ok {
+			break
 		}
 		if err := onObject(obj); err != nil {
 			panic(err)

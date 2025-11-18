@@ -99,7 +99,7 @@ type dbState struct {
 	writeTxnPool        sync.Pool
 }
 
-type dbRoot = readTxn
+type dbRoot = []tableEntry
 
 type Option func(*opts)
 
@@ -213,14 +213,17 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
 	for i, table := range tables {
-		tableEntry := root[table.tablePos()]
+		pos := table.tablePos()
+		tableEntry := root[pos]
 		tableEntry.indexes = slices.Clone(tableEntry.indexes)
-		txn.modifiedTables[table.tablePos()] = &tableEntry
-		txn.tableNames[i] = table.Name()
+		txn.modifiedTables[pos] = &tableEntry
+
+		name := table.Name()
+		txn.tableNames[i] = name
 
 		db.metrics.WriteTxnTableAcquisition(
 			db.handleName,
-			table.Name(),
+			name,
 			table.sortableMutex().AcquireDuration(),
 		)
 		table.acquired(txn)
@@ -234,7 +237,7 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 		acquiredAt.Sub(lockAt),
 	)
 
-	handle := &writeTxnHandle{txn}
+	handle := &writeTxnHandle{txn, nil}
 	runtime.SetFinalizer(handle, txnFinalizer)
 	return handle
 }
@@ -308,7 +311,7 @@ func (db *DB) NewHandle(name string) *DB {
 
 func reuseSlice[T any](s []T, length int) []T {
 	if cap(s) < length {
-		return make([]T, length, length)
+		return make([]T, length)
 	}
 	s = s[:length]
 	return s

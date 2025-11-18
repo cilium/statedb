@@ -355,7 +355,6 @@ func TestDB_Quick(t *testing.T) {
 		// defined by the "B" key first and then by the "A" key.
 		if !isOrdered(t, false, table.Prefix(rtxn, bIndex.Query(""))) {
 			t.Logf("Prefix() via bIndex wrong order")
-			rtxn.mustIndexReadTxn(table, table.indexPos("b")).PrintTree()
 			return false
 		}
 		if !isOrdered(t, false, table.LowerBound(rtxn, bIndex.Query(""))) {
