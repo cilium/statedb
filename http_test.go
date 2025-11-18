@@ -75,9 +75,9 @@ func Test_http_runQuery(t *testing.T) {
 	// idIndex, unique
 	indexTxn, err := txn.indexReadTxn(table, table.indexPos(idIndex.Name))
 	require.NoError(t, err)
-	items := []*object{}
+	items := []object{}
 	onObject := func(obj *object) error {
-		items = append(items, obj)
+		items = append(items, *obj)
 		return nil
 	}
 	runQuery(indexTxn, false, index.Uint64(1), onObject)

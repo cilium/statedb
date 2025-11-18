@@ -44,7 +44,7 @@ func (txn *Txn[T]) Len() int {
 
 // Clone returns a clone of the transaction for reading. The clone is unaffected
 // by any future changes done with the original transaction.
-func (txn *Txn[T]) Clone() Ops[T] {
+func (txn *Txn[T]) Clone() *Tree[T] {
 	// Clear the mutated nodes so that the returned clone won't be changed by
 	// further modifications in this transaction.
 	txn.mutated.clear()
