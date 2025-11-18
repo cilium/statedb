@@ -10,7 +10,9 @@ import (
 	"errors"
 	"expvar"
 	"fmt"
+	"iter"
 	"log/slog"
+	"net/netip"
 	"runtime"
 	"slices"
 	"strconv"
@@ -39,9 +41,10 @@ func TestMain(m *testing.M) {
 }
 
 type testObject struct {
-	ID   uint64           `json:"id" yaml:"id"`
-	Key  string           `json:"key,omitempty" yaml:"key,omitempty"`
-	Tags part.Set[string] `json:"tags" yaml:"tags"`
+	ID     uint64 `json:"id" yaml:"id"`
+	Key    string `json:"key,omitempty" yaml:"key,omitempty"`
+	Prefix netip.Prefix
+	Tags   part.Set[string] `json:"tags" yaml:"tags"`
 }
 
 func (t *testObject) clone() *testObject {
@@ -71,12 +74,14 @@ func (t *testObject) MarshalJSON() ([]byte, error) {
 }
 
 func (t *testObject) TableHeader() []string {
-	return []string{"ID", "Tags"}
+	return []string{"ID", "Key", "Prefix", "Tags"}
 }
 
 func (t *testObject) TableRow() []string {
 	return []string{
 		strconv.FormatUint(uint64(t.ID), 10),
+		t.Key,
+		t.Prefix.String(),
 		strings.Join(slices.Collect(t.Tags.All()), ", "),
 	}
 }
@@ -110,6 +115,13 @@ var (
 		FromKey:    index.String,
 		FromString: index.FromString,
 		Unique:     false,
+	}
+
+	prefixIndex = NetIPPrefixIndex[*testObject]{
+		Name: "prefix",
+		FromObject: func(obj *testObject) iter.Seq[netip.Prefix] {
+			return Just(obj.Prefix)
+		},
 	}
 )
 
