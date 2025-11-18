@@ -25,8 +25,8 @@ func TestScript(t *testing.T) {
 	h := hive.New(
 		Cell, // DB
 		cell.Invoke(func(db *DB) {
-			_ = newTestObjectTable(t, db, "test1", tagsIndex)
-			_ = newTestObjectTable(t, db, "test2", tagsIndex)
+			_ = newTestObjectTable(t, db, "test1", tagsIndex, prefixIndex)
+			_ = newTestObjectTable(t, db, "test2", tagsIndex, prefixIndex)
 		}),
 	)
 	t.Cleanup(func() {

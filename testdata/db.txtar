@@ -70,6 +70,15 @@ cmp obj2.yaml obj2_get.yaml
 db/get -i tags -f yaml -o obj1_get.yaml test1 bar
 cmp obj1.yaml obj1_get.yaml
 
+db/get -i prefix -f yaml -o obj2_get.yaml test1 10.1.2.3/32
+cmp obj2.yaml obj2_get.yaml
+
+db/get -i prefix -f yaml -o obj1_get.yaml test1 10.0.0.0/8
+cmp obj1.yaml obj1_get.yaml
+
+db/get -i prefix -f yaml -o obj2_get.yaml test1 10.1.0.0/16
+cmp obj2.yaml obj2_get.yaml
+
 # List
 db/list -o=list.table test1 1
 cmp obj1.table list.table
@@ -96,6 +105,15 @@ db/prefix test1 1
 db/prefix -o=prefix.table --index=tags test1 ba
 cmp objs.table prefix.table
 
+db/prefix -o=prefix.table --index=prefix test1 0.0.0.0/0
+cmp objs.table prefix.table
+
+db/prefix -o=prefix.table --index=prefix test1 10.0.0.0/8
+cmp objs.table prefix.table
+
+db/prefix -o=prefix.table --index=prefix test1 10.1.2.3/32
+cmp obj2.table prefix.table
+
 # LowerBound
 db/lowerbound -o=lb.table test1 0
 cmp objs.table lb.table
@@ -106,6 +124,15 @@ cmp obj2.table lb.table
 db/lowerbound -o=lb.table test1 3
 cmp empty.table lb.table
 
+db/lowerbound -i=prefix -o=lb.table test1 0.0.0.0/0
+cmp objs.table lb.table
+
+db/lowerbound -i=prefix -o=lb.table test1 10.0.0.0/8
+cmp objs.table lb.table
+
+db/lowerbound -i=prefix -o=lb.table test1 10.1.0.0/16
+cmp obj2.table lb.table
+
 # Compare
 db/cmp test1 objs.table
 db/cmp test1 objs_ids.table
@@ -115,9 +142,11 @@ db/cmp --grep=baz test1 obj2.table
 # Delete
 db/delete test1 obj1.yaml
 db/cmp test1 obj2.table
+! db/empty test1
 
 db/delete test1 obj2.yaml
 db/cmp test1 empty.table
+db/empty test1
 
 # Delete with get
 db/insert test1 obj1.yaml
@@ -126,6 +155,7 @@ db/show test1
 db/get test1 1
 db/get --delete test1 1
 db/cmp test1 empty.table
+db/empty test1
 
 # Delete with prefix
 db/insert test1 obj1.yaml
@@ -133,6 +163,7 @@ db/insert test1 obj2.yaml
 db/cmp test1 objs.table
 db/prefix --index=tags --delete test1 fo
 db/cmp test1 empty.table
+db/empty test1
 
 # Delete with lowerbound
 db/insert test1 obj1.yaml
@@ -148,21 +179,25 @@ db
 
 -- obj1.yaml --
 id: 1
+prefix: 10.0.0.0/8
 tags:
     - bar
     - foo
 -- obj2.yaml --
 id: 2
+prefix: 10.1.2.3/32
 tags:
     - baz
     - foo
 -- test1.yaml --
 id: 1
+prefix: 10.0.0.0/8
 tags:
     - bar
     - foo
 ---
 id: 2
+prefix: 10.1.2.3/32
 tags:
     - baz
     - foo
@@ -182,22 +217,22 @@ tags:
   ]
 }
 -- test1.table --
-ID   Tags
-1    bar, foo
-2    baz, foo
+ID   Key   Prefix        Tags
+1          10.0.0.0/8    bar, foo
+2          10.1.2.3/32   baz, foo
 -- objs.table --
-ID   Tags
-1    bar, foo
-2    baz, foo
+ID   Key   Prefix        Tags
+1          10.0.0.0/8    bar, foo
+2          10.1.2.3/32   baz, foo
 -- objs_ids.table --
 ID
 1
 2
 -- obj1.table --
-ID   Tags
-1    bar, foo
+ID   Key   Prefix       Tags
+1          10.0.0.0/8   bar, foo
 -- obj2.table --
-ID   Tags
-2    baz, foo
+ID   Key   Prefix        Tags
+2          10.1.2.3/32   baz, foo
 -- empty.table --
-ID   Tags
+ID   Key   Prefix   Tags
