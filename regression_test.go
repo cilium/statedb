@@ -149,7 +149,7 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 
 	// Partially observe the changes
 	<-watch
-	changes, watch = changeIter.Next(db.ReadTxn())
+	changes, _ = changeIter.Next(db.ReadTxn())
 	for change := range changes {
 		require.True(t, change.Deleted, "expected Deleted")
 		break
