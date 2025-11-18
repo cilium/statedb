@@ -190,7 +190,7 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 		db:             db,
 		dbRoot:         root,
 		handle:         db.handleName,
-		acquiredAt:     time.Now(),
+		acquiredAt:     acquiredAt,
 		modifiedTables: tableEntries,
 		smus:           smus,
 	}
