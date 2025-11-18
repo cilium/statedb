@@ -28,10 +28,10 @@ func httpFixture(t *testing.T) (*DB, RWTable[*testObject], *httptest.Server) {
 	t.Cleanup(ts.Close)
 
 	wtxn := db.WriteTxn(table)
-	table.Insert(wtxn, &testObject{1, "", part.NewSet("foo")})
-	table.Insert(wtxn, &testObject{2, "", part.NewSet("foo")})
-	table.Insert(wtxn, &testObject{3, "", part.NewSet("foobar")})
-	table.Insert(wtxn, &testObject{4, "", part.NewSet("baz")})
+	table.Insert(wtxn, &testObject{ID: 1, Key: "", Tags: part.NewSet("foo")})
+	table.Insert(wtxn, &testObject{ID: 2, Key: "", Tags: part.NewSet("foo")})
+	table.Insert(wtxn, &testObject{ID: 3, Key: "", Tags: part.NewSet("foobar")})
+	table.Insert(wtxn, &testObject{ID: 4, Key: "", Tags: part.NewSet("baz")})
 	wtxn.Commit()
 
 	return db, table, ts
