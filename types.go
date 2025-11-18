@@ -452,7 +452,7 @@ type anyIndexer struct {
 
 	// fromObject returns the key (or keys for multi-index) to index the
 	// object with.
-	fromObject func(object) index.KeySet
+	fromObject func(*object) index.KeySet
 
 	// fromString converts string into a key. Optional.
 	fromString func(string) (index.Key, error)
@@ -473,18 +473,18 @@ type anyDeleteTracker interface {
 }
 
 type indexEntry struct {
-	tree *part.Tree[object]
+	tree *part.Tree[*object]
 
 	// txn for mutating the index
-	txn *part.Txn[object]
+	txn *part.Txn[*object]
 
 	// clone is the latest memoized clone of [txn] for reading that won't
 	// be invalidated by future writes. Cleared on write.
-	clone  part.Ops[object]
+	clone  part.Ops[*object]
 	unique bool
 }
 
-func (ie *indexEntry) getClone() part.Ops[object] {
+func (ie *indexEntry) getClone() part.Ops[*object] {
 	if ie.clone == nil {
 		if ie.txn == nil {
 			ie.clone = ie.tree

@@ -100,7 +100,7 @@ func (h dbHandler) query(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
-	onObject := func(obj object) error {
+	onObject := func(obj *object) error {
 		return enc.Encode(QueryResponse{
 			Rev: obj.revision,
 			Obj: obj.data,
@@ -122,8 +122,8 @@ type QueryResponse struct {
 	Err string `json:"err,omitempty"`
 }
 
-func runQuery(indexTxn indexReadTxn, lowerbound bool, queryKey []byte, onObject func(object) error) {
-	var iter *part.Iterator[object]
+func runQuery(indexTxn indexReadTxn, lowerbound bool, queryKey []byte, onObject func(*object) error) {
+	var iter *part.Iterator[*object]
 	if !indexTxn.unique {
 		queryKey = encodeNonUniqueBytes(queryKey)
 	}

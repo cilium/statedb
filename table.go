@@ -84,7 +84,7 @@ func NewTableAny[Obj any](
 	toAnyIndexer := func(idx Indexer[Obj], pos int) anyIndexer {
 		return anyIndexer{
 			name: idx.indexName(),
-			fromObject: func(iobj object) index.KeySet {
+			fromObject: func(iobj *object) index.KeySet {
 				return idx.fromObject(iobj.data.(Obj))
 			},
 			fromString: idx.fromString,
@@ -250,15 +250,15 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	entry.indexes = make([]indexEntry, len(t.indexPositions))
 
 	// For revision indexes we only need to watch the root.
-	entry.indexes[RevisionIndexPos] = indexEntry{part.New[object](part.RootOnlyWatch), nil, nil, true}
-	entry.indexes[GraveyardRevisionIndexPos] = indexEntry{part.New[object](part.RootOnlyWatch), nil, nil, true}
-	entry.indexes[GraveyardIndexPos] = indexEntry{part.New[object](), nil, nil, true}
+	entry.indexes[RevisionIndexPos] = indexEntry{part.New[*object](part.RootOnlyWatch), nil, nil, true}
+	entry.indexes[GraveyardRevisionIndexPos] = indexEntry{part.New[*object](part.RootOnlyWatch), nil, nil, true}
+	entry.indexes[GraveyardIndexPos] = indexEntry{part.New[*object](), nil, nil, true}
 
 	entry.indexes[t.indexPos(t.primaryIndexer.indexName())] =
-		indexEntry{part.New[object](), nil, nil, true}
+		indexEntry{part.New[*object](), nil, nil, true}
 
 	for index, indexer := range t.secondaryAnyIndexers {
-		entry.indexes[t.indexPos(index)] = indexEntry{part.New[object](), nil, nil, indexer.unique}
+		entry.indexes[t.indexPos(index)] = indexEntry{part.New[*object](), nil, nil, indexer.unique}
 	}
 
 	return entry
@@ -379,7 +379,7 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64
 func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
 	indexPos := t.indexPos(q.index)
 	var (
-		ops    part.Ops[object]
+		ops    part.Ops[*object]
 		unique bool
 	)
 	if wtxn, ok := txn.(WriteTxn); ok {
@@ -405,7 +405,7 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 		unique = entry.unique
 	}
 
-	var iobj object
+	var iobj *object
 	if unique {
 		// On a unique index we can do a direct get rather than a prefix search.
 		iobj, watch, ok = ops.Get(q.key)
@@ -514,7 +514,7 @@ func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, 
 }
 
 func (t *genTable[Obj]) InsertWatch(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, watch <-chan struct{}, err error) {
-	var old object
+	var old *object
 	old, hadOld, watch, err = txn.getTxn().insert(t, Revision(0), obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
@@ -523,7 +523,7 @@ func (t *genTable[Obj]) InsertWatch(txn WriteTxn, obj Obj) (oldObj Obj, hadOld b
 }
 
 func (t *genTable[Obj]) Modify(txn WriteTxn, obj Obj, merge func(old, new Obj) Obj) (oldObj Obj, hadOld bool, err error) {
-	var old object
+	var old *object
 	old, hadOld, _, err = txn.getTxn().modify(t, Revision(0), obj,
 		func(old any) any {
 			return merge(old.(Obj), obj)
@@ -535,7 +535,7 @@ func (t *genTable[Obj]) Modify(txn WriteTxn, obj Obj, merge func(old, new Obj) O
 }
 
 func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var old object
+	var old *object
 	old, hadOld, _, err = txn.getTxn().insert(t, rev, obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
@@ -544,7 +544,7 @@ func (t *genTable[Obj]) CompareAndSwap(txn WriteTxn, rev Revision, obj Obj) (old
 }
 
 func (t *genTable[Obj]) Delete(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var old object
+	var old *object
 	old, hadOld, err = txn.getTxn().delete(t, Revision(0), obj)
 	if hadOld {
 		oldObj = old.data.(Obj)
@@ -553,7 +553,7 @@ func (t *genTable[Obj]) Delete(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, 
 }
 
 func (t *genTable[Obj]) CompareAndDelete(txn WriteTxn, rev Revision, obj Obj) (oldObj Obj, hadOld bool, err error) {
-	var old object
+	var old *object
 	old, hadOld, err = txn.getTxn().delete(t, rev, obj)
 	if hadOld {
 		oldObj = old.data.(Obj)

@@ -55,7 +55,7 @@ func ToSeq[A, B any](seq iter.Seq2[A, B]) iter.Seq[A] {
 }
 
 // partSeq returns a casted sequence of objects from a part Iterator.
-func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
+func partSeq[Obj any](iter *part.Iterator[*object]) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
 		// Iterate over a clone of the original iterator to allow the sequence to be iterated
 		// from scratch multiple times.
@@ -90,7 +90,7 @@ func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
 //	aaaa\0ccc4
 //
 // We yield "aaaa\0bbb4", skip "aaa\0abab3" and yield "aaaa\0ccc4".
-func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searchKey []byte) iter.Seq2[Obj, Revision] {
+func nonUniqueSeq[Obj any](iter *part.Iterator[*object], prefixSearch bool, searchKey []byte) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
 		// Clone the iterator to allow multiple iterations over the sequence.
 		it := iter.Clone()
@@ -144,7 +144,7 @@ func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searc
 	}
 }
 
-func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []byte) iter.Seq2[Obj, Revision] {
+func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[*object], searchKey []byte) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
 		// Clone the iterator to allow multiple uses.
 		iter = iter.Clone()
@@ -179,7 +179,9 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 
 // iterator adapts the "any" object iterator to a typed object.
 type iterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
+	iter interface {
+		Next() ([]byte, *object, bool)
+	}
 }
 
 func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {

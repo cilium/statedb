@@ -40,12 +40,12 @@ type writeTxnState struct {
 }
 
 type indexReadTxn struct {
-	part.Ops[object]
+	part.Ops[*object]
 	unique bool
 }
 
 type indexTxn struct {
-	*part.Txn[object]
+	*part.Txn[*object]
 	unique bool
 }
 
@@ -132,39 +132,33 @@ func (txn *writeTxnState) mustIndexWriteTxn(meta TableMeta, indexPos int) indexT
 	return indexTxn
 }
 
-func (txn *writeTxnState) insert(meta TableMeta, guardRevision Revision, data any) (object, bool, <-chan struct{}, error) {
+func (txn *writeTxnState) insert(meta TableMeta, guardRevision Revision, data any) (*object, bool, <-chan struct{}, error) {
 	return txn.modify(meta, guardRevision, data, func(_ any) any { return data })
 }
 
-func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData any, merge func(any) any) (object, bool, <-chan struct{}, error) {
+func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData any, merge func(any) any) (*object, bool, <-chan struct{}, error) {
 	if txn == nil {
-		return object{}, false, nil, ErrTransactionClosed
+		return nil, false, nil, ErrTransactionClosed
 	}
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
 	table := txn.modifiedTables[meta.tablePos()]
 	if table == nil {
-		return object{}, false, nil, tableError(tableName, ErrTableNotLockedForWriting)
+		return nil, false, nil, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
 	table.revision++
 	revision := table.revision
 
 	// Update the primary index first
-	idKey := meta.primary().fromObject(object{data: newData}).First()
+	obj := &object{data: newData, revision: revision}
+	idKey := meta.primary().fromObject(obj).First()
 	idIndexTxn := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
 
-	var obj object
 	oldObj, oldExists, watch := idIndexTxn.ModifyWatch(idKey,
-		func(old object) object {
-			obj = object{
-				revision: revision,
-			}
-			if old.revision == 0 {
-				// Zero revision: the object did not exist so no need to call merge.
-				obj.data = newData
-			} else {
+		func(old *object) *object {
+			if old != nil {
 				obj.data = merge(old.data)
 			}
 			return obj
@@ -191,7 +185,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 			// the insert.
 			idIndexTxn.Delete(idKey)
 			table.revision = oldRevision
-			return object{}, false, watch, ErrObjectNotFound
+			return nil, false, watch, ErrObjectNotFound
 		}
 		if oldObj.revision != guardRevision {
 			// Revert the change. We're assuming here that it's rarer for CompareAndSwap() to
@@ -279,16 +273,16 @@ func (txn *writeTxnState) addDeleteTracker(meta TableMeta, trackerName string, d
 	return nil
 }
 
-func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data any) (object, bool, error) {
+func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data any) (*object, bool, error) {
 	if txn == nil {
-		return object{}, false, ErrTransactionClosed
+		return nil, false, ErrTransactionClosed
 	}
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
 	table := txn.modifiedTables[meta.tablePos()]
 	if table == nil {
-		return object{}, false, tableError(tableName, ErrTableNotLockedForWriting)
+		return nil, false, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
 	table.revision++
@@ -297,11 +291,11 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	// Delete from the primary index first to grab the object.
 	// We assume that "data" has only enough defined fields to
 	// compute the primary key.
-	idKey := meta.primary().fromObject(object{data: data}).First()
+	idKey := meta.primary().fromObject(&object{data: data}).First()
 	idIndexTree := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
 	obj, existed := idIndexTree.Delete(idKey)
 	if !existed {
-		return object{}, false, nil
+		return nil, false, nil
 	}
 
 	// For CompareAndDelete() validate against guard revision and if there's a mismatch,
@@ -335,11 +329,14 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	// And finally insert the object into the graveyard.
 	if txn.hasDeleteTrackers(meta) {
 		graveyardIndex := txn.mustIndexWriteTxn(meta, GraveyardIndexPos)
-		obj.revision = revision
-		if _, existed := graveyardIndex.Insert(idKey, obj); existed {
+		deadObj := &object{
+			data:     obj.data,
+			revision: revision,
+		}
+		if _, existed := graveyardIndex.Insert(idKey, deadObj); existed {
 			panic("BUG: Double deletion! Deleted object already existed in graveyard")
 		}
-		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Insert(index.Uint64(revision), obj)
+		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Insert(index.Uint64(revision), deadObj)
 	}
 
 	return obj, true, nil
@@ -526,7 +523,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// Commit each individual changed index to each table.
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
-	txnToNotify := make([]*part.Txn[object], 0, txn.numTxns)
+	txnToNotify := make([]*part.Txn[*object], 0, txn.numTxns)
 	for _, table := range txn.modifiedTables {
 		if table == nil {
 			continue
