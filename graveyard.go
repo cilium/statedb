@@ -65,7 +65,7 @@ func graveyardWorker(db *DB, ctx context.Context, gcRateLimitInterval time.Durat
 
 			objIter := indexTree.Iterator()
 			for key, obj, ok := objIter.Next(); ok; key, obj, ok = objIter.Next() {
-				if obj.revision > lowWatermark {
+				if obj.revision() > lowWatermark {
 					break
 				}
 				toBeDeleted[table.meta] = append(toBeDeleted[table.meta], key)

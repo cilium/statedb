@@ -59,7 +59,7 @@ func (t AnyTable) Get(txn ReadTxn, index string, key string) (any, Revision, boo
 	}
 	if itxn.unique {
 		obj, _, ok := itxn.Get(rawKey)
-		return obj.data, obj.revision, ok, nil
+		return obj.data, obj.revision(), ok, nil
 	}
 	// For non-unique indexes we need to prefix search and make sure to fully
 	// match the secondary key.
@@ -70,7 +70,7 @@ func (t AnyTable) Get(txn ReadTxn, index string, key string) (any, Revision, boo
 			break
 		}
 		if nonUniqueKey(k).secondaryLen() == len(rawKey) {
-			return obj.data, obj.revision, true, nil
+			return obj.data, obj.revision(), true, nil
 		}
 	}
 	return nil, 0, false, nil
@@ -112,7 +112,7 @@ func (t AnyTable) List(txn ReadTxn, index string, key string) (iter.Seq2[any, Re
 		value, _, ok := itxn.Get(rawKey)
 		return func(yield func(any, Revision) bool) {
 			if ok {
-				yield(value.data, value.revision)
+				yield(value.data, value.revision())
 			}
 		}, nil
 	}

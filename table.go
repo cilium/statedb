@@ -413,7 +413,7 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 			return
 		}
 		obj = iobj.data.(Obj)
-		revision = iobj.revision
+		revision = iobj.revision()
 		return
 	}
 
@@ -434,7 +434,7 @@ func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision u
 
 	if ok {
 		obj = iobj.data.(Obj)
-		revision = iobj.revision
+		revision = iobj.revision()
 	}
 	return
 }
@@ -494,7 +494,7 @@ func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Rev
 		value, watch, ok := indexTxn.Get(q.key)
 		seq := func(yield func(Obj, Revision) bool) {
 			if ok {
-				yield(value.data.(Obj), value.revision)
+				yield(value.data.(Obj), value.revision())
 			}
 		}
 		return seq, watch

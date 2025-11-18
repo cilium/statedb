@@ -102,7 +102,7 @@ func (h dbHandler) query(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	onObject := func(obj *object) error {
 		return enc.Encode(QueryResponse{
-			Rev: obj.revision,
+			Rev: obj.revision(),
 			Obj: obj.data,
 		})
 	}

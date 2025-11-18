@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"iter"
@@ -440,8 +441,12 @@ const (
 
 // object is the format in which data is stored in the tables.
 type object struct {
-	revision uint64
-	data     any
+	revisionKey [8]byte
+	data        any
+}
+
+func (o *object) revision() uint64 {
+	return binary.BigEndian.Uint64(o.revisionKey[:])
 }
 
 // anyIndexer is an untyped indexer. The user-defined 'Index[Obj,Key]'

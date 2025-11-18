@@ -65,7 +65,7 @@ func partSeq[Obj any](iter *part.Iterator[*object]) iter.Seq2[Obj, Revision] {
 			if !ok {
 				break
 			}
-			if !yield(iobj.data.(Obj), iobj.revision) {
+			if !yield(iobj.data.(Obj), iobj.revision()) {
 				break
 			}
 		}
@@ -137,7 +137,7 @@ func nonUniqueSeq[Obj any](iter *part.Iterator[*object], prefixSearch bool, sear
 				visited[string(primary)] = struct{}{}
 			}
 
-			if !yield(iobj.data.(Obj), iobj.revision) {
+			if !yield(iobj.data.(Obj), iobj.revision()) {
 				break
 			}
 		}
@@ -169,7 +169,7 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[*object], searchKey []b
 				}
 				visited[string(primary)] = struct{}{}
 
-				if !yield(iobj.data.(Obj), iobj.revision) {
+				if !yield(iobj.data.(Obj), iobj.revision()) {
 					return
 				}
 			}
@@ -188,7 +188,7 @@ func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
 	_, iobj, ok := it.iter.Next()
 	if ok {
 		obj = iobj.data.(Obj)
-		revision = iobj.revision
+		revision = iobj.revision()
 	}
 	return
 }

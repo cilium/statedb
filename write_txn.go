@@ -152,7 +152,8 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	revision := table.revision
 
 	// Update the primary index first
-	obj := &object{data: newData, revision: revision}
+	obj := &object{data: newData}
+	binary.BigEndian.PutUint64(obj.revisionKey[:], revision)
 	idKey := meta.primary().fromObject(obj).First()
 	idIndexTxn := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
 
@@ -187,7 +188,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 			table.revision = oldRevision
 			return nil, false, watch, ErrObjectNotFound
 		}
-		if oldObj.revision != guardRevision {
+		if oldObj.revision() != guardRevision {
 			// Revert the change. We're assuming here that it's rarer for CompareAndSwap() to
 			// fail and thus we're optimizing to have only one lookup in the common case
 			// (versus doing a Get() and then Insert()).
@@ -200,22 +201,19 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	// Update revision index
 	revIndexTxn := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
 	if oldExists {
-		var revKey [8]byte // to avoid heap allocation
-		binary.BigEndian.PutUint64(revKey[:], oldObj.revision)
-		_, ok := revIndexTxn.Delete(revKey[:])
+		_, ok := revIndexTxn.Delete(oldObj.revisionKey[:])
 		if !ok {
 			panic("BUG: Old revision index entry not found")
 		}
 	}
-	revIndexTxn.Insert(index.Uint64(obj.revision), obj)
+	revIndexTxn.Insert(obj.revisionKey[:], obj)
 
 	// If it's new, possibly remove an older deleted object with the same
 	// primary key from the graveyard.
 	if !oldExists {
 		if old, existed := txn.mustIndexWriteTxn(meta, GraveyardIndexPos).Delete(idKey); existed {
-			var revKey [8]byte // to avoid heap allocation
-			binary.BigEndian.PutUint64(revKey[:], old.revision)
-			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Delete(revKey[:])
+			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).
+				Delete(old.revisionKey[:])
 		}
 	}
 
@@ -301,7 +299,7 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	// For CompareAndDelete() validate against guard revision and if there's a mismatch,
 	// revert the change.
 	if guardRevision > 0 {
-		if obj.revision != guardRevision {
+		if obj.revision() != guardRevision {
 			idIndexTree.Insert(idKey, obj)
 			table.revision = oldRevision
 			return obj, true, ErrRevisionNotEqual
@@ -310,9 +308,7 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 
 	// Remove the object from the revision index.
 	indexTree := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
-	var revKey [8]byte // To avoid heap allocation
-	binary.BigEndian.PutUint64(revKey[:], obj.revision)
-	if _, ok := indexTree.Delete(revKey[:]); !ok {
+	if _, ok := indexTree.Delete(obj.revisionKey[:]); !ok {
 		panic("BUG: Object to be deleted not found from revision index")
 	}
 
@@ -330,13 +326,14 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	if txn.hasDeleteTrackers(meta) {
 		graveyardIndex := txn.mustIndexWriteTxn(meta, GraveyardIndexPos)
 		deadObj := &object{
-			data:     obj.data,
-			revision: revision,
+			data: obj.data,
 		}
+		binary.BigEndian.PutUint64(deadObj.revisionKey[:], revision)
 		if _, existed := graveyardIndex.Insert(idKey, deadObj); existed {
 			panic("BUG: Double deletion! Deleted object already existed in graveyard")
 		}
-		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).Insert(index.Uint64(revision), deadObj)
+		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).
+			Insert(deadObj.revisionKey[:], deadObj)
 	}
 
 	return obj, true, nil
