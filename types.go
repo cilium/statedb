@@ -426,16 +426,15 @@ type TableWritable interface {
 //
 
 const (
-	PrimaryIndexPos = 0
-
 	reservedIndexPrefix       = "__"
 	RevisionIndex             = "__revision__"
-	RevisionIndexPos          = 1
+	RevisionIndexPos          = 0
 	GraveyardIndex            = "__graveyard__"
-	GraveyardIndexPos         = 2
+	GraveyardIndexPos         = 1
 	GraveyardRevisionIndex    = "__graveyard_revision__"
-	GraveyardRevisionIndexPos = 3
+	GraveyardRevisionIndexPos = 2
 
+	PrimaryIndexPos        = 3
 	SecondaryIndexStartPos = 4
 )
 
@@ -507,7 +506,7 @@ type tableEntry struct {
 }
 
 func (t *tableEntry) numObjects() int {
-	indexEntry := t.indexes[t.meta.indexPos(RevisionIndex)]
+	indexEntry := t.indexes[RevisionIndexPos]
 	if indexEntry.txn != nil {
 		return indexEntry.txn.Len()
 	}
@@ -515,7 +514,7 @@ func (t *tableEntry) numObjects() int {
 }
 
 func (t *tableEntry) numDeletedObjects() int {
-	indexEntry := t.indexes[t.meta.indexPos(GraveyardIndex)]
+	indexEntry := t.indexes[GraveyardIndexPos]
 	if indexEntry.txn != nil {
 		return indexEntry.txn.Len()
 	}
