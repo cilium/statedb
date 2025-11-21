@@ -54,18 +54,49 @@ func ToSeq[A, B any](seq iter.Seq2[A, B]) iter.Seq[A] {
 	}
 }
 
-// partSeq returns a casted sequence of objects from a part Iterator.
-func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
+// Values takes a Seq2 and produces a Seq with the second element of the pair.
+func Values[A, B any](seq iter.Seq2[A, B]) iter.Seq[B] {
+	return func(yield func(B) bool) {
+		for _, x := range seq {
+			if !yield(x) {
+				break
+			}
+		}
+	}
+}
+
+func Just[A any](x A) iter.Seq[A] {
+	return func(yield func(A) bool) {
+		yield(x)
+	}
+}
+
+func Just2[A, B any](a A, b B) iter.Seq2[A, B] {
+	return func(yield func(A, B) bool) {
+		yield(a, b)
+	}
+}
+
+func objSeq[Obj any](iter iter.Seq[*object]) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
-		// Iterate over a clone of the original iterator to allow the sequence to be iterated
-		// from scratch multiple times.
+		for iobj := range iter {
+			if !yield(iobj.data.(Obj), iobj.revision()) {
+				break
+			}
+		}
+	}
+}
+
+func partSeq(iter *part.Iterator[*object]) iter.Seq[*object] {
+	return func(yield func(*object) bool) {
+		// Clone the iterator for reuse
 		it := iter.Clone()
 		for {
 			_, iobj, ok := it.Next()
 			if !ok {
 				break
 			}
-			if !yield(iobj.data.(Obj), iobj.revision) {
+			if !yield(iobj) {
 				break
 			}
 		}
@@ -90,8 +121,8 @@ func partSeq[Obj any](iter *part.Iterator[object]) iter.Seq2[Obj, Revision] {
 //	aaaa\0ccc4
 //
 // We yield "aaaa\0bbb4", skip "aaa\0abab3" and yield "aaaa\0ccc4".
-func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searchKey []byte) iter.Seq2[Obj, Revision] {
-	return func(yield func(Obj, Revision) bool) {
+func nonUniquePartSeq(iter *part.Iterator[*object], prefixSearch bool, searchKey []byte) iter.Seq[*object] {
+	return func(yield func(*object) bool) {
 		// Clone the iterator to allow multiple iterations over the sequence.
 		it := iter.Clone()
 
@@ -137,23 +168,23 @@ func nonUniqueSeq[Obj any](iter *part.Iterator[object], prefixSearch bool, searc
 				visited[string(primary)] = struct{}{}
 			}
 
-			if !yield(iobj.data.(Obj), iobj.revision) {
+			if !yield(iobj) {
 				break
 			}
 		}
 	}
 }
 
-func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []byte) iter.Seq2[Obj, Revision] {
-	return func(yield func(Obj, Revision) bool) {
+func nonUniqueLowerBoundPartSeq(iter *part.Iterator[*object], searchKey []byte) iter.Seq[*object] {
+	return func(yield func(*object) bool) {
 		// Clone the iterator to allow multiple uses.
-		iter = iter.Clone()
+		it := iter.Clone()
 
 		// Keep track of objects we've already seen as multiple keys in non-unique
 		// index may map to a single object.
 		visited := map[string]struct{}{}
 		for {
-			key, iobj, ok := iter.Next()
+			key, iobj, ok := it.Next()
 			if !ok {
 				break
 			}
@@ -169,7 +200,7 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 				}
 				visited[string(primary)] = struct{}{}
 
-				if !yield(iobj.data.(Obj), iobj.revision) {
+				if !yield(iobj) {
 					return
 				}
 			}
@@ -179,58 +210,60 @@ func nonUniqueLowerBoundSeq[Obj any](iter *part.Iterator[object], searchKey []by
 
 // iterator adapts the "any" object iterator to a typed object.
 type iterator[Obj any] struct {
-	iter interface{ Next() ([]byte, object, bool) }
+	next func() (*object, bool)
+	stop func()
 }
 
-func (it *iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
-	_, iobj, ok := it.iter.Next()
+func seqToIterator[Obj any](objs iter.Seq[*object]) *iterator[Obj] {
+	next, stop := iter.Pull(objs)
+	return &iterator[Obj]{next, stop}
+
+}
+
+func (it iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
+	iobj, ok := it.next()
 	if ok {
 		obj = iobj.data.(Obj)
-		revision = iobj.revision
+		revision = iobj.revision()
 	}
 	return
 }
 
-// Iterator for iterating a sequence objects.
-type Iterator[Obj any] interface {
-	// Next returns the next object and its revision if ok is true, otherwise
-	// zero values to mean that the iteration has finished.
-	Next() (obj Obj, rev Revision, ok bool)
-}
-
-func NewDualIterator[Obj any](left, right Iterator[Obj]) *DualIterator[Obj] {
-	return &DualIterator[Obj]{
+func newDualIterator[Obj any](left, right *iterator[Obj]) *dualIterator[Obj] {
+	return &dualIterator[Obj]{
 		left:  iterState[Obj]{iter: left},
 		right: iterState[Obj]{iter: right},
 	}
 }
 
 type iterState[Obj any] struct {
-	iter Iterator[Obj]
+	iter *iterator[Obj]
 	obj  Obj
 	rev  Revision
 	ok   bool
 }
 
-// DualIterator allows iterating over two iterators in revision order.
+// dualIterator allows iterating over two iterators in revision order.
 // Meant to be used for combined iteration of LowerBound(ByRevision)
 // and Deleted().
-type DualIterator[Obj any] struct {
+type dualIterator[Obj any] struct {
 	left  iterState[Obj]
 	right iterState[Obj]
 }
 
-func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool) {
+func (it *dualIterator[Obj]) next() (obj Obj, revision uint64, fromLeft, ok bool) {
 	// Advance the iterators
 	if !it.left.ok && it.left.iter != nil {
 		it.left.obj, it.left.rev, it.left.ok = it.left.iter.Next()
 		if !it.left.ok {
+			it.left.iter.stop()
 			it.left.iter = nil
 		}
 	}
 	if !it.right.ok && it.right.iter != nil {
 		it.right.obj, it.right.rev, it.right.ok = it.right.iter.Next()
 		if !it.right.ok {
+			it.right.iter.stop()
 			it.right.iter = nil
 		}
 	}
@@ -257,30 +290,45 @@ func (it *DualIterator[Obj]) Next() (obj Obj, revision uint64, fromLeft, ok bool
 	}
 }
 
+func (it *dualIterator[Obj]) stop() {
+	if it.left.iter != nil {
+		it.left.iter.stop()
+		it.left.iter = nil
+	}
+	if it.right.iter != nil {
+		it.right.iter.stop()
+		it.right.iter = nil
+	}
+}
+
 type changeIterator[Obj any] struct {
 	table          Table[Obj]
 	revision       Revision
 	deleteRevision Revision
 	dt             *deleteTracker[Obj]
-	iter           *DualIterator[Obj]
+	iter           *dualIterator[Obj]
 	watch          <-chan struct{}
 }
 
 func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
+	if it.iter != nil {
+		it.iter.stop()
+	}
+
 	// Instead of indexReadTxn() we look up directly here so we don't
 	// refresh from mutated indexes in case [txn] is a WriteTxn. This
 	// is important as the WriteTxn may be aborted and thus revisions will
 	// reset back and watermarks bumped from here would be invalid.
 	indexEntry := txn.root()[it.table.tablePos()].indexes[RevisionIndexPos]
-	indexTxn := indexReadTxn{indexEntry.tree, indexEntry.unique}
-	updateIter := &iterator[Obj]{indexTxn.LowerBound(index.Uint64(it.revision + 1))}
+	updated, _ := indexEntry.index.lowerBound(index.Uint64(it.revision + 1))
+	updateIter := seqToIterator[Obj](updated)
 	deleteIter := it.dt.deleted(txn, it.deleteRevision+1)
-	it.iter = NewDualIterator(deleteIter, updateIter)
+	it.iter = newDualIterator(deleteIter, updateIter)
 
 	// It is enough to watch the revision index and not the graveyard since
 	// any object that is inserted into the graveyard will be deleted from
 	// the revision index.
-	it.watch = indexTxn.RootWatch()
+	it.watch = indexEntry.index.rootWatch()
 }
 
 func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Revision], watch <-chan struct{}) {
@@ -311,7 +359,7 @@ func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Rev
 		if it.iter == nil {
 			return
 		}
-		for obj, rev, deleted, ok := it.iter.Next(); ok; obj, rev, deleted, ok = it.iter.Next() {
+		for obj, rev, deleted, ok := it.iter.next(); ok; obj, rev, deleted, ok = it.iter.next() {
 			if deleted {
 				it.deleteRevision = rev
 				it.dt.mark(rev)
@@ -352,6 +400,10 @@ func (it *changeIterator[Obj]) nextAny(txn ReadTxn) (iter.Seq2[Change[any], Revi
 }
 
 func (it *changeIterator[Obj]) close() {
+	if it.iter != nil {
+		it.iter.stop()
+		it.iter = nil
+	}
 	if it.dt != nil {
 		it.dt.close()
 	}
