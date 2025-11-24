@@ -194,6 +194,9 @@ func (txn *Txn[T]) Notify() {
 		close(txn.rootWatch)
 		txn.rootWatch = nil
 	}
+	if !txn.opts.rootOnlyWatch() {
+		validateRemovedWatches(txn.oldRoot, txn.root)
+	}
 }
 
 // PrintTree to the standard output. For debugging.
@@ -426,9 +429,15 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	if target == root {
 		switch {
 		case root.isLeaf() || root.size() == 0:
+			if root.watch != nil {
+				txn.watches[root.watch] = struct{}{}
+			}
 			// Root is a leaf or node without children
 			newRoot = nil
 		case root.size() == 1:
+			if root.watch != nil {
+				txn.watches[root.watch] = struct{}{}
+			}
 			// Root is a non-leaf node with single child. We can replace
 			// the root with the child.
 			child := root.children()[0]
@@ -471,6 +480,9 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	} else {
 		// The target node is a leaf node or a non-leaf node without any
 		// children. We can just drop it from the parent.
+		if this.node.watch != nil {
+			txn.watches[this.node.watch] = struct{}{}
+		}
 		parent.node = txn.removeChild(parent.node, this.index)
 	}
 	index--
@@ -672,6 +684,50 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 	for _, child := range node.children() {
 		if child != nil {
 			validateTree(child, parents, watches)
+		}
+	}
+}
+
+func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
+	if !runValidation {
+		return
+	}
+
+	var collectWatches func(depth int, watches map[<-chan struct{}]int, node *header[T])
+	collectWatches = func(depth int, watches map[<-chan struct{}]int, node *header[T]) {
+		if node == nil {
+			return
+		}
+		if node.watch == nil {
+			panic("nil watch channel")
+		}
+		watches[node.watch] = depth
+		if leaf := node.getLeaf(); leaf != nil && !node.isLeaf() {
+			watches[leaf.watch] = depth
+		}
+		for _, child := range node.children() {
+			if child != nil {
+				collectWatches(depth+1, watches, child)
+			}
+		}
+	}
+	oldWatches := map[<-chan struct{}]int{}
+	collectWatches(0, oldWatches, oldRoot)
+	newWatches := map[<-chan struct{}]int{}
+	collectWatches(0, newWatches, newRoot)
+
+	// Any nodes that are not part of the new tree must have their watch channels closed.
+	for watch := range newWatches {
+		delete(oldWatches, watch)
+	}
+	for watch, depth := range oldWatches {
+		select {
+		case <-watch:
+		default:
+			oldRoot.printTree(0)
+			fmt.Println("---")
+			newRoot.printTree(0)
+			panic(fmt.Sprintf("dropped watch channel %p at depth %d not closed", watch, depth))
 		}
 	}
 }
