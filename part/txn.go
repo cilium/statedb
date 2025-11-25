@@ -527,12 +527,18 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 			remainingIndex = 1
 		}
 
+		if parent.watch != nil {
+			txn.watches[parent.watch] = struct{}{}
+		}
+
 		child := parent.node4().children[remainingIndex]
 		// Clone for prefix adjustment, but leave watch alone.
+		// The node must not be marked as mutated since we didn't clone
+		// the watch.
 		childClone := child.clone(false)
 		childClone.watch = child.watch
 		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
-		newParent = childClone
+		return childClone
 
 	case parent.kind() == nodeKind256 && size <= 49:
 		demoted := (&node48[T]{header: *parent}).self()
