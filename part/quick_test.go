@@ -22,18 +22,24 @@ var quickConfig = &quick.Config{
 }
 
 func TestQuick_InsertGetPrefix(t *testing.T) {
+	t.Parallel()
+
 	var tree *Tree[string]
 	insert := func(key, value string) any {
 		watchChannels := []<-chan struct{}{}
+		// Add all possible watch channels for prefixes of the key
 		for i := range len(key) {
 			_, watch := tree.Prefix([]byte(key)[:i])
 			watchChannels = append(watchChannels, watch)
 		}
+		// Check that root watch channel always closes on modifications.
+		watchChannels = append(watchChannels, tree.rootWatch)
 
 		_, watchBefore, _ := tree.Get([]byte(key))
 		if watchBefore == nil {
 			return "nil watch from Get()"
 		}
+		watchChannels = append(watchChannels, watchBefore)
 
 		txn := tree.Txn()
 		_, _, watchInsert := txn.InsertWatch([]byte(key), value)
@@ -53,18 +59,12 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 		}
 		tree = txn.CommitAndNotify()
 
-		select {
-		case <-watchBefore:
-		default:
-			return "Get() watch channel did not close after Insert!"
-		}
-
-		// Check that all prefix watch channels closed
+		// Check that all watch channels closed that we expected to
 		for _, ch := range watchChannels {
 			select {
 			case <-ch:
 			default:
-				return "prefix watch channel did not close"
+				return "watch channel did not close"
 			}
 		}
 
@@ -116,6 +116,8 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 }
 
 func TestQuick_IteratorReuse(t *testing.T) {
+	t.Parallel()
+
 	tree := New[string]()
 
 	iterate := func(key, value string, cloneFirst bool) bool {
@@ -163,6 +165,8 @@ func TestQuick_IteratorReuse(t *testing.T) {
 }
 
 func TestQuick_Delete(t *testing.T) {
+	t.Parallel()
+
 	tree := New[string]()
 
 	do := func(key, value string, delete bool) bool {
@@ -203,6 +207,8 @@ func TestQuick_Delete(t *testing.T) {
 }
 
 func TestQuick_ClosedWatch(t *testing.T) {
+	t.Parallel()
+
 	tree := New[string]()
 	insert := func(key, value string) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
@@ -251,6 +257,8 @@ func TestQuick_ClosedWatch(t *testing.T) {
 }
 
 func TestQuick_Map(t *testing.T) {
+	t.Parallel()
+
 	type result struct {
 		old, new int
 	}

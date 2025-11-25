@@ -17,6 +17,8 @@ import (
 // unique index only returns exact matches.
 // https://github.com/cilium/cilium/issues/29324
 func Test_Regression_29324(t *testing.T) {
+	t.Parallel()
+
 	type object struct {
 		ID  string
 		Tag string
@@ -182,6 +184,7 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 // E.g. <a><z><1> and <aa><a><2> were yielded in the incorrect order
 // <aa><a><2> and <a><z><1>, which implied "aa" < "a"!
 func Test_Regression_Prefix_NonUnique(t *testing.T) {
+	t.Parallel()
 	type object struct {
 		ID  string
 		Tag string

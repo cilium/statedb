@@ -193,6 +193,7 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 }
 
 func TestDB_InsertWatch(t *testing.T) {
+	t.Parallel()
 	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
 
 	txn := db.WriteTxn(table)
@@ -1221,6 +1222,8 @@ func TestDB_InitializationTransitions(t *testing.T) {
 }
 
 func TestDB_EmptyKeys(t *testing.T) {
+	t.Parallel()
+
 	db := New()
 	table, err := NewTable(
 		db,

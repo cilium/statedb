@@ -13,8 +13,8 @@ import (
 // Txn is a transaction against a tree. It allows doing efficient
 // modifications to a tree by caching and reusing cloned nodes.
 type Txn[T any] struct {
-	oldRoot   *header[T]
 	root      *header[T]
+	oldRoot   *header[T]
 	rootWatch chan struct{}
 
 	dirty bool
@@ -190,6 +190,9 @@ func (txn *Txn[T]) Notify() {
 		close(ch)
 	}
 	clear(txn.watches)
+	if !txn.dirty && len(txn.watches) > 0 {
+		panic("BUG: watch channels marked but txn not dirty")
+	}
 	if txn.dirty && txn.rootWatch != nil {
 		close(txn.rootWatch)
 		txn.rootWatch = nil
@@ -202,6 +205,11 @@ func (txn *Txn[T]) Notify() {
 // PrintTree to the standard output. For debugging.
 func (txn *Txn[T]) PrintTree() {
 	txn.root.printTree(0)
+	fmt.Printf("watches: ")
+	for watch := range txn.watches {
+		fmt.Printf("%p ", watch)
+	}
+	fmt.Println()
 }
 
 func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
@@ -638,10 +646,10 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 		"node with single child has no leaf")
 
 	// Node16 must have occupancy higher than 4
-	assert(node.kind() != nodeKind256 || node.size() > 4, "node16 has fewer children than 17")
+	assert(node.kind() != nodeKind16 || node.size() > 4, "node16 has fewer children than 5")
 
 	// Node48 must have occupancy higher than 16
-	assert(node.kind() != nodeKind256 || node.size() > 16, "node48 has fewer children than 17")
+	assert(node.kind() != nodeKind48 || node.size() > 16, "node48 has fewer children than 17")
 
 	// Node256 must have occupancy higher than 48
 	assert(node.kind() != nodeKind256 || node.size() > 48, "node256 has fewer children than 49")
@@ -693,17 +701,48 @@ func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
 		return
 	}
 
-	var collectWatches func(depth int, watches map[<-chan struct{}]int, node *header[T])
-	collectWatches = func(depth int, watches map[<-chan struct{}]int, node *header[T]) {
+	// nodeStruct memoizes the structure for a node.
+	nodeStruct := map[*header[T]]string{}
+
+	// summarizeNodeStructure "lazily" summarizes the internal structure of a node,
+	// e.g. it's watch channel, size, leaf and children. The lazy construction speeds
+	// things up a lot as we only look at the structure in certain specific cases.
+	var summarizeNodeStructure func(node *header[T]) func() string
+	summarizeNodeStructure = func(node *header[T]) func() string {
+		if node == nil {
+			return func() string { return "" }
+		}
+		if s, found := nodeStruct[node]; found {
+			return func() string { return s }
+		}
+		return func() string {
+			var childS string
+			for _, child := range node.children() {
+				if child != nil {
+					childS += summarizeNodeStructure(child)()
+				}
+			}
+			var leafS string
+			if leaf := node.getLeaf(); leaf != nil && !node.isLeaf() {
+				leafS = summarizeNodeStructure(leaf.self())()
+			}
+			s := fmt.Sprintf("K:%d S:%d W:%p L:[%s] C:[%s]", node.kind(), node.size(), node.watch, leafS, childS)
+			nodeStruct[node] = s
+			return s
+		}
+	}
+
+	var collectWatches func(depth int, watches map[<-chan struct{}]func() string, node *header[T])
+	collectWatches = func(depth int, watches map[<-chan struct{}]func() string, node *header[T]) {
 		if node == nil {
 			return
 		}
 		if node.watch == nil {
 			panic("nil watch channel")
 		}
-		watches[node.watch] = depth
+		watches[node.watch] = summarizeNodeStructure(node)
 		if leaf := node.getLeaf(); leaf != nil && !node.isLeaf() {
-			watches[leaf.watch] = depth
+			watches[leaf.watch] = summarizeNodeStructure(leaf.self())
 		}
 		for _, child := range node.children() {
 			if child != nil {
@@ -711,23 +750,39 @@ func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
 			}
 		}
 	}
-	oldWatches := map[<-chan struct{}]int{}
+
+	oldWatches := map[<-chan struct{}]func() string{}
 	collectWatches(0, oldWatches, oldRoot)
-	newWatches := map[<-chan struct{}]int{}
+	newWatches := map[<-chan struct{}]func() string{}
 	collectWatches(0, newWatches, newRoot)
+
+	// Check that any nodes that kept the old watch channel have exactly
+	// the same leaf and children structure.
+	for watch, oldDescFn := range oldWatches {
+		newDescFn, found := newWatches[watch]
+		if found {
+			oldDesc := oldDescFn()
+			newDesc := newDescFn()
+			if oldDesc != newDesc {
+				panic(fmt.Sprintf("node with retained watch channel has different structure:\nexpected: %s\n     got: %s", oldDesc, newDesc))
+			}
+		}
+
+	}
 
 	// Any nodes that are not part of the new tree must have their watch channels closed.
 	for watch := range newWatches {
 		delete(oldWatches, watch)
 	}
-	for watch, depth := range oldWatches {
+
+	for watch, desc := range oldWatches {
 		select {
 		case <-watch:
 		default:
 			oldRoot.printTree(0)
 			fmt.Println("---")
 			newRoot.printTree(0)
-			panic(fmt.Sprintf("dropped watch channel %p at depth %d not closed", watch, depth))
+			panic(fmt.Sprintf("dropped watch channel %p not closed %s", watch, desc()))
 		}
 	}
 }

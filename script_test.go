@@ -20,6 +20,7 @@ import (
 )
 
 func TestScript(t *testing.T) {
+	t.Parallel()
 	log := hivetest.Logger(t)
 	h := hive.New(
 		Cell, // DB
