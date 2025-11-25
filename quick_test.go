@@ -96,6 +96,7 @@ func seqLen[A, B any](it iter.Seq2[A, B]) int {
 }
 
 func TestDB_Quick(t *testing.T) {
+	t.Parallel()
 	db := New()
 	table, err := NewTable(db, "test", aIndex, bIndex)
 	require.NoError(t, err, "NewTable")
@@ -149,9 +150,13 @@ func TestDB_Quick(t *testing.T) {
 			return true
 		}
 
+		getObj, _, getWatch, getFound := table.GetWatch(txn, aIndex.Query(a))
+
 		old, hadOld, err := table.Insert(txn, quickObj{a, b})
 		require.NoError(t, err, "Insert")
 		numInserted++
+
+		require.Equal(t, getFound, hadOld)
 
 		expected, found := values[a]
 		if found {
@@ -161,6 +166,7 @@ func TestDB_Quick(t *testing.T) {
 			}
 			if old.B != expected {
 				t.Logf("insert returned wrong old object, %q vs %q", expected, old.B)
+				return false
 			}
 		} else {
 			if hadOld {
@@ -176,6 +182,17 @@ func TestDB_Quick(t *testing.T) {
 		}
 
 		txn.Commit()
+
+		if hadOld {
+			select {
+			case <-getWatch:
+			default:
+				t.Logf("get watch channel not closed after insert")
+				return false
+			}
+			require.Equal(t, old, getObj)
+		}
+
 		rtxn := db.ReadTxn()
 
 		if len(values) != table.NumObjects(rtxn) {
@@ -373,6 +390,7 @@ func TestDB_Quick(t *testing.T) {
 }
 
 func Test_Quick_nonUniqueKey(t *testing.T) {
+	t.Parallel()
 	check := func(p1, s1, p2, s2 []byte) bool {
 		key1 := encodeNonUniqueKey(p1, s1)
 		expectedLen := encodedLength(p1) + 1 + encodedLength(s1) + 2

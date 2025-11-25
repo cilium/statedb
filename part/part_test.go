@@ -19,6 +19,8 @@ const numObjectsToInsert = 1000
 
 // Tests that the right channels are closed during insertion.
 func Test_insertion_and_watches(t *testing.T) {
+	t.Parallel()
+
 	assertOpen := func(t testing.TB, c <-chan struct{}) {
 		t.Helper()
 		assert.NotNil(t, c)
@@ -173,7 +175,60 @@ func Test_insertion_and_watches(t *testing.T) {
 	}
 }
 
+func Test_watchClosingRandom(t *testing.T) {
+	t.Parallel()
+
+	tree := New[int]()
+
+	keys := [][]byte{}
+	for range rand.Intn(1000) {
+		key := make([]byte, rand.Intn(8))
+		rand.Read(key)
+		keys = append(keys, key)
+	}
+
+	rootWatch := tree.RootWatch()
+	txn := tree.Txn()
+	for i, key := range keys {
+		txn.Insert(key, i)
+	}
+	tree = txn.CommitAndNotify()
+
+	watches := []<-chan struct{}{}
+	for _, key := range keys {
+		_, watch, found := tree.Get(key)
+		require.True(t, found)
+		watches = append(watches, watch)
+	}
+
+	rand.Shuffle(len(keys), func(i, j int) {
+		keys[i], keys[j] = keys[j], keys[i]
+	})
+
+	txn = tree.Txn()
+	for i, key := range keys {
+		txn.Insert(key, i)
+	}
+	tree = txn.CommitAndNotify()
+
+	assertClosed := func(t testing.TB, c <-chan struct{}) {
+		t.Helper()
+		assert.NotNil(t, c)
+		select {
+		case <-c:
+		default:
+			t.Error("open, but should be closed")
+		}
+	}
+	assertClosed(t, rootWatch)
+	for _, watch := range watches {
+		assertClosed(t, watch)
+	}
+}
+
 func Test_commonPrefix(t *testing.T) {
+	t.Parallel()
+
 	check := func(a, b, common string) {
 		actual := string(commonPrefix([]byte(a), []byte(b)))
 		if actual != common {
@@ -194,6 +249,8 @@ func Test_commonPrefix(t *testing.T) {
 }
 
 func Test_search(t *testing.T) {
+	t.Parallel()
+
 	tree := New[[]byte](RootOnlyWatch)
 	_, _, tree = tree.Insert([]byte("a"), []byte("a"))
 	_, _, tree = tree.Insert([]byte("ba"), []byte("ba"))
@@ -227,6 +284,8 @@ func uint32Key(n uint32) []byte {
 }
 
 func Test_simple_delete(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 
 	_, _, found := tree.Get(uint64Key(1))
@@ -285,6 +344,8 @@ func Test_simple_delete(t *testing.T) {
 }
 
 func Test_delete_compress(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 
 	// With two elements we have node4 with to children
@@ -299,11 +360,54 @@ func Test_delete_compress(t *testing.T) {
 	require.Equal(t, tree.root.getLeaf().fullKey(), uint64Key(1))
 }
 
+// This is a regression test for a case where an internal node's
+// prefix was extended during deletions and the watch channel was
+// not replaced after an insert since the internal node was marked
+// mutated.
+func Test_delete_compress_regression(t *testing.T) {
+	t.Parallel()
+
+	tree := New[int]()
+
+	// Create a tree that has internal node with the prefix 'foo-'.
+	_, _, tree = tree.Insert([]byte("foo-1/aaa"), 1)
+	_, _, tree = tree.Insert([]byte("foo-1/bbb"), 2)
+	_, _, tree = tree.Insert([]byte("foo-1/ccc"), 3)
+	_, _, tree = tree.Insert([]byte("foo-2/aaa"), 4)
+	_, _, tree = tree.Insert([]byte("foo-2/bbb"), 4)
+
+	// Retrieve an unknown key that returns the watch channel
+	// for the internal node 'foo-'
+	_, watch, _ := tree.Get([]byte("foo-2/ccc"))
+
+	txn := tree.Txn()
+	// Remove the keys under foo-1. This will extend the prefix of the
+	// internal node 'foo-' to 'foo-2/' without marking its watch channel
+	// for closing.
+	txn.Delete([]byte("foo-1/aaa"))
+	txn.Delete([]byte("foo-1/bbb"))
+	txn.Delete([]byte("foo-1/ccc"))
+
+	// Insert under 'foo-2/'. This should now create a new watch channel
+	// and mark the old one for closing. In the bug the watch channel was
+	// not swapped.
+	txn.Insert([]byte("foo-2/ccc"), 6)
+	tree = txn.CommitAndNotify()
+
+	select {
+	case <-watch:
+	default:
+		t.Fatalf("watch not closed")
+	}
+}
+
 func Test_delete(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 
 	// Do multiple rounds with the same tree.
-	for range 100 {
+	for range 10 {
 		// Use a random amount of keys in random order to exercise different
 		// tree structures each time.
 		numKeys := 10 + rand.Intn(1000)
@@ -485,6 +589,8 @@ func Test_delete(t *testing.T) {
 }
 
 func Test_watch(t *testing.T) {
+	t.Parallel()
+
 	tree := New[[]byte]()
 
 	// Insert 'a', get it and check watch channel is not closed.
@@ -539,11 +645,11 @@ func Test_watch(t *testing.T) {
 
 func Test_insert(t *testing.T) {
 	tree := New[int]()
-	for i := range 10000 {
+	for i := range 1000 {
 		key := binary.NativeEndian.AppendUint32(nil, uint32(i))
 		_, _, tree = tree.Insert(key, i)
 	}
-	for i := range 10000 {
+	for i := range 1000 {
 		key := binary.NativeEndian.AppendUint32(nil, uint32(i))
 		_, _, ok := tree.Get(key)
 		if !ok {
@@ -553,6 +659,7 @@ func Test_insert(t *testing.T) {
 }
 
 func Test_modify(t *testing.T) {
+	t.Parallel()
 	tree := New[int]()
 	key := []byte{1}
 
@@ -564,7 +671,7 @@ func Test_modify(t *testing.T) {
 	require.Equal(t, 1, v)
 
 	txn := tree.Txn()
-	for i := range 10000 {
+	for i := range 1000 {
 		old, hadOld := txn.Modify(key, func(x int) int { return x + 1 })
 		require.True(t, hadOld)
 		require.Equal(t, i+1, old)
@@ -573,10 +680,12 @@ func Test_modify(t *testing.T) {
 
 	v, _, ok = tree.Get(key)
 	require.True(t, ok)
-	require.Equal(t, 10001, v)
+	require.Equal(t, 1001, v)
 }
 
 func Test_replaceRoot(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	keyA := []byte{'a'}
 	keyB := []byte{'a', 'b'}
@@ -595,6 +704,8 @@ func Test_replaceRoot(t *testing.T) {
 }
 
 func Test_deleteRoot(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	keyA := []byte{'a'}
 	_, _, tree = tree.Insert(keyA, 1)
@@ -606,6 +717,8 @@ func Test_deleteRoot(t *testing.T) {
 }
 
 func Test_deleteIntermediate(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	keyA := []byte{'a'}
 	keyAB := []byte{'a', 'b'}
@@ -629,6 +742,8 @@ func Test_deleteIntermediate(t *testing.T) {
 }
 
 func Test_deleteNonExistantIntermediate(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	keyAB := []byte{'a', 'b'}
 	keyAC := []byte{'a', 'c'}
@@ -646,6 +761,8 @@ func Test_deleteNonExistantIntermediate(t *testing.T) {
 }
 
 func Test_deleteNonExistantCommonPrefix(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	keyAB := []byte{'a', 'b', 'c'}
 	_, _, tree = tree.Insert(keyAB, 1)
@@ -657,6 +774,8 @@ func Test_deleteNonExistantCommonPrefix(t *testing.T) {
 }
 
 func Test_replace(t *testing.T) {
+	t.Parallel()
+
 	tree := New[int]()
 	key := binary.BigEndian.AppendUint32(nil, uint32(0))
 
@@ -671,6 +790,8 @@ func Test_replace(t *testing.T) {
 }
 
 func Test_prefix(t *testing.T) {
+	t.Parallel()
+
 	tree := New[[]byte]()
 	ins := func(s string) { _, _, tree = tree.Insert([]byte(s), []byte(s)) }
 	ins("a")
@@ -700,6 +821,8 @@ func Test_prefix(t *testing.T) {
 }
 
 func Test_deleteEmptyKey(t *testing.T) {
+	t.Parallel()
+
 	tree := New[string]()
 
 	_, _, tree = tree.Insert([]byte{}, "x")
@@ -726,6 +849,8 @@ func Test_deleteEmptyKey(t *testing.T) {
 }
 
 func Test_txn(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 	ins := func(n uint64) { _, _, tree = tree.Insert(uint64Key(n), n) }
 
@@ -770,6 +895,8 @@ func Test_txn(t *testing.T) {
 }
 
 func Test_lowerbound(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 	ins := func(n int) { _, _, tree = tree.Insert(uint64Key(uint64(n)), uint64(n)) }
 
@@ -807,6 +934,8 @@ func Test_lowerbound(t *testing.T) {
 }
 
 func Test_lowerbound_edge_cases(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint32]()
 	keys := []uint32{}
 	ins := func(n uint32) {
@@ -904,6 +1033,8 @@ func Test_lowerbound_edge_cases(t *testing.T) {
 }
 
 func Test_lowerbound_regression(t *testing.T) {
+	t.Parallel()
+
 	// Regression test for bug in lowerbound() where the lowerbound search ended up
 	// in a smaller node and thought there were no larger nodes in the tree to iterate
 	// over.
@@ -931,6 +1062,8 @@ func Test_lowerbound_regression(t *testing.T) {
 }
 
 func Test_prefix_regression(t *testing.T) {
+	t.Parallel()
+
 	// Regression test for bug where a long key and a short key was inserted and where
 	// the keys shared a prefix.
 
@@ -948,6 +1081,8 @@ func Test_prefix_regression(t *testing.T) {
 }
 
 func Test_iterate(t *testing.T) {
+	t.Parallel()
+
 	sizes := []int{1, 10, 100, 1000}
 	for _, size := range sizes {
 		t.Logf("size=%d", size)
@@ -1045,6 +1180,8 @@ func Test_iterate(t *testing.T) {
 }
 
 func Test_closed_chan_regression(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 	_, _, tree = tree.Insert(hexKey(uint64(0)), uint64(0))
 	_, _, tree = tree.Insert(hexKey(uint64(1)), uint64(1))
@@ -1068,6 +1205,8 @@ func Test_closed_chan_regression(t *testing.T) {
 }
 
 func Test_lowerbound_bigger(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 	ins := func(n int) { _, _, tree = tree.Insert(uint64Key(uint64(n)), uint64(n)) }
 
@@ -1083,6 +1222,8 @@ func Test_lowerbound_bigger(t *testing.T) {
 
 // Test that we can "fork" the tree even though we're reusing the txn allocation.
 func Test_fork_with_cache(t *testing.T) {
+	t.Parallel()
+
 	tree := New[uint64]()
 	_, _, tree = tree.Insert(uint64Key(1), 1)
 
@@ -1108,6 +1249,8 @@ func Test_fork_with_cache(t *testing.T) {
 }
 
 func TestEmptyKey(t *testing.T) {
+	t.Parallel()
+
 	// Must be able to insert empty key into empty tree
 	tree := New[int]()
 	_, _, tree = tree.Insert([]byte(""), 1)

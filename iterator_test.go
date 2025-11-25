@@ -12,6 +12,7 @@ import (
 )
 
 func TestCollectFilterMapToSeq(t *testing.T) {
+	t.Parallel()
 	type testObject struct {
 		ID int
 	}

@@ -18,6 +18,8 @@ import (
 )
 
 func TestStringMap(t *testing.T) {
+	t.Parallel()
+
 	var m Map[string, int]
 
 	//
@@ -137,6 +139,7 @@ func TestStringMap(t *testing.T) {
 }
 
 func TestSingletonMap(t *testing.T) {
+	t.Parallel()
 	var m Map[string, int]
 
 	// check singleton properties
@@ -275,6 +278,7 @@ func TestSingletonMap(t *testing.T) {
 }
 
 func TestMapTxn(t *testing.T) {
+	t.Parallel()
 	var m Map[string, int]
 
 	// Empty map
@@ -380,6 +384,7 @@ func TestMapTxn(t *testing.T) {
 }
 
 func TestUint64Map(t *testing.T) {
+	t.Parallel()
 	// TestStringMap tests most of the operations. We just check here that
 	// fromBytes and toBytes work and can iterate in the right order.
 	var m Map[uint64, int]
@@ -404,6 +409,7 @@ func TestUint64Map(t *testing.T) {
 }
 
 func TestRegisterKeyType(t *testing.T) {
+	t.Parallel()
 	type testKey struct {
 		X string
 	}
@@ -423,6 +429,7 @@ func TestRegisterKeyType(t *testing.T) {
 }
 
 func TestMapJSON(t *testing.T) {
+	t.Parallel()
 	var m Map[string, int]
 	m = m.Set("foo", 1).Set("bar", 2).Set("baz", 3)
 
@@ -436,6 +443,7 @@ func TestMapJSON(t *testing.T) {
 }
 
 func TestMapYAMLStringKey(t *testing.T) {
+	t.Parallel()
 	var m Map[string, int]
 
 	bs, err := yaml.Marshal(m)
@@ -455,6 +463,7 @@ func TestMapYAMLStringKey(t *testing.T) {
 }
 
 func TestMapYAMLStructKey(t *testing.T) {
+	t.Parallel()
 	type key struct {
 		A int    `yaml:"a"`
 		B string `yaml:"b"`

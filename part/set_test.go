@@ -15,6 +15,8 @@ import (
 )
 
 func TestStringSet(t *testing.T) {
+	t.Parallel()
+
 	var s part.Set[string]
 
 	assert.False(t, s.Has("nothing"), "Has nothing")
@@ -59,6 +61,7 @@ func TestStringSet(t *testing.T) {
 }
 
 func TestSetJSON(t *testing.T) {
+	t.Parallel()
 	s := part.NewSet("foo", "bar", "baz")
 
 	bs, err := json.Marshal(s)
@@ -71,6 +74,7 @@ func TestSetJSON(t *testing.T) {
 }
 
 func TestSetYAML(t *testing.T) {
+	t.Parallel()
 	s := part.NewSet("foo", "bar", "baz")
 
 	bs, err := yaml.Marshal(s)

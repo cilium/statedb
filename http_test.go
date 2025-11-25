@@ -20,6 +20,8 @@ import (
 )
 
 func httpFixture(t *testing.T) (*DB, RWTable[testObject], *httptest.Server) {
+	t.Parallel()
+
 	db, table, _ := newTestDB(t, tagsIndex)
 
 	ts := httptest.NewServer(db.HTTPHandler())

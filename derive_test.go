@@ -80,6 +80,8 @@ func newNopHealth() (cell.Health, *nopHealth) {
 var _ cell.Health = &nopHealth{}
 
 func TestDerive(t *testing.T) {
+	t.Parallel()
+
 	var (
 		db       *DB
 		inTable  RWTable[testObject]
