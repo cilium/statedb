@@ -26,7 +26,7 @@ type Txn[T any] struct {
 	// that we can keep mutating without cloning them again.
 	// It is cleared if the transaction is cloned or iterated
 	// upon.
-	mutated *nodeMutated
+	mutated *nodeMutated[T]
 
 	// watches contains the channels of cloned nodes that should be closed
 	// when transaction is committed.
@@ -213,14 +213,14 @@ func (txn *Txn[T]) PrintTree() {
 }
 
 func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
-	if nodeMutatedExists(txn.mutated, n) {
+	if txn.mutated.exists(n) {
 		return n
 	}
 	if n.watch != nil {
 		txn.watches[n.watch] = struct{}{}
 	}
 	n = n.clone(!txn.opts.rootOnlyWatch())
-	nodeMutatedSet(txn.mutated, n)
+	txn.mutated.set(n)
 	return n
 }
 
@@ -265,7 +265,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 					txn.watches[this.watch] = struct{}{}
 				}
 				this = this.promote()
-				nodeMutatedSet(txn.mutated, this)
+				txn.mutated.set(this)
 			} else {
 				// Node is big enough, clone it so we can mutate it
 				this = txn.cloneNode(this)
@@ -371,7 +371,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 		newNode.setSize(2)
 	}
 	*thisp = newNode.self()
-	nodeMutatedSet(txn.mutated, newNode.self())
+	txn.mutated.set(newNode.self())
 
 	return
 }
@@ -602,7 +602,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 	if parent.watch != nil {
 		txn.watches[parent.watch] = struct{}{}
 	}
-	nodeMutatedSet(txn.mutated, newParent)
+	txn.mutated.set(newParent)
 	return newParent
 }
 
