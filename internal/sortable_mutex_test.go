@@ -67,3 +67,14 @@ func TestSortableMutex_Chaos(t *testing.T) {
 
 	wg.Wait()
 }
+
+func Benchmark_SortableMutex(b *testing.B) {
+	smu1 := NewSortableMutex()
+	smu2 := NewSortableMutex()
+	smus := SortableMutexes{smu1, smu2}
+
+	for b.Loop() {
+		smus.Lock()
+		smus.Unlock()
+	}
+}
