@@ -1532,3 +1532,94 @@ func Benchmark_Delete_Random(b *testing.B) {
 	}
 	b.ReportMetric(float64(numObjects*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
+
+func Benchmark_nodeMutatedClear(b *testing.B) {
+	var nm nodeMutated[bool]
+	for b.Loop() {
+		nm.clear()
+		nm.clear()
+		nm.clear()
+		nm.clear()
+		nm.clear()
+	}
+}
+
+func Benchmark_nodeMutatedExists(b *testing.B) {
+	var nm nodeMutated[bool]
+	h := &header[bool]{}
+	nm.set(h)
+	for b.Loop() {
+		nm.exists(h)
+		nm.exists(h)
+		nm.exists(h)
+		nm.exists(h)
+		nm.exists(h)
+	}
+}
+
+func Benchmark_find16(b *testing.B) {
+	n := &node16[bool]{
+		header:   header[bool]{},
+		leaf:     nil,
+		children: [16]*header[bool]{},
+		keys: [16]byte{
+			0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+		},
+	}
+	n.setKind(nodeKind16)
+	n.setSize(16)
+
+	for b.Loop() {
+		n.find(16)
+	}
+}
+
+func Benchmark_findIndex16(b *testing.B) {
+	n := &node16[bool]{
+		header:   header[bool]{},
+		leaf:     nil,
+		children: [16]*header[bool]{},
+		keys: [16]byte{
+			0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+		},
+	}
+	n.setKind(nodeKind16)
+	n.setSize(16)
+
+	for b.Loop() {
+		n.findIndex(16)
+	}
+}
+
+func Benchmark_find4(b *testing.B) {
+	n := &node4[bool]{
+		header:   header[bool]{},
+		leaf:     nil,
+		children: [4]*header[bool]{},
+		keys: [4]byte{
+			0, 1, 2, 3,
+		},
+	}
+	n.setKind(nodeKind4)
+	n.setSize(4)
+
+	for b.Loop() {
+		n.find(4)
+	}
+}
+
+func Benchmark_findIndex4(b *testing.B) {
+	n := &node4[bool]{
+		header: header[bool]{},
+		leaf:   nil,
+		keys: [4]byte{
+			0, 1, 2, 3,
+		},
+	}
+	n.setKind(nodeKind4)
+	n.setSize(4)
+
+	for b.Loop() {
+		n.findIndex(4)
+	}
+}
