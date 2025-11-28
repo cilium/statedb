@@ -301,21 +301,30 @@ func (n *header[T]) findIndex(key byte) (*header[T], int) {
 	case nodeKind4:
 		n4 := n.node4()
 		size := n4.size()
-		for i := 0; i < int(size); i++ {
-			if n4.keys[i] == key {
-				return n4.children[i], i
-			} else if n4.keys[i] > key {
-				return nil, i
-			}
+		i := size
+		switch {
+		case n4.keys[0] >= key:
+			i = 0
+		case n4.keys[1] >= key:
+			i = 1
+		case n4.keys[2] >= key:
+			i = 2
+		case n4.keys[3] >= key:
+			i = 3
 		}
-		return nil, size
+		if i < size && n4.keys[i] == key {
+			return n4.children[i], i
+		}
+		return nil, i
 	case nodeKind16:
 		n16 := n.node16()
 		size := n16.size()
 		for i := 0; i < int(size); i++ {
-			if n16.keys[i] == key {
-				return n16.children[i], i
-			} else if n16.keys[i] > key {
+			k := n16.keys[i]
+			if k >= key {
+				if k == key {
+					return n16.children[i], i
+				}
 				return nil, i
 			}
 		}
@@ -358,13 +367,8 @@ func (n *header[T]) find(key byte) *header[T] {
 		return nil
 	case nodeKind16:
 		n16 := n.node16()
-		size := n16.size()
-		for i := 0; i < int(size); i++ {
-			if n16.keys[i] == key {
-				return n16.children[i]
-			} else if n16.keys[i] > key {
-				return nil
-			}
+		if idx := bytes.IndexByte(n16.keys[:n16.size()], key); idx >= 0 {
+			return n16.children[idx]
 		}
 		return nil
 	case nodeKind48:
