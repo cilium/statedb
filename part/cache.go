@@ -7,6 +7,10 @@ import (
 	"unsafe"
 )
 
+// nodeMutatedSize is the number of cloned node pointers to keep in cache.
+// Value was arrived at by observing reconciler/benchmark with different sizes.
+// The clear() method was benchmarked and there was no difference between
+// say 16 and 256.
 const nodeMutatedSize = 256 // must be power-of-two
 
 // nodeMutated is a probabilistic check for seeing if a node has
@@ -52,9 +56,7 @@ func (nm *nodeMutated[T]) exists(n *header[T]) bool {
 // This is fine though as we do compare the actual *header[T] pointers
 // and this is probabilistic anyway as this is a fixed size cache.
 func slot(p uintptr) int {
-	p >>= 4 // ignore low order bits
-	// use some relevant bits from the pointer
-	slot := uint8(p) ^ uint8(p>>8) ^ uint8(p>>16)
+	slot := uint8(p >> 10)
 	return int(slot & (nodeMutatedSize - 1))
 }
 
