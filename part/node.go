@@ -38,6 +38,12 @@ func (n *header[T]) prefix() []byte {
 	return unsafe.Slice(n.prefixP, n.prefixLen)
 }
 
+func (n *header[T]) isPrefixOf(key []byte) bool {
+	// This is essentially same as bytes.HasPrefix(key, this.prefix()), but slight bit
+	// faster as we don't need to construct the slice header for length comparison.
+	return uint16(len(key)) >= n.prefixLen && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
+}
+
 func (n *header[T]) setPrefix(p []byte) {
 	if len(p) > 0 {
 		n.prefixP = &p[0]
@@ -518,7 +524,7 @@ func search[T any](root *header[T], rootWatch <-chan struct{}, key []byte) (valu
 		return
 	}
 	for {
-		if !bytes.HasPrefix(key, this.prefix()) {
+		if !this.isPrefixOf(key) {
 			return
 		}
 
@@ -538,7 +544,7 @@ func search[T any](root *header[T], rootWatch <-chan struct{}, key []byte) (valu
 
 		// Prefix matched. Remember this as the closest watch channel as we traverse
 		// further.
-		if !this.isLeaf() && this.watch != nil {
+		if this.watch != nil && !this.isLeaf() {
 			watch = this.watch
 		}
 

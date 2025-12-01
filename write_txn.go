@@ -9,7 +9,6 @@ import (
 	"io"
 	"reflect"
 	"runtime"
-	"slices"
 	"sync/atomic"
 	"time"
 
@@ -27,17 +26,16 @@ type writeTxnHandle struct {
 }
 
 type writeTxnState struct {
-	db     *DB
-	dbRoot dbRoot
+	db *DB
 
 	handle     string
 	acquiredAt time.Time     // the time at which the transaction acquired the locks
 	duration   atomic.Uint64 // the transaction duration after it finished
 
-	modifiedTables []*tableEntry            // table entries being modified
-	numTxns        int                      // number of index transactions opened
-	smus           internal.SortableMutexes // the (sorted) table locks
-	tableNames     []string
+	tableEntries []tableEntry             // table entries being modified
+	numTxns      int                      // number of index transactions opened
+	smus         internal.SortableMutexes // the (sorted) table locks
+	tableNames   []string
 
 	revKey [8]byte // reusable array for storing the serialized revision key when deleting
 }
@@ -47,27 +45,21 @@ func (txn *writeTxnState) unwrap() *writeTxnState {
 }
 
 func (txn *writeTxnState) root() dbRoot {
-	return txn.dbRoot
+	return txn.tableEntries
 }
 
 // txnFinalizer is called when the GC frees *txn. It checks that a WriteTxn
 // has been Aborted or Committed. This is a safeguard against forgetting to
 // Abort/Commit which would cause the table to be locked forever.
 func txnFinalizer(handle *writeTxnHandle) {
-	if handle.writeTxnState != nil && handle.writeTxnState.dbRoot != nil {
+	if handle.writeTxnState != nil {
 		txn := handle.writeTxnState
 		panic(fmt.Sprintf("WriteTxn from handle %s against tables %v was never Abort()'d or Commit()'d", txn.handle, txn.tableNames))
 	}
 }
 
 func (txn *writeTxnState) getTableEntry(meta TableMeta) *tableEntry {
-	if txn.modifiedTables != nil {
-		entry := txn.modifiedTables[meta.tablePos()]
-		if entry != nil {
-			return entry
-		}
-	}
-	return &txn.dbRoot[meta.tablePos()]
+	return &txn.tableEntries[meta.tablePos()]
 }
 
 // indexReadTxn returns a transaction to read from the specific index.
@@ -76,24 +68,18 @@ func (txn *writeTxnState) indexReadTxn(meta TableMeta, indexPos int) (tableIndex
 	if meta.tablePos() < 0 {
 		return nil, tableError(meta.Name(), ErrTableNotRegistered)
 	}
-	if txn.modifiedTables != nil {
-		entry := txn.modifiedTables[meta.tablePos()]
-		if entry != nil {
-			indexEntry := &entry.indexes[indexPos]
-			if indexEntry.txn != nil {
-				return entry.indexes[indexPos].txn, nil
-			}
-		}
+	indexEntry := txn.tableEntries[meta.tablePos()].indexes[indexPos]
+	if indexEntry.txn != nil {
+		return indexEntry.txn, nil
 	}
-	indexEntry := txn.dbRoot[meta.tablePos()].indexes[indexPos]
 	return indexEntry.index, nil
 }
 
 // indexWriteTxn returns a transaction to read/write to a specific index.
 // The created transaction is memoized and used for subsequent reads and/or writes.
 func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableIndexTxn, error) {
-	table := txn.modifiedTables[meta.tablePos()]
-	if table == nil {
+	table := &txn.tableEntries[meta.tablePos()]
+	if !table.locked {
 		return nil, tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
 	indexEntry := &table.indexes[indexPos]
@@ -135,8 +121,8 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
-	table := txn.modifiedTables[meta.tablePos()]
-	if table == nil {
+	table := &txn.tableEntries[meta.tablePos()]
+	if !table.locked {
 		return object{}, false, nil, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
@@ -229,19 +215,16 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 }
 
 func (txn *writeTxnState) hasDeleteTrackers(meta TableMeta) bool {
-	table := txn.modifiedTables[meta.tablePos()]
-	if table != nil {
-		return table.deleteTrackers.Len() > 0
-	}
-	return txn.dbRoot[meta.tablePos()].deleteTrackers.Len() > 0
+	table := &txn.tableEntries[meta.tablePos()]
+	return table.deleteTrackers.Len() > 0
 }
 
 func (txn *writeTxnState) addDeleteTracker(meta TableMeta, trackerName string, dt anyDeleteTracker) error {
 	if txn == nil {
 		return ErrTransactionClosed
 	}
-	table := txn.modifiedTables[meta.tablePos()]
-	if table == nil {
+	table := &txn.tableEntries[meta.tablePos()]
+	if !table.locked {
 		return tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
 
@@ -258,8 +241,8 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
-	table := txn.modifiedTables[meta.tablePos()]
-	if table == nil {
+	table := &txn.tableEntries[meta.tablePos()]
+	if !table.locked {
 		return object{}, false, tableError(tableName, ErrTableNotLockedForWriting)
 	}
 	oldRevision := table.revision
@@ -312,10 +295,8 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 // and returns it to the pool.
 func (handle *writeTxnHandle) returnToPool() {
 	txn := handle.writeTxnState
-	txn.dbRoot = nil
+	txn.tableEntries = nil
 	txn.numTxns = 0
-	clear(txn.modifiedTables)
-	txn.modifiedTables = txn.modifiedTables[:0]
 	clear(txn.smus)
 	txn.smus = txn.smus[:0]
 	clear(txn.tableNames)
@@ -347,8 +328,8 @@ func (handle *writeTxnHandle) Abort() {
 	}
 
 	txn := handle.writeTxnState
-	for _, table := range txn.modifiedTables {
-		if table != nil {
+	for _, table := range txn.tableEntries {
+		if table.locked {
 			table.meta.released()
 		}
 	}
@@ -397,8 +378,9 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
 	txnToNotify := make([]interface{ notify() }, 0, txn.numTxns)
-	for _, table := range txn.modifiedTables {
-		if table == nil {
+	for pos := range txn.tableEntries {
+		table := &txn.tableEntries[pos]
+		if !table.locked {
 			continue
 		}
 		for i := range table.indexes {
@@ -425,28 +407,33 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// Since the root may have changed since the pointer was last read in WriteTxn(),
 	// load it again and modify the latest version that we now have immobilised by
 	// the root lock.
-	root := slices.Clone(*db.root.Load())
-
+	currentRoot := *db.root.Load()
+	root := txn.tableEntries
 	var initChansToClose []chan struct{}
 
 	// Insert the modified tables into the root tree of tables.
-	for pos, table := range txn.modifiedTables {
-		if table != nil {
-			// Check if tables become initialized. We close the channel only after
-			// we've swapped in the new root so that one cannot get a snapshot of
-			// an uninitialized table after observing the channel closing.
-			if !table.initialized && len(table.pendingInitializers) == 0 {
-				initChansToClose = append(initChansToClose, table.initWatchChan)
-				table.initialized = true
-			}
-			table.meta.released()
-			root[pos] = *table
+	for pos := range txn.tableEntries {
+		table := &txn.tableEntries[pos]
+		if !table.locked {
+			// Table was not locked so it might have changed.
+			// Update the entry from the current root.
+			root[pos] = currentRoot[pos]
+			continue
 		}
+		// Check if tables become initialized. We close the channel only after
+		// we've swapped in the new root so that one cannot get a snapshot of
+		// an uninitialized table after observing the channel closing.
+		if !table.initialized && len(table.pendingInitializers) == 0 {
+			initChansToClose = append(initChansToClose, table.initWatchChan)
+			table.initialized = true
+		}
+		table.meta.released()
+		table.locked = false
 	}
+	txn.tableEntries = nil
 
 	// Commit the transaction to build the new root tree and then
 	// atomically store it.
-	txn.dbRoot = root
 	db.root.Store(&root)
 	db.mu.Unlock()
 
@@ -478,6 +465,6 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 // WriteJSON marshals out the database as JSON into the given writer.
 // If tables are given then only these tables are written.
 func (txn *writeTxnState) WriteJSON(w io.Writer, tables ...string) error {
-	rtxn := readTxn(txn.dbRoot)
+	rtxn := readTxn(txn.tableEntries)
 	return rtxn.WriteJSON(w, tables...)
 }
