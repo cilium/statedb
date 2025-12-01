@@ -102,6 +102,19 @@ func BenchmarkDB_NewWriteTxn(b *testing.B) {
 	}
 }
 
+func BenchmarkDB_WriteTxnCommit100(b *testing.B) {
+	db := New(WithMetrics(&NopMetrics{}))
+	tables := make([]Table[*testObject], 100)
+	for i := range len(tables) {
+		tables[i], _ = NewTable(db, fmt.Sprintf("test%d", i), idIndex)
+	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		db.WriteTxn(tables[len(tables)-1]).Commit()
+	}
+}
+
 func BenchmarkDB_NewReadTxn(b *testing.B) {
 	db, _ := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	for b.Loop() {
@@ -437,6 +450,7 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
+	b.ResetTimer()
 
 	for b.Loop() {
 		txn := db.ReadTxn()
@@ -454,18 +468,45 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func BenchmarkDB_FullIteration_Get(b *testing.B) {
+func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
-	ids := []uint64{}
 	queries := []Query[*testObject]{}
 	for i := range numObjectsIteration {
 		queries = append(queries, idIndex.Query(uint64(i)))
-		ids = append(ids, uint64(i))
 		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
+	b.ResetTimer()
+
+	for b.Loop() {
+		txn := db.ReadTxn()
+		i := uint64(0)
+		for obj := range table.Prefix(txn, Query[*testObject]{index: idIndex.indexName()}) {
+			if obj.ID != i {
+				b.Fatalf("expected ID %d, got %d", i, obj.ID)
+			}
+			i++
+		}
+		if numObjectsIteration != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsIteration, i)
+		}
+	}
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_FullIteration_Get(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	wtxn := db.WriteTxn(table)
+	queries := []Query[*testObject]{}
+	for i := range numObjectsIteration {
+		queries = append(queries, idIndex.Query(uint64(i)))
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+	b.ResetTimer()
 
 	txn := db.ReadTxn()
 	for b.Loop() {
@@ -490,6 +531,7 @@ func BenchmarkDB_FullIteration_Get_Secondary(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
+	b.ResetTimer()
 
 	txn := db.ReadTxn()
 	for b.Loop() {
