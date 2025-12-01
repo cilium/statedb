@@ -132,22 +132,22 @@ func New(options ...Option) *DB {
 			gcRateLimitInterval: defaultGCRateLimitInterval,
 		},
 	}
-	db.updateWriteTxnPoolLocked()
+	db.updateWriteTxnPoolLocked(0)
 	db.handleName = "DB"
 	root := dbRoot{}
 	db.root.Store(&root)
 	return db
 }
 
-func (db *DB) updateWriteTxnPoolLocked() {
+func (db *DB) updateWriteTxnPoolLocked(numTables int) {
 	const defaultNumTables = 4
 	db.writeTxnPool.New =
 		func() any {
 			return &writeTxnState{
-				db:             db,
-				modifiedTables: make([]*tableEntry, 0, len(*db.root.Load())),
-				smus:           make(internal.SortableMutexes, 0, defaultNumTables),
-				tableNames:     make([]string, 0, defaultNumTables),
+				db:           db,
+				tableEntries: make([]tableEntry, 0, numTables),
+				smus:         make(internal.SortableMutexes, 0, defaultNumTables),
+				tableNames:   make([]string, 0, defaultNumTables),
 			}
 		}
 }
@@ -169,7 +169,7 @@ func (db *DB) registerTable(table TableMeta) error {
 	table.setTablePos(pos)
 	root = append(root, table.tableEntry())
 
-	db.updateWriteTxnPoolLocked()
+	db.updateWriteTxnPoolLocked(len(root))
 
 	db.root.Store(&root)
 	return nil
@@ -205,18 +205,16 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn.smus.Lock()
 	acquiredAt := time.Now()
 
-	root := *db.root.Load()
-	txn.dbRoot = root
+	txn.tableEntries = slices.Clone(*db.root.Load())
 	txn.handle = db.handleName
 	txn.acquiredAt = acquiredAt
-	txn.modifiedTables = reuseSlice(txn.modifiedTables, len(root))
 
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
 	for i, table := range tables {
 		pos := table.tablePos()
-		tableEntry := root[pos]
+		tableEntry := &txn.tableEntries[pos]
 		tableEntry.indexes = slices.Clone(tableEntry.indexes)
-		txn.modifiedTables[pos] = &tableEntry
+		tableEntry.locked = true
 
 		name := table.Name()
 		txn.tableNames[i] = name

@@ -62,9 +62,9 @@ func (dt *deleteTracker[Obj]) close() {
 	txn := wtxn.unwrap()
 	dt.db = nil
 	db := txn.db
-	table := txn.modifiedTables[dt.table.tablePos()]
-	if table == nil {
-		panic("BUG: Table missing from write transaction")
+	table := &txn.tableEntries[dt.table.tablePos()]
+	if !table.locked {
+		panic("BUG: Table not locked")
 	}
 	_, _, table.deleteTrackers = table.deleteTrackers.Delete([]byte(dt.trackerName))
 	wtxn.Commit()
