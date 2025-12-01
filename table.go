@@ -350,34 +350,35 @@ func (t *genTable[Obj]) PendingInitializers(txn ReadTxn) []string {
 }
 
 func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(WriteTxn) {
-	table := txn.unwrap().modifiedTables[t.pos]
-	if table != nil {
-		if slices.Contains(table.pendingInitializers, name) {
-			panic(fmt.Sprintf("RegisterInitializer: %q already registered", name))
-		}
-
-		if len(table.pendingInitializers) == 0 {
-			table.initialized = false
-			table.initWatchChan = make(chan struct{})
-		}
-
-		table.pendingInitializers =
-			append(slices.Clone(table.pendingInitializers), name)
-		var once sync.Once
-		return func(txn WriteTxn) {
-			once.Do(func() {
-				if table := txn.unwrap().modifiedTables[t.pos]; table != nil {
-					table.pendingInitializers = slices.DeleteFunc(
-						slices.Clone(table.pendingInitializers),
-						func(n string) bool { return n == name },
-					)
-				} else {
-					panic(fmt.Sprintf("RegisterInitializer/MarkDone: Table %q not locked for writing", t.table))
-				}
-			})
-		}
-	} else {
+	table := &txn.unwrap().tableEntries[t.pos]
+	if !table.locked {
 		panic(fmt.Sprintf("RegisterInitializer: Table %q not locked for writing", t.table))
+	}
+
+	if slices.Contains(table.pendingInitializers, name) {
+		panic(fmt.Sprintf("RegisterInitializer: %q already registered", name))
+	}
+
+	if len(table.pendingInitializers) == 0 {
+		table.initialized = false
+		table.initWatchChan = make(chan struct{})
+	}
+
+	table.pendingInitializers =
+		append(slices.Clone(table.pendingInitializers), name)
+	var once sync.Once
+	return func(txn WriteTxn) {
+		once.Do(func() {
+			table := &txn.unwrap().tableEntries[t.pos]
+
+			if !table.locked {
+				panic(fmt.Sprintf("RegisterInitializer/MarkDone: Table %q not locked for writing", t.table))
+			}
+			table.pendingInitializers = slices.DeleteFunc(
+				slices.Clone(table.pendingInitializers),
+				func(n string) bool { return n == name },
+			)
+		})
 	}
 }
 
@@ -401,36 +402,16 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64
 }
 
 func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	indexPos := t.indexPos(q.index)
-	var ops tableIndexReader
-	if wtxn, ok := txn.(WriteTxn); ok {
-		itxn := wtxn.unwrap()
-		if itxn.modifiedTables != nil {
-			if table := itxn.modifiedTables[t.tablePos()]; table != nil {
-				// Since we're not returning an iterator here we can optimize and not use
-				// indexReadTxn which clones if this is a WriteTxn (to avoid invalidating iterators).
-				indexEntry := &table.indexes[indexPos]
-				if indexEntry.txn != nil {
-					ops = indexEntry.txn
-				} else {
-					ops = indexEntry.index
-				}
-			}
-		}
+	entry := txn.root()[t.tablePos()].indexes[t.indexPos(q.index)]
+	var ops tableIndexReader = entry.index
+	if entry.txn != nil {
+		ops = entry.txn
 	}
-
-	if ops == nil {
-		entry := txn.root()[t.tablePos()].indexes[indexPos]
-		ops = entry.index
-	}
-
 	iobj, watch, ok := ops.get(q.key)
-	if !ok {
-		return
+	if ok {
+		obj = iobj.data.(Obj)
+		revision = iobj.revision
 	}
-
-	obj = iobj.data.(Obj)
-	revision = iobj.revision
 	return
 }
 

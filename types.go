@@ -429,8 +429,9 @@ type tableEntry struct {
 	indexes             []indexEntry
 	deleteTrackers      *part.Tree[anyDeleteTracker]
 	revision            uint64
-	pendingInitializers []string
+	locked              bool
 	initialized         bool
+	pendingInitializers []string
 	initWatchChan       chan struct{}
 }
 
