@@ -19,7 +19,7 @@ import (
 	"github.com/cilium/statedb/part"
 )
 
-func httpFixture(t *testing.T) (*DB, RWTable[testObject], *httptest.Server) {
+func httpFixture(t *testing.T) (*DB, RWTable[*testObject], *httptest.Server) {
 	t.Parallel()
 
 	db, table, _ := newTestDB(t, tagsIndex)
@@ -28,10 +28,10 @@ func httpFixture(t *testing.T) (*DB, RWTable[testObject], *httptest.Server) {
 	t.Cleanup(ts.Close)
 
 	wtxn := db.WriteTxn(table)
-	table.Insert(wtxn, testObject{1, "", part.NewSet("foo")})
-	table.Insert(wtxn, testObject{2, "", part.NewSet("foo")})
-	table.Insert(wtxn, testObject{3, "", part.NewSet("foobar")})
-	table.Insert(wtxn, testObject{4, "", part.NewSet("baz")})
+	table.Insert(wtxn, &testObject{1, "", part.NewSet("foo")})
+	table.Insert(wtxn, &testObject{2, "", part.NewSet("foo")})
+	table.Insert(wtxn, &testObject{3, "", part.NewSet("foobar")})
+	table.Insert(wtxn, &testObject{4, "", part.NewSet("baz")})
 	wtxn.Commit()
 
 	return db, table, ts
@@ -84,7 +84,7 @@ func Test_http_runQuery(t *testing.T) {
 	}
 	runQuery(indexTxn, false, index.Uint64(1), onObject)
 	if assert.Len(t, items, 1) {
-		assert.EqualValues(t, items[0].data.(testObject).ID, 1)
+		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
 	}
 
 	// tagsIndex, non-unique
@@ -94,8 +94,8 @@ func Test_http_runQuery(t *testing.T) {
 	runQuery(indexTxn, false, index.String("foo"), onObject)
 
 	if assert.Len(t, items, 2) {
-		assert.EqualValues(t, items[0].data.(testObject).ID, 1)
-		assert.EqualValues(t, items[1].data.(testObject).ID, 2)
+		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
+		assert.EqualValues(t, items[1].data.(*testObject).ID, 2)
 	}
 
 	// lower-bound on revision index
@@ -105,10 +105,10 @@ func Test_http_runQuery(t *testing.T) {
 	runQuery(indexTxn, true, index.Uint64(0), onObject)
 	if assert.Len(t, items, 4) {
 		// Items are in revision (creation) order
-		assert.EqualValues(t, items[0].data.(testObject).ID, 1)
-		assert.EqualValues(t, items[1].data.(testObject).ID, 2)
-		assert.EqualValues(t, items[2].data.(testObject).ID, 3)
-		assert.EqualValues(t, items[3].data.(testObject).ID, 4)
+		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
+		assert.EqualValues(t, items[1].data.(*testObject).ID, 2)
+		assert.EqualValues(t, items[2].data.(*testObject).ID, 3)
+		assert.EqualValues(t, items[3].data.(*testObject).ID, 4)
 	}
 }
 
@@ -119,7 +119,7 @@ func Test_http_RemoteTable_Get_LowerBound(t *testing.T) {
 	base, err := url.Parse(ts.URL)
 	require.NoError(t, err, "ParseURL")
 
-	remoteTable := NewRemoteTable[testObject](base, table.Name())
+	remoteTable := NewRemoteTable[*testObject](base, table.Name())
 
 	iter, errs := remoteTable.Get(ctx, idIndex.Query(1))
 	items := Collect(iter)
@@ -146,7 +146,7 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 	base, err := url.Parse(ts.URL)
 	require.NoError(t, err, "ParseURL")
 
-	remoteTable := NewRemoteTable[testObject](base, table.Name())
+	remoteTable := NewRemoteTable[*testObject](base, table.Name())
 
 	iter, errs := remoteTable.LowerBound(ctx, idIndex.Query(0))
 	items := Collect(iter)
@@ -155,7 +155,7 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 
 	changes, errs := remoteTable.Changes(ctx)
 	// Consume the changes via a channel so it is easier to assert.
-	changesChan := make(chan Change[testObject], 1)
+	changesChan := make(chan Change[*testObject], 1)
 	go func() {
 		defer close(changesChan)
 		for change := range changes {
@@ -171,9 +171,9 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 	}
 
 	wtxn := db.WriteTxn(table)
-	_, _, err = table.Insert(wtxn, testObject{ID: 5})
+	_, _, err = table.Insert(wtxn, &testObject{ID: 5})
 	require.NoError(t, err, "Insert")
-	_, _, err = table.Delete(wtxn, testObject{ID: 1})
+	_, _, err = table.Delete(wtxn, &testObject{ID: 1})
 	require.NoError(t, err, "Delete")
 	wtxn.Commit()
 

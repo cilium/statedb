@@ -106,9 +106,9 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	// Insert some objects
 	wtxn := db.WriteTxn(table)
-	table.Insert(wtxn, testObject{ID: 1})
-	table.Insert(wtxn, testObject{ID: 2})
-	table.Insert(wtxn, testObject{ID: 3})
+	table.Insert(wtxn, &testObject{ID: 1})
+	table.Insert(wtxn, &testObject{ID: 2})
+	table.Insert(wtxn, &testObject{ID: 3})
 	txn = wtxn.Commit()
 
 	// The 'watchAll' channel should now have closed and Wait() returns.
@@ -125,7 +125,7 @@ func TestWatchSetInQueries(t *testing.T) {
 	_, _, watch3, _ := table.GetWatch(txn, idIndex.Query(3))
 
 	wtxn = db.WriteTxn(table)
-	table.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("foo")})
+	table.Insert(wtxn, &testObject{ID: 1, Tags: part.NewSet("foo")})
 	wtxn.Commit()
 
 	// Use a new WatchSet and merge it. This allows having "subsets" that we
