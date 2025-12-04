@@ -122,9 +122,9 @@ func Test_Regression_Changes_Watch(t *testing.T) {
 	}
 
 	wtxn = db.WriteTxn(table)
-	table.Insert(wtxn, testObject{ID: 1})
-	table.Insert(wtxn, testObject{ID: 2})
-	table.Insert(wtxn, testObject{ID: 3})
+	table.Insert(wtxn, &testObject{ID: 1})
+	table.Insert(wtxn, &testObject{ID: 2})
+	table.Insert(wtxn, &testObject{ID: 3})
 	wtxn.Commit()
 
 	// Observe the objects.

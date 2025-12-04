@@ -84,11 +84,11 @@ func TestDerive(t *testing.T) {
 
 	var (
 		db       *DB
-		inTable  RWTable[testObject]
+		inTable  RWTable[*testObject]
 		outTable RWTable[derived]
 	)
 
-	transform := func(obj testObject, deleted bool) (derived, DeriveResult) {
+	transform := func(obj *testObject, deleted bool) (derived, DeriveResult) {
 		t.Logf("transform(%v, %v)", obj, deleted)
 
 		tags := slices.Collect(obj.Tags.All())
@@ -111,7 +111,7 @@ func TestDerive(t *testing.T) {
 		cell.Module(
 			"test", "Test",
 
-			cell.Provide(func(db_ *DB) (Table[testObject], RWTable[derived], error) {
+			cell.Provide(func(db_ *DB) (Table[*testObject], RWTable[derived], error) {
 				db = db_
 				inTable = MustNewTable(db, "test", idIndex)
 				outTable = MustNewTable(db, "derived", derivedIdIndex)
@@ -134,11 +134,11 @@ func TestDerive(t *testing.T) {
 
 	// Insert 1, 2 and 3 (skipped) and validate.
 	wtxn := db.WriteTxn(inTable)
-	_, _, err := inTable.Insert(wtxn, testObject{ID: 1})
+	_, _, err := inTable.Insert(wtxn, &testObject{ID: 1})
 	require.NoError(t, err, "Insert failed")
-	_, _, err = inTable.Insert(wtxn, testObject{ID: 2})
+	_, _, err = inTable.Insert(wtxn, &testObject{ID: 2})
 	require.NoError(t, err, "Insert failed")
-	_, _, err = inTable.Insert(wtxn, testObject{ID: 3, Tags: part.NewSet("skip")})
+	_, _, err = inTable.Insert(wtxn, &testObject{ID: 3, Tags: part.NewSet("skip")})
 	require.NoError(t, err, "Insert failed")
 	wtxn.Commit()
 
@@ -155,7 +155,7 @@ func TestDerive(t *testing.T) {
 
 	// Delete 2 (testing DeriveUpdate)
 	wtxn = db.WriteTxn(inTable)
-	_, hadOld, err := inTable.Delete(wtxn, testObject{ID: 2})
+	_, hadOld, err := inTable.Delete(wtxn, &testObject{ID: 2})
 	require.NoError(t, err, "Delete failed")
 	require.True(t, hadOld, "Expected object to be deleted")
 	wtxn.Commit()
@@ -174,11 +174,11 @@ func TestDerive(t *testing.T) {
 
 	// Delete 1 (testing DeriveDelete)
 	wtxn = db.WriteTxn(inTable)
-	_, _, err = inTable.Insert(wtxn, testObject{ID: 1, Tags: part.NewSet("delete")})
+	_, _, err = inTable.Insert(wtxn, &testObject{ID: 1, Tags: part.NewSet("delete")})
 	require.NoError(t, err, "Insert failed")
 	wtxn.Commit()
 	wtxn = db.WriteTxn(inTable)
-	_, _, err = inTable.Delete(wtxn, testObject{ID: 1})
+	_, _, err = inTable.Delete(wtxn, &testObject{ID: 1})
 	require.NoError(t, err, "Delete failed")
 	wtxn.Commit()
 
