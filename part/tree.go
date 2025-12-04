@@ -98,7 +98,7 @@ func (t *Tree[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // Prefix returns an iterator for all objects that starts with the
 // given prefix, and a channel that closes when any objects matching
 // the given prefix are upserted or deleted.
-func (t *Tree[T]) Prefix(prefix []byte) (*Iterator[T], <-chan struct{}) {
+func (t *Tree[T]) Prefix(prefix []byte) (Iterator[T], <-chan struct{}) {
 	return prefixSearch(t.root, t.rootWatch, prefix)
 }
 
@@ -111,7 +111,7 @@ func (t *Tree[T]) RootWatch() <-chan struct{} {
 
 // LowerBound returns an iterator for all keys that have a value
 // equal to or higher than 'key'.
-func (t *Tree[T]) LowerBound(key []byte) *Iterator[T] {
+func (t *Tree[T]) LowerBound(key []byte) Iterator[T] {
 	return lowerbound(t.root, key)
 }
 
@@ -145,8 +145,17 @@ func (t *Tree[T]) Delete(key []byte) (old T, hadOld bool, tree *Tree[T]) {
 }
 
 // Iterator returns an iterator for all objects.
-func (t *Tree[T]) Iterator() *Iterator[T] {
-	return newIterator[T](t.root)
+func (t *Tree[T]) Iterator() Iterator[T] {
+	return newIterator(t.root)
+}
+
+// All iterates over all objects
+func (t *Tree[T]) All(yield func([]byte, T) bool) {
+	Iterator[T]{start: t.root}.All(yield)
+}
+
+func (t *Tree[T]) Next() (key []byte, value T, ok bool) {
+	panic("nope")
 }
 
 // PrintTree to the standard output. For debugging.

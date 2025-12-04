@@ -69,29 +69,17 @@ func Just[A any](x A) iter.Seq[A] {
 	}
 }
 
-func objSeq[Obj any](newIter func() tableIndexIterator) iter.Seq2[Obj, Revision] {
+func objSeq[Obj any](iter tableIndexIterator) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
-		iter := newIter()
-		for {
-			_, iobj, ok := iter.Next()
-			if !ok {
-				break
-			}
-			if !yield(iobj.data.(Obj), iobj.revision) {
-				break
-			}
-		}
+		iter.All(func(_ []byte, iobj object) bool {
+			return yield(iobj.data.(Obj), iobj.revision)
+		})
 	}
 }
 
 // iterator adapts the "any" object iterator to a typed object.
 type iterator[Obj any] struct {
 	next func() ([]byte, object, bool)
-}
-
-func convertIterator[Obj any](newIter func() tableIndexIterator) *iterator[Obj] {
-	return &iterator[Obj]{newIter().Next}
-
 }
 
 func (it iterator[Obj]) Next() (obj Obj, revision uint64, ok bool) {
@@ -177,8 +165,8 @@ func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
 	// is important as the WriteTxn may be aborted and thus revisions will
 	// reset back and watermarks bumped from here would be invalid.
 	indexEntry := txn.root()[it.table.tablePos()].indexes[RevisionIndexPos]
-	updated, _ := indexEntry.index.lowerBound(index.Uint64(it.revision + 1))
-	updateIter := convertIterator[Obj](updated)
+	updated, _ := indexEntry.index.lowerBoundNext(index.Uint64(it.revision + 1))
+	updateIter := &iterator[Obj]{updated}
 	deleteIter := it.dt.deleted(txn, it.deleteRevision+1)
 	it.iter = newDualIterator(deleteIter, updateIter)
 
@@ -257,9 +245,7 @@ func (it *changeIterator[Obj]) nextAny(txn ReadTxn) (iter.Seq2[Change[any], Revi
 }
 
 func (it *changeIterator[Obj]) close() {
-	if it.iter != nil {
-		it.iter = nil
-	}
+	it.iter = nil
 	if it.dt != nil {
 		it.dt.close()
 	}

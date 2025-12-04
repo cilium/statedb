@@ -854,7 +854,7 @@ func Test_txn(t *testing.T) {
 	tree := New[uint64]()
 	ins := func(n uint64) { _, _, tree = tree.Insert(uint64Key(n), n) }
 
-	var iter *Iterator[uint64]
+	var iter Iterator[uint64]
 	next := func(exOK bool, exVal int) {
 		t.Helper()
 		_, v, ok := iter.Next()
@@ -905,7 +905,7 @@ func Test_lowerbound(t *testing.T) {
 		ins(i)
 	}
 
-	var iter *Iterator[uint64]
+	var iter Iterator[uint64]
 	next := func(exOK bool, exVal int) {
 		t.Helper()
 		_, v, ok := iter.Next()
@@ -943,7 +943,7 @@ func Test_lowerbound_edge_cases(t *testing.T) {
 		keys = append(keys, n)
 	}
 
-	var iter *Iterator[uint32]
+	var iter Iterator[uint32]
 	next := func(exOK bool, exVal uint32) {
 		t.Helper()
 		_, v, ok := iter.Next()
@@ -1444,11 +1444,46 @@ func Benchmark_Get(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func Benchmark_Iterate(b *testing.B) {
+func Benchmark_All(b *testing.B) {
 	tree := New[uint64](RootOnlyWatch)
 	for j := uint64(1); j <= numObjectsToInsert; j++ {
 		_, _, tree = tree.Insert(uint64Key(j), j)
 	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		for _, j := range tree.All {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Iterator_All(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		for _, j := range tree.Iterator().All {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Iterator_Next(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
 
 	for b.Loop() {
 		iter := tree.Iterator()

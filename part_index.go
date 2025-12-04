@@ -114,25 +114,19 @@ type partIndex struct {
 }
 
 // list implements tableIndex.
-func (r *partIndex) list(key index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func (r *partIndex) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partList(r.unique, r.tree, key)
 }
 
-var emptyTableIndexIteratorInstance = &singletonTableIndexIterator{}
+var emptyTableIndexIterator = &singletonTableIndexIterator{}
 
-func emptyTableIndexIterator() tableIndexIterator {
-	return emptyTableIndexIteratorInstance
-}
-
-func partList(unique bool, tree part.Ops[object], key index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func partList(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
 	if unique {
 		// Unique index means that there can be only a single matching object.
 		// Doing a Get() is more efficient than constructing an iterator.
 		obj, watch, ok := tree.Get(key)
 		if ok {
-			return func() tableIndexIterator {
-				return &singletonTableIndexIterator{key, obj}
-			}, watch
+			return &singletonTableIndexIterator{key, obj}, watch
 		}
 		return emptyTableIndexIterator, watch
 	}
@@ -144,7 +138,7 @@ func partList(unique bool, tree part.Ops[object], key index.Key) (func() tableIn
 	// iteration will continue until key length mismatches, e.g. we hit a
 	// longer key sharing the same prefix.
 	iter, watch := tree.Prefix(key)
-	return func() tableIndexIterator { return newNonUniquePartIterator(iter.Clone(), false, key) }, watch
+	return newNonUniquePartIterator(iter, false, key), watch
 }
 
 // rootWatch implements tableIndex.
@@ -192,33 +186,41 @@ func (r *partIndex) len() int {
 	return r.tree.Len()
 }
 
-func (r *partIndex) allIterator() tableIndexIterator {
-	return r.tree.Iterator()
-}
-
-func (r *partIndex) all() (func() tableIndexIterator, <-chan struct{}) {
-	return r.allIterator, r.rootWatch()
+func (r *partIndex) all() (tableIndexIterator, <-chan struct{}) {
+	return r.tree, r.rootWatch()
 }
 
 // prefix implements tableIndex.
-func (r *partIndex) prefix(ikey index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func (r *partIndex) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partPrefix(r.unique, r.tree, ikey)
 }
 
-func partPrefix(unique bool, tree part.Ops[object], key index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func partPrefix(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
 	if !unique {
 		key = encodeNonUniqueBytes(key)
 	}
 	iter, watch := tree.Prefix(key)
 	if unique {
-		return func() tableIndexIterator { return iter.Clone() }, watch
+		return iter, watch
 	}
-	return func() tableIndexIterator { return newNonUniquePartIterator(iter.Clone(), true, key) }, watch
+	return newNonUniquePartIterator(iter, true, key), watch
 }
 
 // lowerBound implements tableIndexTxn.
-func (r *partIndex) lowerBound(ikey index.Key) (func() tableIndexIterator, <-chan struct{}) {
-	return func() tableIndexIterator { return partLowerBound(r.unique, r.tree, ikey) }, r.rootWatch()
+func (r *partIndex) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	return partLowerBound(r.unique, r.tree, ikey), r.rootWatch()
+}
+
+// lowerBoundNext implements tableIndexTxn.
+func (r *partIndex) lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{}) {
+	if !r.unique {
+		key = encodeNonUniqueBytes(key)
+	}
+	iter := r.tree.LowerBound(key)
+	if r.unique {
+		return iter.Next, r.rootWatch()
+	}
+	return newNonUniqueLowerBoundPartIterator(iter, key).Next, r.rootWatch()
 }
 
 func partLowerBound(unique bool, tree part.Ops[object], key index.Key) tableIndexIterator {
@@ -227,7 +229,7 @@ func partLowerBound(unique bool, tree part.Ops[object], key index.Key) tableInde
 	}
 	iter := tree.LowerBound(key)
 	if unique {
-		return iter
+		return &iter
 	}
 	return newNonUniqueLowerBoundPartIterator(iter, key)
 }
@@ -248,25 +250,31 @@ type partIndexTxn struct {
 }
 
 // all implements tableIndexTxn.
-func (r *partIndexTxn) all() (func() tableIndexIterator, <-chan struct{}) {
-	return r.allIterator, r.rootWatch()
-}
-
-func (r *partIndexTxn) allIterator() tableIndexIterator {
-	return r.txn.Clone().Iterator()
+func (r *partIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
+	return r.txn.Clone(), r.rootWatch()
 }
 
 // list implements tableIndexTxn.
-func (r *partIndexTxn) list(ikey index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partList(r.unique, r.txn.Clone(), ikey)
 }
 
 // lowerBound implements tableIndexTxn.
-func (r *partIndexTxn) lowerBound(ikey index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func (r *partIndexTxn) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	snapshot := r.txn.Clone()
-	return func() tableIndexIterator {
-		return partLowerBound(r.unique, snapshot, ikey)
-	}, r.rootWatch()
+	return partLowerBound(r.unique, snapshot, ikey), r.rootWatch()
+}
+
+// lowerBoundNext implements tableIndexTxn.
+func (r *partIndexTxn) lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{}) {
+	if !r.unique {
+		key = encodeNonUniqueBytes(key)
+	}
+	iter := r.txn.Clone().LowerBound(key)
+	if r.unique {
+		return iter.Next, r.rootWatch()
+	}
+	return newNonUniqueLowerBoundPartIterator(iter, key).Next, r.rootWatch()
 }
 
 // rootWatch implements tableIndexTxn.
@@ -319,7 +327,7 @@ func (r *partIndexTxn) notify() {
 }
 
 // prefix implements tableIndexTxn.
-func (r *partIndexTxn) prefix(ikey index.Key) (func() tableIndexIterator, <-chan struct{}) {
+func (r *partIndexTxn) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partPrefix(r.unique, r.txn.Clone(), ikey)
 }
 
@@ -457,19 +465,25 @@ func (k nonUniqueKey) encodedSecondary() []byte {
 }
 
 type nonUniquePartIterator struct {
-	iter         *part.Iterator[object]
+	iter         part.Iterator[object]
 	prefixSearch bool
 	searchKey    []byte
-	visited      map[string]struct{}
 }
 
-func (it *nonUniquePartIterator) Next() ([]byte, object, bool) {
-	for {
-		key, iobj, ok := it.iter.Next()
-		if !ok {
-			return nil, object{}, false
-		}
-
+// All implements tableIndexIterator.
+func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
+	var visited map[string]struct{}
+	if it.prefixSearch {
+		// When prefix searching, keep track of objects we've already seen as
+		// multiple keys in non-unique index may map to a single object.
+		// When just doing a List() on a non-unique index we will see each object
+		// only once and do not need to track this.
+		//
+		// This of course makes iterating over a non-unique index with a prefix
+		// (or lowerbound search) about 20x slower than normal!
+		visited = map[string]struct{}{}
+	}
+	for key, iobj := range it.iter.All {
 		nuk := nonUniqueKey(key)
 		secondaryLen := nuk.secondaryLen()
 
@@ -488,15 +502,23 @@ func (it *nonUniquePartIterator) Next() ([]byte, object, bool) {
 			// When doing a prefix search on a non-unique index we may see the
 			// same object multiple times since multiple keys may point it.
 			// Skip if we've already seen this object.
-			if _, found := it.visited[string(primary)]; found {
+			if _, found := visited[string(primary)]; found {
 				continue
 			}
-			it.visited[string(primary)] = struct{}{}
+			visited[string(primary)] = struct{}{}
 		}
 
-		return key, iobj, true
+		if !yield(key, iobj) {
+			return
+		}
 	}
 }
+
+func (it *nonUniquePartIterator) Next() ([]byte, object, bool) {
+	panic("not implemented")
+}
+
+var _ tableIndexIterator = &nonUniquePartIterator{}
 
 // nonUniqueSeq returns a sequence of objects for a non-unique index.
 // Non-unique indexes work by concatenating the secondary key with the
@@ -516,38 +538,56 @@ func (it *nonUniquePartIterator) Next() ([]byte, object, bool) {
 //	aaaa\0ccc4
 //
 // We yield "aaaa\0bbb4", skip "aaa\0abab3" and yield "aaaa\0ccc4".
-func newNonUniquePartIterator(iter *part.Iterator[object], prefixSearch bool, searchKey []byte) tableIndexIterator {
-	var visited map[string]struct{}
-	if prefixSearch {
-		// When prefix searching, keep track of objects we've already seen as
-		// multiple keys in non-unique index may map to a single object.
-		// When just doing a List() on a non-unique index we will see each object
-		// only once and do not need to track this.
-		//
-		// This of course makes iterating over a non-unique index with a prefix
-		// (or lowerbound search) about 20x slower than normal!
-		visited = map[string]struct{}{}
-	}
+func newNonUniquePartIterator(iter part.Iterator[object], prefixSearch bool, searchKey []byte) tableIndexIterator {
 	return &nonUniquePartIterator{
 		iter:         iter,
 		prefixSearch: prefixSearch,
 		searchKey:    searchKey,
-		visited:      visited,
 	}
 }
 
 type nonUniqueLowerBoundPartIterator struct {
-	iter      *part.Iterator[object]
+	iter      part.Iterator[object]
 	searchKey []byte
-	visited   map[string]struct{}
+
+	// Keep track of objects we've already seen as multiple keys in non-unique
+	// index may map to a single object. Only used by Next().
+	visited map[string]struct{}
+}
+
+// All implements tableIndexIterator.
+func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) {
+	visited := map[string]struct{}{}
+	for key, iobj := range it.iter.All {
+		// With a non-unique index we have a composite key <secondary><primary><secondary len>.
+		// This means we need to check every key that it's larger or equal to the search key.
+		// Just seeking to the first one isn't enough as the secondary key length may vary.
+		nuk := nonUniqueKey(key)
+		secondary := nuk.encodedSecondary()
+		if bytes.Compare(secondary, it.searchKey) >= 0 {
+			primary := nuk.encodedPrimary()
+			if _, found := visited[string(primary)]; found {
+				continue
+			}
+			visited[string(primary)] = struct{}{}
+
+			if !yield(key, iobj) {
+				return
+			}
+		}
+	}
 }
 
 func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
+	if it.visited == nil {
+		it.visited = map[string]struct{}{}
+	}
 	for {
-		key, iobj, ok := it.iter.Next()
+		key, obj, ok := it.iter.Next()
 		if !ok {
 			return nil, object{}, false
 		}
+
 		// With a non-unique index we have a composite key <secondary><primary><secondary len>.
 		// This means we need to check every key that it's larger or equal to the search key.
 		// Just seeking to the first one isn't enough as the secondary key length may vary.
@@ -560,18 +600,15 @@ func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
 			}
 			it.visited[string(primary)] = struct{}{}
 
-			return key, iobj, true
+			return key, obj, true
 		}
 	}
 }
 
-func newNonUniqueLowerBoundPartIterator(iter *part.Iterator[object], searchKey []byte) tableIndexIterator {
+func newNonUniqueLowerBoundPartIterator(iter part.Iterator[object], searchKey []byte) *nonUniqueLowerBoundPartIterator {
 	return &nonUniqueLowerBoundPartIterator{
 		iter:      iter,
 		searchKey: searchKey,
-		// Keep track of objects we've already seen as multiple keys in non-unique
-		// index may map to a single object.
-		visited: map[string]struct{}{},
 	}
 }
 
@@ -580,13 +617,10 @@ type singletonTableIndexIterator struct {
 	obj object
 }
 
-func (s *singletonTableIndexIterator) Next() (key []byte, obj object, ok bool) {
+func (s *singletonTableIndexIterator) All(yield func([]byte, object) bool) {
 	if s.key != nil {
-		key = s.key
-		obj = s.obj
-		ok = true
-		s.key = nil
-		s.obj = object{}
+		yield(s.key, s.obj)
 	}
-	return
 }
+
+var _ tableIndexIterator = &singletonTableIndexIterator{}

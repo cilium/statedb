@@ -464,7 +464,11 @@ func (t *genTable[Obj]) All(txn ReadTxn) iter.Seq2[Obj, Revision] {
 func (t *genTable[Obj]) AllWatch(txn ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.mustIndexReadTxn(t, PrimaryIndexPos)
 	iter, watch := indexTxn.all()
-	return objSeq[Obj](iter), watch
+	return func(yield func(Obj, Revision) bool) {
+		iter.All(func(_ []byte, obj object) bool {
+			return yield(obj.data.(Obj), obj.revision)
+		})
+	}, watch
 }
 
 func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
