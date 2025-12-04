@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"iter"
 	"maps"
 	"slices"
 	"testing"
@@ -128,29 +129,21 @@ func TestQuick_IteratorReuse(t *testing.T) {
 		}
 
 		prefixIter, _ := tree.Prefix([]byte(key))
-		iterators := []*Iterator[string]{
+		iterators := []Iterator[string]{
 			tree.LowerBound([]byte(key)),
 			prefixIter,
 		}
 
-		for _, iter := range iterators {
-			iter2 := iter.Clone()
-
-			collect := func(it *Iterator[string]) (out []string) {
-				for k, v, ok := it.Next(); ok; k, v, ok = it.Next() {
+		for _, it := range iterators {
+			collect := func(it iter.Seq2[[]byte, string]) (out []string) {
+				for k, v := range it {
 					out = append(out, string(k)+"="+v)
 				}
 				return
 			}
 
-			var fst, snd []string
-			if cloneFirst {
-				snd = collect(iter2)
-				fst = collect(iter)
-			} else {
-				fst = collect(iter)
-				snd = collect(iter2)
-			}
+			fst := collect(it.All)
+			snd := collect(it.All)
 
 			if !slices.Equal(fst, snd) {
 				return false

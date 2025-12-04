@@ -471,19 +471,19 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
-	queries := []Query[*testObject]{}
 	for i := range numObjectsIteration {
-		queries = append(queries, idIndex.Query(uint64(i)))
 		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
 	b.ResetTimer()
 
+	query := Query[*testObject]{index: idIndex.indexName()}
+
 	for b.Loop() {
 		txn := db.ReadTxn()
 		i := uint64(0)
-		for obj := range table.Prefix(txn, Query[*testObject]{index: idIndex.indexName()}) {
+		for obj := range table.Prefix(txn, query) {
 			if obj.ID != i {
 				b.Fatalf("expected ID %d, got %d", i, obj.ID)
 			}

@@ -30,7 +30,11 @@ func (t AnyTable) All(txn ReadTxn) iter.Seq2[any, Revision] {
 func (t AnyTable) AllWatch(txn ReadTxn) (iter.Seq2[any, Revision], <-chan struct{}) {
 	indexTxn := txn.mustIndexReadTxn(t.Meta, PrimaryIndexPos)
 	iter, watch := indexTxn.all()
-	return objSeq[any](iter), watch
+	return func(yield func(any, Revision) bool) {
+		iter.All(func(_ []byte, iobj object) bool {
+			return yield(iobj.data, iobj.revision)
+		})
+	}, watch
 }
 
 func (t AnyTable) UnmarshalYAML(data []byte) (any, error) {

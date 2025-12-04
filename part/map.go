@@ -120,9 +120,10 @@ func (m Map[K, V]) Delete(key K) Map[K, V] {
 		case 0:
 			m.tree = nil
 		case 1:
-			_, kv, _ := txn.Iterator().Next()
-			m.singleton = &kv
-			m.tree = nil
+			for _, v := range txn.Iterator().All {
+				m.singleton = &v
+				m.tree = nil
+			}
 		default:
 			m.tree = txn.Commit()
 		}
@@ -130,13 +131,9 @@ func (m Map[K, V]) Delete(key K) Map[K, V] {
 	return m
 }
 
-func toSeq2[K, V any](iter *Iterator[mapKVPair[K, V]]) iter.Seq2[K, V] {
+func toSeq2[K, V any](iter Iterator[mapKVPair[K, V]]) iter.Seq2[K, V] {
 	return func(yield func(K, V) bool) {
-		if iter == nil {
-			return
-		}
-		iter = iter.Clone()
-		for _, kv, ok := iter.Next(); ok; _, kv, ok = iter.Next() {
+		for _, kv := range iter.All {
 			if !yield(kv.Key, kv.Value) {
 				break
 			}
@@ -153,7 +150,7 @@ func (m Map[K, V]) LowerBound(from K) iter.Seq2[K, V] {
 		}
 	}
 	if m.tree == nil {
-		return toSeq2[K, V](nil)
+		return toSeq2[K, V](Iterator[mapKVPair[K, V]]{})
 	}
 	return toSeq2(m.tree.LowerBound(m.keyToBytes(from)))
 }
@@ -175,7 +172,7 @@ func (m Map[K, V]) Prefix(prefix K) iter.Seq2[K, V] {
 		}
 	}
 	if m.tree == nil {
-		return toSeq2[K, V](nil)
+		return toSeq2[K, V](Iterator[mapKVPair[K, V]]{})
 	}
 	iter, _ := m.tree.Prefix(m.keyToBytes(prefix))
 	return toSeq2(iter)
@@ -189,7 +186,7 @@ func (m Map[K, V]) All() iter.Seq2[K, V] {
 		return m.singletonIter()
 	}
 	if m.tree == nil {
-		return toSeq2[K, V](nil)
+		return toSeq2[K, V](Iterator[mapKVPair[K, V]]{})
 	}
 	return toSeq2(m.tree.Iterator())
 }
@@ -414,7 +411,8 @@ func (txn MapTxn[K, V]) Commit() (m Map[K, V]) {
 	switch txn.txn.Len() {
 	case 0:
 	case 1:
-		_, kv, _ := txn.txn.Iterator().Next()
+		iter := txn.txn.Iterator()
+		_, kv, _ := iter.Next()
 		m.singleton = &kv
 	default:
 		m.tree = txn.txn.Commit()

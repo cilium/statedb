@@ -80,12 +80,21 @@ func (s Set[T]) Has(v T) bool {
 	return found
 }
 
+func emptySeq[T any](yield func(T) bool) {
+}
+
 // All returns an iterator for all values.
 func (s Set[T]) All() iter.Seq[T] {
 	if s.tree == nil {
-		return toSeq[T](nil)
+		return emptySeq[T]
 	}
-	return toSeq(s.tree.Iterator())
+	return s.yieldAll
+}
+
+func (s Set[T]) yieldAll(yield func(v T) bool) {
+	for _, v := range s.tree.Iterator().All {
+		yield(v)
+	}
 }
 
 // Union returns a set that is the union of the values
@@ -245,18 +254,4 @@ func (s *Set[T]) UnmarshalYAML(value *yaml.Node) error {
 	}
 	s.tree = txn.Commit()
 	return nil
-}
-
-func toSeq[T any](iter *Iterator[T]) iter.Seq[T] {
-	return func(yield func(T) bool) {
-		if iter == nil {
-			return
-		}
-		iter = iter.Clone()
-		for _, x, ok := iter.Next(); ok; _, x, ok = iter.Next() {
-			if !yield(x) {
-				break
-			}
-		}
-	}
 }

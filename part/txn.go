@@ -42,6 +42,11 @@ func (txn *Txn[T]) Len() int {
 	return txn.size
 }
 
+func (txn *Txn[T]) All(yield func([]byte, T) bool) {
+	txn.mutated.clear()
+	Iterator[T]{start: txn.root}.All(yield)
+}
+
 // Clone returns a clone of the transaction for reading. The clone is unaffected
 // by any future changes done with the original transaction.
 func (txn *Txn[T]) Clone() *Tree[T] {
@@ -54,6 +59,10 @@ func (txn *Txn[T]) Clone() *Tree[T] {
 		rootWatch: txn.rootWatch,
 		size:      txn.size,
 	}
+}
+
+func (txn *Txn[T]) Next() (key []byte, value T, ok bool) {
+	panic("nope")
 }
 
 // Insert or update the tree with the given key and value.
@@ -134,20 +143,20 @@ func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
 // Prefix returns an iterator for all objects that starts with the
 // given prefix, and a channel that closes when any objects matching
 // the given prefix are upserted or deleted.
-func (txn *Txn[T]) Prefix(key []byte) (*Iterator[T], <-chan struct{}) {
+func (txn *Txn[T]) Prefix(key []byte) (Iterator[T], <-chan struct{}) {
 	txn.mutated.clear()
 	return prefixSearch(txn.root, txn.rootWatch, key)
 }
 
 // LowerBound returns an iterator for all objects that have a
 // key equal or higher than the given 'key'.
-func (txn *Txn[T]) LowerBound(key []byte) *Iterator[T] {
+func (txn *Txn[T]) LowerBound(key []byte) Iterator[T] {
 	txn.mutated.clear()
 	return lowerbound(txn.root, key)
 }
 
 // Iterator returns an iterator for all objects.
-func (txn *Txn[T]) Iterator() *Iterator[T] {
+func (txn *Txn[T]) Iterator() Iterator[T] {
 	txn.mutated.clear()
 	return newIterator(txn.root)
 }
