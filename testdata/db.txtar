@@ -122,6 +122,8 @@ db/cmp test1 empty.table
 # Delete with get
 db/insert test1 obj1.yaml
 db/cmp test1 obj1.table
+db/show test1
+db/get test1 1
 db/get --delete test1 1
 db/cmp test1 empty.table
 

@@ -84,8 +84,7 @@ func marshalJSON(data any) (out []byte) {
 
 func writeTableAsJSON(buf *bufio.Writer, txn ReadTxn, table *tableEntry) (err error) {
 	indexTxn := txn.mustIndexReadTxn(table.meta, PrimaryIndexPos)
-	newIter, _ := indexTxn.all()
-	iter := newIter()
+	iter, _ := indexTxn.all()
 
 	writeString := func(s string) {
 		if err != nil {
@@ -97,11 +96,7 @@ func writeTableAsJSON(buf *bufio.Writer, txn ReadTxn, table *tableEntry) (err er
 
 	numObjects := indexTxn.len()
 
-	for {
-		_, obj, ok := iter.Next()
-		if !ok {
-			break
-		}
+	for _, obj := range iter.All {
 		writeString("    ")
 		if _, err := buf.Write(marshalJSON(obj.data)); err != nil {
 			return err

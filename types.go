@@ -382,21 +382,21 @@ type tableInternal interface {
 	tableRowAny(any) []string
 }
 
-// tableIndexIterator iterates over objects in the index. We're using this construction
-// instead of iter.Seq2 as this is much faster and avoids allocating a closure.
-// The reader methods return a function to construct the iterator since StateDB
-// queries return an iter.Seq which is allowed to be consumed multiple times.
+// tableIndexIterator for iterating over keys and objects in an index.
+// This is not a straight up iter.Seq2 as this way we avoid a heap allocation
+// for a function closure.
 type tableIndexIterator interface {
-	Next() ([]byte, object, bool)
+	All(yield func(key []byte, obj object) bool)
 }
 
 type tableIndexReader interface {
 	len() int
 	get(key index.Key) (object, <-chan struct{}, bool)
-	prefix(key index.Key) (func() tableIndexIterator, <-chan struct{})
-	lowerBound(key index.Key) (func() tableIndexIterator, <-chan struct{})
-	list(key index.Key) (func() tableIndexIterator, <-chan struct{})
-	all() (func() tableIndexIterator, <-chan struct{})
+	prefix(key index.Key) (tableIndexIterator, <-chan struct{})
+	lowerBound(key index.Key) (tableIndexIterator, <-chan struct{})
+	lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{})
+	list(key index.Key) (tableIndexIterator, <-chan struct{})
+	all() (tableIndexIterator, <-chan struct{})
 	rootWatch() <-chan struct{}
 	objectToKey(obj object) index.Key
 }
