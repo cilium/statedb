@@ -111,7 +111,7 @@ func (txn *writeTxnState) insert(meta TableMeta, guardRevision Revision, data an
 	return txn.modify(meta, guardRevision, data, nil)
 }
 
-func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData any, merge func(any) any) (object, bool, <-chan struct{}, error) {
+func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData any, merge func(old, new object) object) (object, bool, <-chan struct{}, error) {
 	if txn == nil {
 		return object{}, false, nil, ErrTransactionClosed
 	}
@@ -139,16 +139,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	if merge == nil {
 		oldObj, oldExists, watch = idIndexTxn.insert(idKey, obj)
 	} else {
-		mod := func(old object) object {
-			if old.revision == 0 {
-				return obj
-			}
-			return object{
-				data:     merge(old.data),
-				revision: revision,
-			}
-		}
-		oldObj, oldExists, watch = idIndexTxn.modify(idKey, obj, mod)
+		oldObj, oldExists, watch = idIndexTxn.modify(idKey, obj, merge)
 	}
 
 	// Sanity check: is the same object being inserted back and thus the

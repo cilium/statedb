@@ -128,9 +128,9 @@ func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree *Tree[T]
 // function is called with the zero value for T. It is up to the
 // caller to not mutate the value in-place and to return a clone.
 // Returns the old value if it exists.
-func (t *Tree[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool, tree *Tree[T]) {
+func (t *Tree[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, hadOld bool, tree *Tree[T]) {
 	txn := t.Txn()
-	old, hadOld = txn.Modify(key, mod)
+	old, hadOld = txn.Modify(key, value, mod)
 	tree = txn.CommitAndNotify()
 	return
 }

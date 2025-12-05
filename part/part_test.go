@@ -664,7 +664,7 @@ func Test_modify(t *testing.T) {
 	key := []byte{1}
 
 	// Modify without the value existing inserts it.
-	_, _, tree = tree.Modify(key, func(x int) int { return 1 })
+	_, _, tree = tree.Modify(key, 1, func(x, _ int) int { return 123 })
 
 	v, _, ok := tree.Get(key)
 	require.True(t, ok)
@@ -672,7 +672,7 @@ func Test_modify(t *testing.T) {
 
 	txn := tree.Txn()
 	for i := range 1000 {
-		old, hadOld := txn.Modify(key, func(x int) int { return x + 1 })
+		old, hadOld := txn.Modify(key, 123, func(x, _ int) int { return x + 1 })
 		require.True(t, hadOld)
 		require.Equal(t, i+1, old)
 	}
@@ -1307,7 +1307,7 @@ func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 				v, _, _ := txn.Get(key)
 				txn.Insert(key, v)
 			} else {
-				txn.Modify(key, func(x int) int { return x })
+				txn.Modify(key, 123, func(x, _ int) int { return x })
 			}
 		}
 		tree = txn.CommitAndNotify()
