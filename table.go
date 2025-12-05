@@ -472,11 +472,12 @@ func (t *genTable[Obj]) InsertWatch(txn WriteTxn, obj Obj) (oldObj Obj, hadOld b
 }
 
 func (t *genTable[Obj]) Modify(txn WriteTxn, obj Obj, merge func(old, new Obj) Obj) (oldObj Obj, hadOld bool, err error) {
+	mergeObjects := func(old object, new object) object {
+		new.data = merge(old.data.(Obj), obj)
+		return new
+	}
 	var old object
-	old, hadOld, _, err = txn.unwrap().modify(t, Revision(0), obj,
-		func(old any) any {
-			return merge(old.(Obj), obj)
-		})
+	old, hadOld, _, err = txn.unwrap().modify(t, Revision(0), obj, mergeObjects)
 	if hadOld {
 		oldObj = old.data.(Obj)
 	}

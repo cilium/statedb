@@ -87,12 +87,11 @@ func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <
 	return
 }
 
-// Modify a value in the tree. If the key does not exist the modify
-// function is called with the zero value for T. It is up to the
+// Modify a value in the tree. It is up to the
 // caller to not mutate the value in-place and to return a clone.
 // Returns the old value if it exists.
-func (txn *Txn[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool) {
-	old, hadOld, _ = txn.ModifyWatch(key, mod)
+func (txn *Txn[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, hadOld bool) {
+	old, hadOld, _ = txn.ModifyWatch(key, value, mod)
 	return
 }
 
@@ -101,8 +100,8 @@ func (txn *Txn[T]) Modify(key []byte, mod func(T) T) (old T, hadOld bool) {
 // caller to not mutate the value in-place and to return a clone.
 // Returns the old value if it exists and a watch channel that closes
 // when the key changes again.
-func (txn *Txn[T]) ModifyWatch(key []byte, mod func(T) T) (old T, hadOld bool, watch <-chan struct{}) {
-	old, hadOld, watch, txn.root = txn.modify(txn.root, key, mod)
+func (txn *Txn[T]) ModifyWatch(key []byte, value T, mod func(T, T) T) (old T, hadOld bool, watch <-chan struct{}) {
+	old, hadOld, watch, txn.root = txn.modify(txn.root, key, value, mod)
 	validateTree(txn.root, nil, txn.watches)
 	if !hadOld {
 		txn.size++
@@ -233,23 +232,17 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 	return n
 }
 
-type noModify[T any] struct{ value T }
-
-func (nm noModify[T]) mod(_ T) T { return nm.value }
-
 func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
-	mod := noModify[T]{value}
-	return txn.modify(root, key, mod.mod)
+	return txn.modify(root, key, value, nil)
 }
 
-func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
+func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T) T) (oldValue T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
 	txn.dirty = true
 	fullKey := key
 
 	if root == nil {
-		var zero T
-		leaf := newLeaf(txn.opts, key, fullKey, mod(zero))
-		return zero, false, leaf.watch, leaf.self()
+		leaf := newLeaf(txn.opts, key, fullKey, newValue)
+		return oldValue, false, leaf.watch, leaf.self()
 	}
 
 	// Start recursing from the root to find the insertion point.
@@ -284,8 +277,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				// Node is big enough, clone it so we can mutate it
 				this = txn.cloneNode(this)
 			}
-			var zero T
-			leaf := newLeaf(txn.opts, key, fullKey, mod(zero))
+			leaf := newLeaf(txn.opts, key, fullKey, newValue)
 			this.insert(idx, leaf.self())
 			*thisp = this
 			watch = leaf.watch
@@ -319,11 +311,14 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 				this.setLeaf(leaf)
 			}
 			watch = leaf.watch
-			leaf.value = mod(oldValue)
+			if mod != nil {
+				leaf.value = mod(oldValue, newValue)
+			} else {
+				leaf.value = newValue
+			}
 		} else {
 			// Set the leaf
-			var zero T
-			leaf := newLeaf(txn.opts, this.prefix(), fullKey, mod(zero))
+			leaf := newLeaf(txn.opts, this.prefix(), fullKey, newValue)
 			watch = leaf.watch
 			this.setLeaf(leaf)
 		}
@@ -344,8 +339,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, mod func(T) T) (oldValue 
 	this.setPrefix(this.prefix()[len(common):])
 	key = key[len(common):]
 
-	var zero T
-	newLeaf := newLeaf(txn.opts, key, fullKey, mod(zero))
+	newLeaf := newLeaf(txn.opts, key, fullKey, newValue)
 	watch = newLeaf.watch
 	newNode := &node4[T]{}
 	newNode.setPrefix(common)
