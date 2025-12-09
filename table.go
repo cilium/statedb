@@ -94,7 +94,7 @@ func NewTableAny[Obj any](
 		smu:                  internal.NewSortableMutex(),
 		primaryAnyIndexer:    toAnyIndexer(primaryIndexer, PrimaryIndexPos),
 		primaryIndexer:       primaryIndexer,
-		secondaryAnyIndexers: make(map[string]anyIndexer, len(secondaryIndexers)),
+		secondaryAnyIndexers: make([]anyIndexer, 0, len(secondaryIndexers)),
 		indexPositions:       make([]string, SecondaryIndexStartPos+len(secondaryIndexers)),
 		pos:                  -1,
 		tableHeaderFunc:      tableHeader,
@@ -112,7 +112,7 @@ func NewTableAny[Obj any](
 	for _, indexer := range secondaryIndexers {
 		name := indexer.indexName()
 		anyIndexer := toAnyIndexer(indexer, indexPos)
-		table.secondaryAnyIndexers[name] = anyIndexer
+		table.secondaryAnyIndexers = append(table.secondaryAnyIndexers, anyIndexer)
 		table.indexPositions[indexPos] = name
 		indexPos++
 	}
@@ -171,7 +171,7 @@ type genTable[Obj any] struct {
 	smu                  internal.SortableMutex
 	primaryIndexer       Indexer[Obj]
 	primaryAnyIndexer    anyIndexer
-	secondaryAnyIndexers map[string]anyIndexer
+	secondaryAnyIndexers []anyIndexer
 	indexPositions       []string
 	tableHeaderFunc      func() []string
 	tableRowFunc         func(Obj) []string
@@ -244,8 +244,8 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	primaryIndex := t.primaryIndexer.newTableIndex()
 	entry.indexes[PrimaryIndexPos] = primaryIndex
 
-	for index, indexer := range t.secondaryAnyIndexers {
-		entry.indexes[t.indexPos(index)] = indexer.newTableIndex()
+	for _, indexer := range t.secondaryAnyIndexers {
+		entry.indexes[t.indexPos(indexer.name)] = indexer.newTableIndex()
 	}
 	// For revision indexes we only need to watch the root.
 	entry.indexes[RevisionIndexPos] = newRevisionIndex()
@@ -290,16 +290,14 @@ func (t *genTable[Obj]) tablePos() int {
 	return t.pos
 }
 
-func (t *genTable[Obj]) tableKey() []byte {
-	return []byte(t.table)
-}
-
 func (t *genTable[Obj]) getIndexer(name string) *anyIndexer {
 	if name == "" || t.primaryAnyIndexer.name == name {
 		return &t.primaryAnyIndexer
 	}
-	if indexer, ok := t.secondaryAnyIndexers[name]; ok {
-		return &indexer
+	for i, indexer := range t.secondaryAnyIndexers {
+		if indexer.name == name {
+			return &t.secondaryAnyIndexers[i]
+		}
 	}
 	return nil
 }
@@ -308,11 +306,7 @@ func (t *genTable[Obj]) PrimaryIndexer() Indexer[Obj] {
 	return t.primaryIndexer
 }
 
-func (t *genTable[Obj]) primary() anyIndexer {
-	return t.primaryAnyIndexer
-}
-
-func (t *genTable[Obj]) secondary() map[string]anyIndexer {
+func (t *genTable[Obj]) secondary() []anyIndexer {
 	return t.secondaryAnyIndexers
 }
 
@@ -323,8 +317,8 @@ func (t *genTable[Obj]) Name() string {
 func (t *genTable[Obj]) Indexes() []string {
 	idxs := make([]string, 0, 1+len(t.secondaryAnyIndexers))
 	idxs = append(idxs, t.primaryAnyIndexer.name)
-	for k := range t.secondaryAnyIndexers {
-		idxs = append(idxs, k)
+	for _, idx := range t.secondaryAnyIndexers {
+		idxs = append(idxs, idx.name)
 	}
 	sort.Strings(idxs)
 	return idxs
