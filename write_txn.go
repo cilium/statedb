@@ -410,9 +410,11 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 		// Check if tables become initialized. We close the channel only after
 		// we've swapped in the new root so that one cannot get a snapshot of
 		// an uninitialized table after observing the channel closing.
-		if !table.initialized && len(table.pendingInitializers) == 0 {
-			initChansToClose = append(initChansToClose, table.initWatchChan)
-			table.initialized = true
+		if init := table.init; init != nil {
+			if len(init.pending) == 0 {
+				initChansToClose = append(initChansToClose, init.watch)
+				table.init = nil
+			}
 		}
 		table.meta.released()
 		table.locked = false
