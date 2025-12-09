@@ -239,42 +239,46 @@ func (l lpmIndex) rootWatch() <-chan struct{} {
 	return l.watch
 }
 
+func (l lpmIndex) commit() (tableIndex, tableIndexTxnNotify) {
+	return l, nil
+}
+
 // txn implements tableIndex.
-func (l lpmIndex) txn() tableIndexTxn {
+func (l lpmIndex) txn() (tableIndexTxn, bool) {
 	if l.prevTxn != nil {
 		return lpmIndexTxn{
 			index: l,
-			txn:   l.prevTxn.Reuse(l.lpm),
-		}
+			tx:    l.prevTxn.Reuse(l.lpm),
+		}, true
 	}
 	return lpmIndexTxn{
 		index: l,
-		txn:   l.lpm.Txn(),
-	}
+		tx:    l.lpm.Txn(),
+	}, true
 }
 
 var _ tableIndex = lpmIndex{}
 
 type lpmIndexTxn struct {
 	index lpmIndex
-	txn   *lpm.Txn[object]
+	tx    *lpm.Txn[object]
 }
 
 // all implements tableIndexTxn.
 func (l lpmIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
-	return l.txn.All(), l.index.watch
+	return l.tx.All(), l.index.watch
 }
 
 // commit implements tableIndexTxn.
-func (l lpmIndexTxn) commit() tableIndex {
-	lpm := l.txn.Commit()
-	l.txn.Clear()
+func (l lpmIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
+	lpm := l.tx.Commit()
+	l.tx.Clear()
 	return lpmIndex{
 		lpm:          lpm,
-		prevTxn:      l.txn,
+		prevTxn:      l.tx,
 		objectToKeys: l.index.objectToKeys,
 		watch:        make(chan struct{}),
-	}
+	}, l
 }
 
 // delete implements tableIndexTxn.
@@ -294,13 +298,13 @@ func (l lpmIndexTxn) modify(key index.Key, obj object, mod func(old object) obje
 
 // get implements tableIndexTxn.
 func (l lpmIndexTxn) get(key index.Key) (object, <-chan struct{}, bool) {
-	obj, found := l.txn.Lookup(key)
+	obj, found := l.tx.Lookup(key)
 	return obj, l.index.watch, found
 }
 
 // len implements tableIndexTxn.
 func (l lpmIndexTxn) len() int {
-	return l.txn.Len()
+	return l.tx.Len()
 }
 
 // list implements tableIndexTxn.
@@ -318,12 +322,12 @@ func (l lpmIndexTxn) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 
 // lowerBound implements tableIndexTxn.
 func (l lpmIndexTxn) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return l.txn.LowerBound(key), l.index.watch
+	return l.tx.LowerBound(key), l.index.watch
 }
 
 // lowerBoundNext implements tableIndexTxn.
 func (l lpmIndexTxn) lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{}) {
-	return l.txn.LowerBound(key).Next, l.index.watch
+	return l.tx.LowerBound(key).Next, l.index.watch
 }
 
 // notify implements tableIndexTxn.
@@ -341,7 +345,7 @@ func (l lpmIndexTxn) objectToKey(obj object) index.Key {
 
 // prefix implements tableIndexTxn.
 func (l lpmIndexTxn) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return l.txn.Prefix(key), l.index.watch
+	return l.tx.Prefix(key), l.index.watch
 }
 
 // reindex implements tableIndexTxn.
@@ -350,14 +354,14 @@ func (l lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
 	if new.revision != 0 {
 		newKeys = l.index.objectToKeys(new)
 		newKeys.Foreach(func(key index.Key) {
-			l.txn.Insert(key, new)
+			l.tx.Insert(key, new)
 		})
 	}
 	if old.revision != 0 {
 		// The old object existed, remove any obsolete keys
 		l.index.objectToKeys(old).Foreach(func(oldKey index.Key) {
 			if !newKeys.Exists(oldKey) {
-				l.txn.Delete(oldKey)
+				l.tx.Delete(oldKey)
 			}
 		})
 	}
@@ -366,6 +370,10 @@ func (l lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
 // rootWatch implements tableIndexTxn.
 func (l lpmIndexTxn) rootWatch() <-chan struct{} {
 	return l.index.watch
+}
+
+func (l lpmIndexTxn) txn() (tableIndexTxn, bool) {
+	return l, false
 }
 
 var _ tableIndexTxn = lpmIndexTxn{}

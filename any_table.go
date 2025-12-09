@@ -18,8 +18,7 @@ type AnyTable struct {
 }
 
 func (t AnyTable) NumObjects(txn ReadTxn) int {
-	indexTxn := txn.mustIndexReadTxn(t.Meta, PrimaryIndexPos)
-	return indexTxn.len()
+	return txn.mustIndexReadTxn(t.Meta, PrimaryIndexPos).len()
 }
 
 func (t AnyTable) All(txn ReadTxn) iter.Seq2[any, Revision] {

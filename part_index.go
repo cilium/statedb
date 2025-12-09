@@ -150,6 +150,10 @@ func (r *partIndex) objectToKey(obj object) index.Key {
 	return r.objectToKeys(obj).First()
 }
 
+func (r *partIndex) commit() (tableIndex, tableIndexTxnNotify) {
+	return r, nil
+}
+
 // get implements tableIndex.
 func (r *partIndex) get(ikey index.Key) (iobj object, watch <-chan struct{}, found bool) {
 	return partGet(r.unique, r.tree, ikey)
@@ -235,10 +239,10 @@ func partLowerBound(unique bool, tree part.Ops[object], key index.Key) tableInde
 }
 
 // txn implements tableIndex.
-func (r *partIndex) txn() tableIndexTxn {
+func (r *partIndex) txn() (tableIndexTxn, bool) {
 	txn := &r.partIndexTxn
-	txn.txn = r.tree.Txn()
-	return txn
+	txn.tx = r.tree.Txn()
+	return txn, true
 }
 
 var _ tableIndex = &partIndex{}
@@ -246,22 +250,22 @@ var _ tableIndex = &partIndex{}
 type partIndexTxn struct {
 	objectToKeys func(object) index.KeySet
 	unique       bool
-	txn          *part.Txn[object]
+	tx           *part.Txn[object]
 }
 
 // all implements tableIndexTxn.
 func (r *partIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
-	return r.txn.Clone(), r.rootWatch()
+	return r.tx.Clone(), r.rootWatch()
 }
 
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	return partList(r.unique, r.txn.Clone(), ikey)
+	return partList(r.unique, r.tx.Clone(), ikey)
 }
 
 // lowerBound implements tableIndexTxn.
 func (r *partIndexTxn) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	snapshot := r.txn.Clone()
+	snapshot := r.tx.Clone()
 	return partLowerBound(r.unique, snapshot, ikey), r.rootWatch()
 }
 
@@ -270,7 +274,7 @@ func (r *partIndexTxn) lowerBoundNext(key index.Key) (func() ([]byte, object, bo
 	if !r.unique {
 		key = encodeNonUniqueBytes(key)
 	}
-	iter := r.txn.Clone().LowerBound(key)
+	iter := r.tx.Clone().LowerBound(key)
 	if r.unique {
 		return iter.Next, r.rootWatch()
 	}
@@ -279,56 +283,56 @@ func (r *partIndexTxn) lowerBoundNext(key index.Key) (func() ([]byte, object, bo
 
 // rootWatch implements tableIndexTxn.
 func (r *partIndexTxn) rootWatch() <-chan struct{} {
-	return r.txn.RootWatch()
+	return r.tx.RootWatch()
 }
 
 // commit implements tableIndexTxn.
-func (r *partIndexTxn) commit() tableIndex {
+func (r *partIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
 	return &partIndex{
-		tree: r.txn.Commit(),
+		tree: r.tx.Commit(),
 		partIndexTxn: partIndexTxn{
 			unique:       r.unique,
 			objectToKeys: r.objectToKeys,
 		},
-	}
+	}, r
 }
 
 // delete implements tableIndexTxn.
 func (r *partIndexTxn) delete(key index.Key) (old object, hadOld bool) {
-	return r.txn.Delete(key)
+	return r.tx.Delete(key)
 }
 
 // get implements tableIndexTxn.
 func (r *partIndexTxn) get(key index.Key) (iobj object, watch <-chan struct{}, ok bool) {
-	return partGet(r.unique, r.txn, key)
+	return partGet(r.unique, r.tx, key)
 }
 
 // insert implements tableIndexTxn.
 func (r *partIndexTxn) insert(key index.Key, obj object) (old object, hadOld bool, watch <-chan struct{}) {
-	return r.txn.InsertWatch(key, obj)
+	return r.tx.InsertWatch(key, obj)
 }
 
 // len implements tableIndexTxn.
 func (r *partIndexTxn) len() int {
-	return r.txn.Len()
+	return r.tx.Len()
 }
 
 // modify implements tableIndexTxn.
 func (r *partIndexTxn) modify(key index.Key, obj object, mod func(old object) object) (old object, hadOld bool, watch <-chan struct{}) {
-	return r.txn.ModifyWatch(key, mod)
+	return r.tx.ModifyWatch(key, mod)
 }
 
 // notify implements tableIndexTxn.
 func (r *partIndexTxn) notify() {
-	if r.txn != nil {
-		r.txn.Notify()
-		r.txn = nil
+	if r.tx != nil {
+		r.tx.Notify()
+		r.tx = nil
 	}
 }
 
 // prefix implements tableIndexTxn.
 func (r *partIndexTxn) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	return partPrefix(r.unique, r.txn.Clone(), ikey)
+	return partPrefix(r.unique, r.tx.Clone(), ikey)
 }
 
 func (r *partIndexTxn) objectToKey(obj object) index.Key {
@@ -347,7 +351,7 @@ func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) {
 			if !unique {
 				newKey = encodeNonUniqueKey(idKey, newKey)
 			}
-			r.txn.Insert(newKey, new)
+			r.tx.Insert(newKey, new)
 		})
 	}
 
@@ -359,7 +363,7 @@ func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) {
 					if !unique {
 						oldKey = encodeNonUniqueKey(idKey, oldKey)
 					}
-					_, hadOld := r.txn.Delete(oldKey)
+					_, hadOld := r.tx.Delete(oldKey)
 					if !unique && !hadOld {
 						panic("BUG: delete did not find old object")
 					}
@@ -367,6 +371,10 @@ func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) {
 			},
 		)
 	}
+}
+
+func (r *partIndexTxn) txn() (tableIndexTxn, bool) {
+	return r, false
 }
 
 var _ tableIndexTxn = &partIndexTxn{}
