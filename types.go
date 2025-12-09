@@ -291,7 +291,7 @@ type Indexer[Obj any] interface {
 	// ObjectToKey returns the primary key of the object.
 	ObjectToKey(Obj) index.Key
 
-	// isIndexerOf is a dummy method to constrain the indexer to the 'Obj'
+	// isIndexerOf is a marker method to constrain the indexer to the 'Obj'
 	// type which enforces that indexer of a wrong type is not used.
 	isIndexerOf(Obj)
 
@@ -365,10 +365,8 @@ type tableInternal interface {
 	tablePos() int
 	setTablePos(int)
 	indexPos(string) int
-	tableKey() []byte // The radix key for the table in the root tree
 	getIndexer(name string) *anyIndexer
-	primary() anyIndexer                   // The untyped primary indexer for the table
-	secondary() map[string]anyIndexer      // Secondary indexers (if any)
+	secondary() []anyIndexer               // Secondary indexers (if any)
 	sortableMutex() internal.SortableMutex // The sortable mutex for locking the table for writing
 	anyChanges(txn WriteTxn) (anyChangeIterator, error)
 	typeName() string                       // Returns the 'Obj' type as string
