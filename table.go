@@ -243,20 +243,18 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	entry.initWatchChan = make(chan struct{})
 	close(entry.initWatchChan)
 
-	entry.indexes = make([]indexEntry, len(t.indexPositions))
+	entry.indexes = make([]tableIndex, len(t.indexPositions))
 
 	primaryIndex := t.primaryIndexer.newTableIndex()
-	entry.indexes[PrimaryIndexPos] = indexEntry{
-		index: primaryIndex,
-	}
+	entry.indexes[PrimaryIndexPos] = primaryIndex
 
 	for index, indexer := range t.secondaryAnyIndexers {
-		entry.indexes[t.indexPos(index)] = indexEntry{index: indexer.newTableIndex()}
+		entry.indexes[t.indexPos(index)] = indexer.newTableIndex()
 	}
 	// For revision indexes we only need to watch the root.
-	entry.indexes[RevisionIndexPos] = indexEntry{index: newRevisionIndex()}
-	entry.indexes[GraveyardRevisionIndexPos] = indexEntry{index: newRevisionIndex()}
-	entry.indexes[GraveyardIndexPos] = indexEntry{index: newGraveyardIndex(primaryIndex)}
+	entry.indexes[RevisionIndexPos] = newRevisionIndex()
+	entry.indexes[GraveyardRevisionIndexPos] = newRevisionIndex()
+	entry.indexes[GraveyardIndexPos] = newGraveyardIndex(primaryIndex)
 
 	return entry
 }
@@ -402,12 +400,8 @@ func (t *genTable[Obj]) Get(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64
 }
 
 func (t *genTable[Obj]) GetWatch(txn ReadTxn, q Query[Obj]) (obj Obj, revision uint64, watch <-chan struct{}, ok bool) {
-	entry := txn.root()[t.tablePos()].indexes[t.indexPos(q.index)]
-	var ops tableIndexReader = entry.index
-	if entry.txn != nil {
-		ops = entry.txn
-	}
-	iobj, watch, ok := ops.get(q.key)
+	index := txn.root()[t.pos].indexes[t.indexPos(q.index)]
+	iobj, watch, ok := index.get(q.key)
 	if ok {
 		obj = iobj.data.(Obj)
 		revision = iobj.revision

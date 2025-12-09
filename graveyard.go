@@ -126,7 +126,7 @@ func (db *DB) graveyardIsEmpty() bool {
 	txn := db.ReadTxn()
 	for _, table := range txn.root() {
 		indexEntry := table.indexes[table.meta.indexPos(GraveyardIndex)]
-		if indexEntry.index.len() != 0 {
+		if indexEntry.len() != 0 {
 			return false
 		}
 	}

@@ -19,8 +19,7 @@ func (r *readTxn) indexReadTxn(meta TableMeta, indexPos int) (tableIndexReader, 
 	if meta.tablePos() < 0 {
 		return nil, tableError(meta.Name(), ErrTableNotRegistered)
 	}
-	indexEntry := (*r)[meta.tablePos()].indexes[indexPos]
-	return indexEntry.index, nil
+	return (*r)[meta.tablePos()].indexes[indexPos], nil
 }
 
 // mustIndexReadTxn implements ReadTxn.

@@ -68,11 +68,7 @@ func (txn *writeTxnState) indexReadTxn(meta TableMeta, indexPos int) (tableIndex
 	if meta.tablePos() < 0 {
 		return nil, tableError(meta.Name(), ErrTableNotRegistered)
 	}
-	indexEntry := txn.tableEntries[meta.tablePos()].indexes[indexPos]
-	if indexEntry.txn != nil {
-		return indexEntry.txn, nil
-	}
-	return indexEntry.index, nil
+	return txn.tableEntries[meta.tablePos()].indexes[indexPos], nil
 }
 
 // indexWriteTxn returns a transaction to read/write to a specific index.
@@ -82,12 +78,13 @@ func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableInde
 	if !table.locked {
 		return nil, tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
-	indexEntry := &table.indexes[indexPos]
-	if indexEntry.txn == nil {
-		indexEntry.txn = indexEntry.index.txn()
+	indexEntry := table.indexes[indexPos]
+	itxn, created := indexEntry.txn()
+	if created {
+		table.indexes[indexPos] = itxn
 		txn.numTxns++
 	}
-	return indexEntry.txn, nil
+	return itxn, nil
 }
 
 // mustIndexReadTxn returns a transaction to read from the specific index.
@@ -377,17 +374,16 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// Commit each individual changed index to each table.
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
-	txnToNotify := make([]interface{ notify() }, 0, txn.numTxns)
+	txnToNotify := make([]tableIndexTxnNotify, 0, txn.numTxns)
 	for pos := range txn.tableEntries {
 		table := &txn.tableEntries[pos]
 		if !table.locked {
 			continue
 		}
-		for i := range table.indexes {
-			txn := table.indexes[i].txn
+		for i, idx := range table.indexes {
+			var txn tableIndexTxnNotify
+			table.indexes[i], txn = idx.commit()
 			if txn != nil {
-				table.indexes[i].index = txn.commit()
-				table.indexes[i].txn = nil
 				txnToNotify = append(txnToNotify, txn)
 			}
 		}

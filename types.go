@@ -108,8 +108,7 @@ type ChangeIterator[Obj any] interface {
 	// The returned sequence is a single-use sequence and subsequent calls will return
 	// an empty sequence.
 	//
-	// If the transaction given to Next is a WriteTxn the modifications made in the
-	// transaction are not observed, that is, only committed changes can be observed.
+	// Next will panic if called with a WriteTxn that has locked the target table.
 	Next(ReadTxn) (iter.Seq2[Change[Obj], Revision], <-chan struct{})
 }
 
@@ -332,8 +331,8 @@ const (
 
 // object is the format in which data is stored in the tables.
 type object struct {
-	revision uint64
 	data     any
+	revision uint64
 }
 
 // anyIndexer is an untyped indexer. The user-defined 'Index[Obj,Key]'
@@ -403,50 +402,38 @@ type tableIndexReader interface {
 
 type tableIndex interface {
 	tableIndexReader
-	txn() tableIndexTxn
+	txn() (tableIndexTxn, bool)
+	commit() (idx tableIndex, txn tableIndexTxnNotify)
 }
 
 type tableIndexTxn interface {
-	tableIndexReader
+	tableIndex
 
 	insert(key index.Key, obj object) (old object, hadOld bool, watch <-chan struct{})
 	modify(key index.Key, obj object, mod func(old object) object) (old object, hadOld bool, watch <-chan struct{})
 	delete(key index.Key) (old object, hadOld bool)
 	reindex(primaryKey index.Key, old object, new object)
-	commit() tableIndex
-	notify()
 }
 
-type indexEntry struct {
-	index tableIndex
-
-	// txn for mutating the index
-	txn tableIndexTxn
+type tableIndexTxnNotify interface {
+	notify()
 }
 
 type tableEntry struct {
 	meta                TableMeta
-	indexes             []indexEntry
 	deleteTrackers      *part.Tree[anyDeleteTracker]
+	initWatchChan       chan struct{}
+	indexes             []tableIndex
+	pendingInitializers []string
 	revision            uint64
 	locked              bool
 	initialized         bool
-	pendingInitializers []string
-	initWatchChan       chan struct{}
 }
 
 func (t *tableEntry) numObjects() int {
-	indexEntry := t.indexes[RevisionIndexPos]
-	if indexEntry.txn != nil {
-		return indexEntry.txn.len()
-	}
-	return indexEntry.index.len()
+	return t.indexes[RevisionIndexPos].len()
 }
 
 func (t *tableEntry) numDeletedObjects() int {
-	indexEntry := t.indexes[GraveyardIndexPos]
-	if indexEntry.txn != nil {
-		return indexEntry.txn.len()
-	}
-	return indexEntry.index.len()
+	return t.indexes[GraveyardIndexPos].len()
 }
