@@ -239,10 +239,6 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	entry.deleteTrackers = part.New[anyDeleteTracker]()
 
 	// A new table is initialized, as no initializers are registered.
-	entry.initialized = true
-	entry.initWatchChan = make(chan struct{})
-	close(entry.initWatchChan)
-
 	entry.indexes = make([]tableIndex, len(t.indexPositions))
 
 	primaryIndex := t.primaryIndexer.newTableIndex()
@@ -340,11 +336,24 @@ func (t *genTable[Obj]) ToTable() Table[Obj] {
 
 func (t *genTable[Obj]) Initialized(txn ReadTxn) (bool, <-chan struct{}) {
 	table := txn.getTableEntry(t)
-	return len(table.pendingInitializers) == 0, table.initWatchChan
+	if init := table.init; init != nil {
+		if len(init.pending) == 0 {
+			// Table has been initialized in this write transaction, but not yet
+			// committed. [init.watch] is closed on Commit(), so return an already
+			// closed watch channel here.
+			return true, closedWatchChannel
+		}
+		return false, init.watch
+	}
+	return true, closedWatchChannel
 }
 
 func (t *genTable[Obj]) PendingInitializers(txn ReadTxn) []string {
-	return txn.getTableEntry(t).pendingInitializers
+	table := txn.getTableEntry(t)
+	if init := table.init; init != nil {
+		return init.pending
+	}
+	return nil
 }
 
 func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(WriteTxn) {
@@ -353,29 +362,38 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 		panic(fmt.Sprintf("RegisterInitializer: Table %q not locked for writing", t.table))
 	}
 
-	if slices.Contains(table.pendingInitializers, name) {
+	var init *tableInitialization
+	if table.init == nil {
+		init = &tableInitialization{
+			watch: make(chan struct{}),
+		}
+		table.init = init
+	} else {
+		// Clone
+		init2 := *table.init
+		init2.pending = slices.Clone(init2.pending)
+		init = &init2
+		table.init = init
+	}
+
+	if slices.Contains(init.pending, name) {
 		panic(fmt.Sprintf("RegisterInitializer: %q already registered", name))
 	}
 
-	if len(table.pendingInitializers) == 0 {
-		table.initialized = false
-		table.initWatchChan = make(chan struct{})
-	}
-
-	table.pendingInitializers =
-		append(slices.Clone(table.pendingInitializers), name)
+	init.pending = append(init.pending, name)
 	var once sync.Once
 	return func(txn WriteTxn) {
 		once.Do(func() {
 			table := &txn.unwrap().tableEntries[t.pos]
-
 			if !table.locked {
 				panic(fmt.Sprintf("RegisterInitializer/MarkDone: Table %q not locked for writing", t.table))
 			}
-			table.pendingInitializers = slices.DeleteFunc(
-				slices.Clone(table.pendingInitializers),
+			init := *table.init
+			init.pending = slices.DeleteFunc(
+				slices.Clone(init.pending),
 				func(n string) bool { return n == name },
 			)
+			table.init = &init
 		})
 	}
 }

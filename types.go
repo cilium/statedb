@@ -419,15 +419,39 @@ type tableIndexTxnNotify interface {
 	notify()
 }
 
+type tableInitialization struct {
+	// watch channel which is closed when the table becomes initialized,
+	// e.g. when all [pending] initializers are marked done.
+	watch chan struct{}
+
+	// pending initializers.
+	pending []string
+}
+
+// tableEntry contains the table state. The database is a slice of
+// these table entries.
 type tableEntry struct {
-	meta                TableMeta
-	deleteTrackers      *part.Tree[anyDeleteTracker]
-	initWatchChan       chan struct{}
-	indexes             []tableIndex
-	pendingInitializers []string
-	revision            uint64
-	locked              bool
-	initialized         bool
+	// meta is the metadata about the table
+	meta TableMeta
+
+	// deleteTrackers are the open Changes() iterators for which
+	// we set aside deleted objects.
+	deleteTrackers *part.Tree[anyDeleteTracker]
+
+	// init if not nil marks the table as not initialized.
+	// When the last registered initializer is done this is
+	// set to nil and the [init.watch] is closed.
+	init *tableInitialization
+
+	// indexes are the table indexes that store the objects
+	indexes []tableIndex
+
+	// revision is the current table revision. It's the same
+	// as the revision of the last inserted object.
+	revision uint64
+
+	// locked marks the table locked for writes.
+	locked bool
 }
 
 func (t *tableEntry) numObjects() int {
