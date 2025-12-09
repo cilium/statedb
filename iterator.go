@@ -166,12 +166,13 @@ type changeIterator[Obj any] struct {
 }
 
 func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
-	// Instead of indexReadTxn() we look up directly here so we don't
-	// refresh from mutated indexes in case [txn] is a WriteTxn. This
-	// is important as the WriteTxn may be aborted and thus revisions will
-	// reset back and watermarks bumped from here would be invalid.
-	indexEntry := txn.root()[it.table.tablePos()].indexes[RevisionIndexPos]
-	updated, _ := indexEntry.index.lowerBoundNext(index.Uint64(it.revision + 1))
+	tableEntry := &txn.root()[it.table.tablePos()]
+	if it.iter != nil && tableEntry.locked {
+		var obj Obj
+		panic(fmt.Sprintf("Table[%T].Changes().Next() called with the target table locked. This is not supported.", obj))
+	}
+	indexEntry := tableEntry.indexes[RevisionIndexPos]
+	updated, _ := indexEntry.lowerBoundNext(index.Uint64(it.revision + 1))
 	updateIter := &iterator[Obj]{updated}
 	deleteIter := it.dt.deleted(txn, it.deleteRevision+1)
 	it.iter = newDualIterator(deleteIter, updateIter)
@@ -179,7 +180,7 @@ func (it *changeIterator[Obj]) refresh(txn ReadTxn) {
 	// It is enough to watch the revision index and not the graveyard since
 	// any object that is inserted into the graveyard will be deleted from
 	// the revision index.
-	it.watch = indexEntry.index.rootWatch()
+	it.watch = indexEntry.rootWatch()
 }
 
 func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Revision], watch <-chan struct{}) {
