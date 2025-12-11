@@ -80,6 +80,10 @@ func (l *Trie[T]) Lookup(key index.Key) (value T, found bool) {
 	return lpmLookup(l.root, key)
 }
 
+func (l *Trie[T]) LookupExact(key index.Key) (value T, found bool) {
+	return lpmLookupExact(l.root, key)
+}
+
 type lpmNode[T any] struct {
 	children  [2]*lpmNode[T]
 	value     T
@@ -321,6 +325,10 @@ func (txn *Txn[T]) Lookup(key index.Key) (value T, found bool) {
 	return lpmLookup(txn.root, key)
 }
 
+func (txn *Txn[T]) LookupExact(key index.Key) (value T, found bool) {
+	return lpmLookupExact(txn.root, key)
+}
+
 func (txn *Txn[T]) All() *Iterator[T] {
 	if txn.root == nil {
 		return nil
@@ -437,6 +445,27 @@ func lpmLookup[T any](root *lpmNode[T], key index.Key) (value T, ok bool) {
 		return closest.value, true
 	}
 	return value, false
+}
+
+func lpmLookupExact[T any](root *lpmNode[T], key index.Key) (value T, ok bool) {
+	node := root
+	keyData, keyPrefixLen := DecodeLPMKey(key)
+	var matchLen PrefixLen
+	for node != nil {
+		nodePrefixLen := node.prefixLen()
+		matchLen = longestMatch(matchLen, node, keyData, keyPrefixLen)
+		if matchLen == keyPrefixLen && matchLen == nodePrefixLen {
+			if node.imaginary {
+				return
+			}
+			return node.value, true
+		}
+		if matchLen < nodePrefixLen {
+			break
+		}
+		node = node.children[getBitAt(keyData, nodePrefixLen)]
+	}
+	return
 }
 
 func getBitAt(data []byte, index uint16) int {
