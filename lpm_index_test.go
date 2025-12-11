@@ -7,9 +7,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"iter"
+	"math/bits"
 	"math/rand"
 	"net/netip"
 	"reflect"
+	"slices"
 	"testing"
 	"testing/quick"
 
@@ -59,10 +61,22 @@ var (
 		FromObject: func(obj lpmTestObject) iter.Seq[netip.Prefix] {
 			return Just(obj.Prefix)
 		},
+		Unique: true,
 	}
 
 	lpmPortIndex = LPMIndex[lpmTestObject]{
-		Name: "port",
+		Name:   "port",
+		Unique: true,
+		FromObject: func(obj lpmTestObject) iter.Seq2[[]byte, lpm.PrefixLen] {
+			return Just2(
+				binary.BigEndian.AppendUint16(nil, obj.Port),
+				obj.PortPrefixLen)
+		},
+	}
+
+	lpmPortNonUniqueIndex = LPMIndex[lpmTestObject]{
+		Name:   "port-non-unique",
+		Unique: false,
 		FromObject: func(obj lpmTestObject) iter.Seq2[[]byte, lpm.PrefixLen] {
 			return Just2(
 				binary.BigEndian.AppendUint16(nil, obj.Port),
@@ -78,6 +92,20 @@ func newLPMTestTable(db *DB) RWTable[lpmTestObject] {
 		lpmIDIndex,
 		lpmPrefixIndex,
 		lpmPortIndex,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func newLPMNonUniqueTestTable(db *DB) RWTable[lpmTestObject] {
+	t, err := NewTable(
+		db,
+		"lpm-test-non-unique",
+		lpmIDIndex,
+		lpmPrefixIndex,
+		lpmPortNonUniqueIndex,
 	)
 	if err != nil {
 		panic(err)
@@ -169,6 +197,102 @@ func TestLPMIndex(t *testing.T) {
 	})
 	txn = wtxn.Commit()
 
+}
+
+func TestLPMIndexNonUnique(t *testing.T) {
+	db := New()
+	tbl := newLPMNonUniqueTestTable(db)
+
+	wtxn := db.WriteTxn(tbl)
+	key := binary.BigEndian.AppendUint16(nil, 0x1234)
+	prefix := netip.MustParsePrefix("10.0.0.0/8")
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            10,
+		Prefix:        prefix,
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            20,
+		Prefix:        prefix.Masked(),
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            30,
+		Prefix:        netip.MustParsePrefix("10.1.0.0/16"),
+		Port:          0x1200,
+		PortPrefixLen: 8,
+	})
+	txn := wtxn.Commit()
+
+	// Get returns the first matching object.
+	obj, _, found := tbl.Get(txn, lpmPortNonUniqueIndex.Query(key, 16))
+	require.True(t, found)
+	require.EqualValues(t, 10, obj.ID)
+
+	// List returns all matches for the key.
+	objs := Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	require.Len(t, objs, 2)
+	require.EqualValues(t, []uint16{10, 20}, []uint16{objs[0].ID, objs[1].ID})
+
+	// Prefix iteration returns all objects matching the broader prefix.
+	objs = Collect(tbl.Prefix(txn, lpmPortNonUniqueIndex.Query(key, 8)))
+	require.Len(t, objs, 3)
+	require.ElementsMatch(t, []uint16{10, 20, 30}, []uint16{objs[0].ID, objs[1].ID, objs[2].ID})
+
+	// Deleting one object keeps the other accessible.
+	wtxn = db.WriteTxn(tbl)
+	old, found, _ := tbl.Delete(wtxn, lpmTestObject{ID: 10})
+	require.True(t, found)
+	require.EqualValues(t, 10, old.ID)
+	txn = wtxn.Commit()
+
+	objs = Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	require.Len(t, objs, 1)
+	require.EqualValues(t, 20, objs[0].ID)
+}
+
+func TestLPMIndexIteratorNonUnique(t *testing.T) {
+	idx := lpmIndex{
+		lpm:          lpm.New[lpmEntry](),
+		unique:       false,
+		objectToKeys: func(object) index.KeySet { return index.KeySet{} },
+		watch:        make(chan struct{}),
+	}
+	txn := lpmIndexTxn{
+		index: idx,
+		tx:    idx.lpm.Txn(),
+		size:  0,
+	}
+
+	obj := func(id uint16, port uint16, prefixLen lpm.PrefixLen, prefix netip.Prefix) object {
+		return object{
+			data: lpmTestObject{
+				ID:            id,
+				Prefix:        prefix,
+				Port:          port,
+				PortPrefixLen: prefixLen,
+			},
+			revision: uint64(id),
+		}
+	}
+
+	key16 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1234), 16)
+	key8 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8)
+
+	txn.insertKey(index.Uint16(10), key16, obj(10, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
+	txn.insertKey(index.Uint16(20), key16, obj(20, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
+	txn.insertKey(index.Uint16(30), key8, obj(30, 0x1200, 8, netip.MustParsePrefix("10.1.0.0/16")))
+
+	iter, _ := txn.prefix(lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8))
+	var ids []uint16
+	iter.All(func(_ []byte, obj object) bool {
+		ids = append(ids, obj.data.(lpmTestObject).ID)
+		return true
+	})
+
+	require.Equal(t, []uint16{30, 10, 20}, ids)
 }
 
 func TestQuickLPMIndex(t *testing.T) {
@@ -279,6 +403,166 @@ func TestQuickLPMIndex(t *testing.T) {
 			args[0] = reflect.ValueOf(uint16(rand.Intn(65535)))
 			args[1] = reflect.ValueOf(netip.PrefixFrom(addr, bits).Masked())
 			args[2] = reflect.ValueOf(rand.Intn(2) == 1)
+		},
+	}))
+}
+
+func TestQuickLPMIndexNonUnique(t *testing.T) {
+	db := New()
+	tbl := newLPMNonUniqueTestTable(db)
+	values := map[uint16]lpmTestObject{}
+
+	toIDs := func(objs []lpmTestObject) []uint16 {
+		if len(objs) == 0 {
+			return nil
+		}
+		ids := make([]uint16, len(objs))
+		for i, obj := range objs {
+			ids[i] = obj.ID
+		}
+		return ids
+	}
+
+	matchPrefix := func(port, candidate uint16, length lpm.PrefixLen) (bool, lpm.PrefixLen) {
+		if length == 0 {
+			return true, 0
+		}
+		mask := uint16(0xffff) << (16 - length)
+		x := port&mask ^ candidate&mask
+		return (port & mask) == (candidate & mask), min(length, lpm.PrefixLen(bits.LeadingZeros16(x)))
+	}
+
+	longestMatch := func(port uint16) (ids []uint16) {
+		matchLen := lpm.PrefixLen(0)
+		for id, obj := range values {
+			match, numBits := matchPrefix(port, obj.Port, obj.PortPrefixLen)
+			if match && numBits >= matchLen {
+				if numBits > matchLen {
+					matchLen = numBits
+					ids = nil
+				}
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		return
+	}
+
+	validate := func(rtxn ReadTxn, port uint16) bool {
+		if len(values) != tbl.NumObjects(rtxn) {
+			t.Logf("wrong object count, expected %d got %d", len(values), tbl.NumObjects(rtxn))
+			return false
+		}
+
+		key := binary.BigEndian.AppendUint16(nil, port)
+		listObjs := Collect(tbl.List(rtxn, lpmPortNonUniqueIndex.Query(key, 16)))
+		expectedIDs := longestMatch(port)
+		listIDs := toIDs(listObjs)
+		if !slices.Equal(expectedIDs, listIDs) {
+			t.Logf("List(%d/16) returned %v, expected %v", port, listIDs, expectedIDs)
+			return false
+		}
+
+		obj, _, found := tbl.Get(rtxn, lpmPortNonUniqueIndex.Query(key, 16))
+		if len(expectedIDs) > 0 && !found {
+			t.Logf("expected result but Get returned no object")
+			return false
+		}
+		if found && !slices.Contains(expectedIDs, obj.ID) {
+			t.Logf("Get(%d/16) returned object %d that was not part of expected IDs %v", port, obj.ID, expectedIDs)
+			return false
+		}
+		return true
+	}
+
+	check := func(id uint16, prefix netip.Prefix, port uint16, portPrefix uint8, remove bool) bool {
+		prefix = prefix.Masked()
+		portPrefixLen := lpm.PrefixLen(portPrefix % 17)
+
+		current, exists := values[id]
+		if exists {
+			obj, _, found := tbl.Get(db.ReadTxn(), lpmIDIndex.Query(id))
+			if !found {
+				t.Logf("existing object not found by id")
+				return false
+			}
+			if obj.Prefix != current.Prefix || obj.Port != current.Port || obj.PortPrefixLen != current.PortPrefixLen {
+				t.Logf("existing object does not match stored data")
+				return false
+			}
+		}
+
+		txn := db.WriteTxn(tbl)
+		defer txn.Abort()
+		if remove {
+			oldObj, found, _ := tbl.Delete(txn, lpmTestObject{ID: id})
+			if found != exists {
+				t.Logf("delete found=%v, expected %v", found, exists)
+				return false
+			}
+			if found {
+				if oldObj.ID != id {
+					t.Logf("delete returned wrong id %d vs %d", oldObj.ID, id)
+					return false
+				}
+				if oldObj.Prefix != current.Prefix || oldObj.Port != current.Port || oldObj.PortPrefixLen != current.PortPrefixLen {
+					t.Logf("delete returned object %v, expected %v", oldObj, current)
+					return false
+				}
+				delete(values, id)
+			}
+			txn.Commit()
+			return validate(db.ReadTxn(), port)
+		}
+
+		obj := lpmTestObject{
+			ID:            id,
+			Prefix:        prefix,
+			Port:          port,
+			PortPrefixLen: portPrefixLen,
+		}
+		oldObj, hadOld, err := tbl.Insert(txn, obj)
+		if err != nil {
+			t.Logf("insert error: %s", err)
+			return false
+		}
+		if hadOld != exists {
+			t.Logf("Insert returned hadOld=%v, expected %v", hadOld, exists)
+			return false
+		}
+		if hadOld {
+			if oldObj.ID != id {
+				t.Logf("Insert returned old object with wrong id %d vs %d", oldObj.ID, id)
+				return false
+			}
+			if oldObj.Prefix != current.Prefix || oldObj.Port != current.Port || oldObj.PortPrefixLen != current.PortPrefixLen {
+				t.Logf("Insert returned wrong old object %+v vs %+v", oldObj, current)
+				return false
+			}
+		}
+		values[id] = obj
+
+		if !validate(txn, port) {
+			t.Logf("validation failed against WriteTxn")
+			return false
+		}
+		return validate(txn.Commit(), port)
+	}
+
+	require.NoError(t, quick.Check(check, &quick.Config{
+		MaxCount: 5000,
+		Values: func(args []reflect.Value, rand *rand.Rand) {
+			if len(args) != 5 {
+				panic("unexpected args count")
+			}
+			bits := rand.Intn(32)
+			var addrBytes [4]byte
+			rand.Read(addrBytes[:])
+			args[0] = reflect.ValueOf(uint16(rand.Intn(65536)))
+			args[1] = reflect.ValueOf(netip.PrefixFrom(netip.AddrFrom4(addrBytes), bits).Masked())
+			args[2] = reflect.ValueOf(uint16(rand.Intn(65536)))
+			args[3] = reflect.ValueOf(uint8(rand.Intn(17)))
+			args[4] = reflect.ValueOf(rand.Intn(3) == 1)
 		},
 	}))
 }

@@ -594,6 +594,7 @@ The `NetIPPrefixIndex` is an LPM index specialized for `netip.Prefix`:
     FromObject: func(obj *MyObject) iter.Seq[netip.Prefix] {
       return statedb.Just(obj.Prefix)
     },
+    Unique: true,
   }
   myObjects, err := statedb.NewTable(db, "my-objects", IDIndex, prefixIndex)
 
@@ -628,6 +629,7 @@ The `LPMIndex` allows defining an index for an arbitrary bit prefix:
 
   portIndex := statedb.LPMIndex[*MyObject]{
     Name: "port",
+    Unique: true,
     FromObject: func(obj *MyObject) iter.Seq2[[]byte, statedb.PrefixLen] {
       return func(yield(data []byte, prefixLen statedb.PrefixLen)) {
         yield(
@@ -783,4 +785,3 @@ or waiting for an object to be reconciled. On failures the reconciler will retry
 the operation at a later time. Reconciler supports health reporting and metrics.
 
 See the example application in `reconciler/example` for more information.
-
