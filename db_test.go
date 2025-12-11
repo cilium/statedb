@@ -122,6 +122,7 @@ var (
 		FromObject: func(obj *testObject) iter.Seq[netip.Prefix] {
 			return Just(obj.Prefix)
 		},
+		Unique: true,
 	}
 )
 

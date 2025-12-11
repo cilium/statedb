@@ -59,10 +59,22 @@ var (
 		FromObject: func(obj lpmTestObject) iter.Seq[netip.Prefix] {
 			return Just(obj.Prefix)
 		},
+		Unique: true,
 	}
 
 	lpmPortIndex = LPMIndex[lpmTestObject]{
-		Name: "port",
+		Name:   "port",
+		Unique: true,
+		FromObject: func(obj lpmTestObject) iter.Seq2[[]byte, lpm.PrefixLen] {
+			return Just2(
+				binary.BigEndian.AppendUint16(nil, obj.Port),
+				obj.PortPrefixLen)
+		},
+	}
+
+	lpmPortNonUniqueIndex = LPMIndex[lpmTestObject]{
+		Name:   "port-non-unique",
+		Unique: false,
 		FromObject: func(obj lpmTestObject) iter.Seq2[[]byte, lpm.PrefixLen] {
 			return Just2(
 				binary.BigEndian.AppendUint16(nil, obj.Port),
@@ -78,6 +90,20 @@ func newLPMTestTable(db *DB) RWTable[lpmTestObject] {
 		lpmIDIndex,
 		lpmPrefixIndex,
 		lpmPortIndex,
+	)
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
+func newLPMNonUniqueTestTable(db *DB) RWTable[lpmTestObject] {
+	t, err := NewTable(
+		db,
+		"lpm-test-non-unique",
+		lpmIDIndex,
+		lpmPrefixIndex,
+		lpmPortNonUniqueIndex,
 	)
 	if err != nil {
 		panic(err)
@@ -169,6 +195,102 @@ func TestLPMIndex(t *testing.T) {
 	})
 	txn = wtxn.Commit()
 
+}
+
+func TestLPMIndexNonUnique(t *testing.T) {
+	db := New()
+	tbl := newLPMNonUniqueTestTable(db)
+
+	wtxn := db.WriteTxn(tbl)
+	key := binary.BigEndian.AppendUint16(nil, 0x1234)
+	prefix := netip.MustParsePrefix("10.0.0.0/8")
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            10,
+		Prefix:        prefix,
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            20,
+		Prefix:        prefix.Masked(),
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            30,
+		Prefix:        netip.MustParsePrefix("10.1.0.0/16"),
+		Port:          0x1200,
+		PortPrefixLen: 8,
+	})
+	txn := wtxn.Commit()
+
+	// Get returns the first matching object.
+	obj, _, found := tbl.Get(txn, lpmPortNonUniqueIndex.Query(key, 16))
+	require.True(t, found)
+	require.EqualValues(t, 10, obj.ID)
+
+	// List returns all matches for the key.
+	objs := Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	require.Len(t, objs, 2)
+	require.EqualValues(t, []uint16{10, 20}, []uint16{objs[0].ID, objs[1].ID})
+
+	// Prefix iteration returns all objects matching the broader prefix.
+	objs = Collect(tbl.Prefix(txn, lpmPortNonUniqueIndex.Query(key, 8)))
+	require.Len(t, objs, 3)
+	require.ElementsMatch(t, []uint16{10, 20, 30}, []uint16{objs[0].ID, objs[1].ID, objs[2].ID})
+
+	// Deleting one object keeps the other accessible.
+	wtxn = db.WriteTxn(tbl)
+	old, found, _ := tbl.Delete(wtxn, lpmTestObject{ID: 10})
+	require.True(t, found)
+	require.EqualValues(t, 10, old.ID)
+	txn = wtxn.Commit()
+
+	objs = Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	require.Len(t, objs, 1)
+	require.EqualValues(t, 20, objs[0].ID)
+}
+
+func TestLPMIndexIteratorNonUnique(t *testing.T) {
+	idx := lpmIndex{
+		lpm:          lpm.New[lpmEntry](),
+		unique:       false,
+		objectToKeys: func(object) index.KeySet { return index.KeySet{} },
+		watch:        make(chan struct{}),
+	}
+	txn := lpmIndexTxn{
+		index: idx,
+		tx:    idx.lpm.Txn(),
+		size:  0,
+	}
+
+	obj := func(id uint16, port uint16, prefixLen lpm.PrefixLen, prefix netip.Prefix) object {
+		return object{
+			data: lpmTestObject{
+				ID:            id,
+				Prefix:        prefix,
+				Port:          port,
+				PortPrefixLen: prefixLen,
+			},
+			revision: uint64(id),
+		}
+	}
+
+	key16 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1234), 16)
+	key8 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8)
+
+	txn.insertKey(index.Uint16(10), key16, obj(10, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
+	txn.insertKey(index.Uint16(20), key16, obj(20, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
+	txn.insertKey(index.Uint16(30), key8, obj(30, 0x1200, 8, netip.MustParsePrefix("10.1.0.0/16")))
+
+	iter, _ := txn.prefix(lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8))
+	var ids []uint16
+	iter.All(func(_ []byte, obj object) bool {
+		ids = append(ids, obj.data.(lpmTestObject).ID)
+		return true
+	})
+
+	require.Equal(t, []uint16{30, 10, 20}, ids)
 }
 
 func TestQuickLPMIndex(t *testing.T) {
