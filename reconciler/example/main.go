@@ -19,6 +19,7 @@ import (
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
+	"github.com/cilium/hive/shell"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/reconciler"
 )
@@ -106,6 +107,8 @@ var Hive = hive.NewWithOptions(
 			},
 		},
 	},
+
+	shell.ServerCell("/tmp/example.sock"),
 
 	statedb.Cell,
 	job.Cell,
