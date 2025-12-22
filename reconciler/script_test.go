@@ -129,7 +129,6 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 					return nil, fmt.Errorf("unexpected arg, expected 'with-prune', 'with-batchops' or 'with-refresh'")
 				}
 			}
-			reconcilerParams.Lifecycle = reconcilerLifecycle
 			r, err = reconciler.Register(
 				reconcilerParams,
 				testObjects,
@@ -139,10 +138,7 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 				ops,
 				bops,
 				opts...)
-			if err != nil {
-				return nil, err
-			}
-			return nil, reconcilerLifecycle.Start(log, context.TODO())
+			return nil, err
 		},
 	)
 

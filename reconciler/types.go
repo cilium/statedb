@@ -39,7 +39,6 @@ type Reconciler[Obj any] interface {
 type Params struct {
 	cell.In
 
-	Lifecycle      cell.Lifecycle
 	Log            *slog.Logger
 	DB             *statedb.DB
 	Jobs           job.Registry

@@ -79,7 +79,7 @@ func Register[Obj comparable](
 		primaryIndexer:       idx,
 	}
 
-	g := params.Jobs.NewGroup(params.Health, params.Lifecycle)
+	g := params.Jobs.NewGroup(params.Health)
 
 	g.Add(job.OneShot("reconcile", r.reconcileLoop))
 	if r.config.RefreshInterval > 0 {
