@@ -122,12 +122,24 @@ func TestTrie(t *testing.T) {
 }
 
 func TestEncodeDecodeLPMKey(t *testing.T) {
+	maskData := func(data []byte, prefixLen PrefixLen) []byte {
+		dataLen := (prefixLen + 7) / 8
+		if dataLen == 0 {
+			return []byte{}
+		}
+		masked := make([]byte, dataLen)
+		copy(masked, data[:dataLen])
+		if rem := prefixLen % 8; rem != 0 {
+			masked[dataLen-1] &= 0xff << (8 - rem)
+		}
+		return masked
+	}
 	roundtrip := func(data []byte, prefixLen PrefixLen) {
 		key := EncodeLPMKey(data, prefixLen)
 		assert.Len(t, key, 2+((int(prefixLen)+7)/8))
 		data2, prefixLen2 := DecodeLPMKey(key)
 		assert.Equal(t, prefixLen, prefixLen2)
-		assert.Equal(t, data2, data[:len(data2)])
+		assert.Equal(t, data2, maskData(data, prefixLen))
 	}
 	roundtrip([]byte{}, 0)
 	roundtrip([]byte{0xa, 0xb}, 1)
@@ -137,6 +149,18 @@ func TestEncodeDecodeLPMKey(t *testing.T) {
 }
 
 func TestQuickRoundTripEncodeDecodeLPMKey(t *testing.T) {
+	maskData := func(data []byte, prefixLen PrefixLen) []byte {
+		dataLen := (prefixLen + 7) / 8
+		if dataLen == 0 {
+			return []byte{}
+		}
+		masked := make([]byte, dataLen)
+		copy(masked, data[:dataLen])
+		if rem := prefixLen % 8; rem != 0 {
+			masked[dataLen-1] &= 0xff << (8 - rem)
+		}
+		return masked
+	}
 	check := func(data []byte, prefixLen uint8) bool {
 		prefixLen = prefixLen % 128
 		prefixLen = min(prefixLen, uint8(len(data)*8))
@@ -144,7 +168,7 @@ func TestQuickRoundTripEncodeDecodeLPMKey(t *testing.T) {
 		assert.Len(t, key, 2+((int(prefixLen)+7)/8))
 		data2, prefixLen2 := DecodeLPMKey(key)
 		assert.Equal(t, PrefixLen(prefixLen), prefixLen2)
-		assert.Equal(t, data2, data[:len(data2)])
+		assert.Equal(t, data2, maskData(data, PrefixLen(prefixLen)))
 		return !t.Failed()
 	}
 	err := quick.Check(check, &quick.Config{MaxCount: 10000})

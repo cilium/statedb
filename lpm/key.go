@@ -41,6 +41,11 @@ func EncodeLPMKey(data []byte, prefixLen PrefixLen) index.Key {
 	}
 	key := make(index.Key, dataLen, dataLen+2)
 	copy(key, data[:dataLen])
+	if dataLen > 0 {
+		if rem := prefixLen % 8; rem != 0 {
+			key[dataLen-1] &= 0xff << (8 - rem)
+		}
+	}
 	return binary.BigEndian.AppendUint16(key, prefixLen)
 }
 
