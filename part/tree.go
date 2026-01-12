@@ -19,6 +19,7 @@ type Tree[T any] struct {
 	size      int // the number of objects in the tree
 	opts      options
 	prevTxn   atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
+	prevTxnID uint64                 // the transaction ID that produced this tree
 }
 
 // New constructs a new tree.
@@ -43,17 +44,11 @@ type Option func(*options)
 // grained notifications.
 var RootOnlyWatch = (*options).setRootOnlyWatch
 
-// NoCache disables the mutated node cache
-var NoCache = (*options).setNoCache
-
 func newTxn[T any](o options) *Txn[T] {
 	txn := &Txn[T]{
 		watches: make(map[chan struct{}]struct{}),
 	}
-	if !o.noCache() {
-		txn.mutated = &nodeMutated[T]{}
-		txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
-	}
+	txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
 	txn.opts = o
 	return txn
 }
@@ -67,7 +62,6 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	// Reuse the previous txn allocation if possible
 	if prevTxn := t.prevTxn.Swap(nil); prevTxn != nil {
 		txn = prevTxn
-		txn.mutated.clear()
 		clear(txn.watches)
 		txn.dirty = false
 	} else {
@@ -78,6 +72,7 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	txn.oldRoot = t.root
 	txn.rootWatch = t.rootWatch
 	txn.size = t.size
+	txn.txnID = t.prevTxnID + 1
 	return txn
 }
 

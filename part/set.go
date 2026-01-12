@@ -42,7 +42,7 @@ func NewSet[T any](values ...T) Set[T] {
 
 func (s *Set[T]) ensureTree() {
 	if s.tree == nil {
-		s.tree = New[T](RootOnlyWatch, NoCache)
+		s.tree = New[T](RootOnlyWatch)
 	}
 	s.toBytes = lookupKeyType[T]()
 }

@@ -1628,30 +1628,6 @@ func Benchmark_Delete_Random(b *testing.B) {
 	b.ReportMetric(float64(numObjects*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func Benchmark_nodeMutatedClear(b *testing.B) {
-	var nm nodeMutated[bool]
-	for b.Loop() {
-		nm.clear()
-		nm.clear()
-		nm.clear()
-		nm.clear()
-		nm.clear()
-	}
-}
-
-func Benchmark_nodeMutatedExists(b *testing.B) {
-	var nm nodeMutated[bool]
-	h := &header[bool]{}
-	nm.set(h)
-	for b.Loop() {
-		nm.exists(h)
-		nm.exists(h)
-		nm.exists(h)
-		nm.exists(h)
-		nm.exists(h)
-	}
-}
-
 func Benchmark_find16(b *testing.B) {
 	n := &node16[bool]{
 		header:   header[bool]{},
