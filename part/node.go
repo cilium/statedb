@@ -146,6 +146,40 @@ func (n *header[T]) node256() *node256[T] {
 	return (*node256[T])(unsafe.Pointer(n))
 }
 
+func (n *header[T]) txnID() uint64 {
+	switch n.kind() {
+	case nodeKindLeaf:
+		return 0
+	case nodeKind4:
+		return n.node4().txnID
+	case nodeKind16:
+		return n.node16().txnID
+	case nodeKind48:
+		return n.node48().txnID
+	case nodeKind256:
+		return n.node256().txnID
+	default:
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
+	}
+}
+
+func (n *header[T]) setTxnID(txnID uint64) {
+	switch n.kind() {
+	case nodeKindLeaf:
+		return
+	case nodeKind4:
+		n.node4().txnID = txnID
+	case nodeKind16:
+		n.node16().txnID = txnID
+	case nodeKind48:
+		n.node48().txnID = txnID
+	case nodeKind256:
+		n.node256().txnID = txnID
+	default:
+		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
+	}
+}
+
 // clone returns a shallow clone of the node.
 // We are working on the assumption here that only
 // value-types are mutated in the returned clone.
@@ -178,13 +212,14 @@ func (n *header[T]) clone(watch bool) *header[T] {
 	return nCopy
 }
 
-func (n *header[T]) promote() *header[T] {
+func (n *header[T]) promote(txnID uint64) *header[T] {
 	switch n.kind() {
 	case nodeKindLeaf:
 		node4 := &node4[T]{}
 		node4.prefixLen = n.prefixLen
 		node4.prefixP = n.prefixP
 		node4.leaf = n.getLeaf()
+		node4.txnID = txnID
 		node4.setKind(nodeKind4)
 		if n.watch != nil {
 			node4.watch = make(chan struct{})
@@ -193,6 +228,7 @@ func (n *header[T]) promote() *header[T] {
 	case nodeKind4:
 		node4 := n.node4()
 		node16 := &node16[T]{header: *n}
+		node16.txnID = txnID
 		node16.setKind(nodeKind16)
 		node16.leaf = n.getLeaf()
 		size := node4.size()
@@ -205,6 +241,7 @@ func (n *header[T]) promote() *header[T] {
 	case nodeKind16:
 		node16 := n.node16()
 		node48 := &node48[T]{header: *n}
+		node48.txnID = txnID
 		node48.setKind(nodeKind48)
 		node48.leaf = n.getLeaf()
 		copy(node48.children[:], node16.children[:node16.size()])
@@ -218,6 +255,7 @@ func (n *header[T]) promote() *header[T] {
 	case nodeKind48:
 		node48 := n.node48()
 		node256 := &node256[T]{header: *n}
+		node256.txnID = txnID
 		node256.setKind(nodeKind256)
 		node256.leaf = n.getLeaf()
 
@@ -482,7 +520,6 @@ func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
 	leaf := &leaf[T]{keyLen: uint16(len(key)), keyP: keyP, value: value}
 	leaf.setPrefix(prefix)
 	leaf.setKind(nodeKindLeaf)
-
 	if !o.rootOnlyWatch() {
 		leaf.watch = make(chan struct{})
 	}
@@ -492,6 +529,7 @@ func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
 
 type node4[T any] struct {
 	header[T]
+	txnID    uint64   // transaction ID that last mutated this node
 	leaf     *leaf[T] // non-nil if this node contains a value
 	children [4]*header[T]
 	keys     [4]byte
@@ -499,6 +537,7 @@ type node4[T any] struct {
 
 type node16[T any] struct {
 	header[T]
+	txnID    uint64   // transaction ID that last mutated this node
 	leaf     *leaf[T] // non-nil if this node contains a value
 	children [16]*header[T]
 	keys     [16]byte
@@ -506,6 +545,7 @@ type node16[T any] struct {
 
 type node48[T any] struct {
 	header[T]
+	txnID    uint64 // transaction ID that last mutated this node
 	children [48]*header[T]
 	leaf     *leaf[T] // non-nil if this node contains a value
 	index    [256]int8
@@ -513,6 +553,7 @@ type node48[T any] struct {
 
 type node256[T any] struct {
 	header[T]
+	txnID    uint64   // transaction ID that last mutated this node
 	leaf     *leaf[T] // non-nil if this node contains a value
 	children [256]*header[T]
 }
