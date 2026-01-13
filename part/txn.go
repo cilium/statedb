@@ -61,10 +61,6 @@ func (txn *Txn[T]) Clone() *Tree[T] {
 	}
 }
 
-func (txn *Txn[T]) Next() (key []byte, value T, ok bool) {
-	panic("nope")
-}
-
 // Insert or update the tree with the given key and value.
 // Returns the old value if it exists.
 func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
