@@ -288,6 +288,7 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 	node.imaginary = true
 
 	// Reconstruct the parents, compressing the trie along the way.
+	// [node] will be the new root at the end of this.
 	for i := len(parents) - 1; i >= 0; i-- {
 		parents[i].node = txn.clone(parents[i].node)
 		parent := parents[i].node
@@ -311,12 +312,17 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 		node = parent
 	}
 
-	if len(parents) > 0 {
-		txn.root = parents[0].node
-	} else {
-		txn.root = node
+	// Drop imaginary root nodes that only have a single child.
+	if node.imaginary {
+		switch {
+		case node.children[0] != nil && node.children[1] == nil:
+			node = node.children[0]
+		case node.children[0] == nil && node.children[1] != nil:
+			node = node.children[1]
+		}
 	}
 
+	txn.root = node
 	txn.size--
 	return value, true
 }
