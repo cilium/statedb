@@ -4,6 +4,7 @@
 package lpm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"iter"
@@ -346,49 +347,182 @@ func FuzzLPMTrie(f *testing.F) {
 	})
 }
 
-func BenchmarkDB_LPMTxn_100_Insert(b *testing.B) {
+const numObjectsToInsert = 1000
+
+func benchmark_txn_insert_batch(b *testing.B, batchSize int) {
 	trie := New[int]()
-	batchSize := 100
 
 	var addrs []netip.Prefix
-	for i := range b.N {
+	for i := range numObjectsToInsert {
 		addr, _ := netip.AddrFromSlice(binary.LittleEndian.AppendUint32(nil, uint32(i)))
 		addrs = append(addrs, netip.PrefixFrom(addr, 32))
 	}
 
-	b.ResetTimer()
-
-	n := b.N
-	idx := 0
-	for n > 0 {
-		txn := trie.Txn()
-		for range min(n, batchSize) {
-			txn.Insert(NetIPPrefixToIndexKey(addrs[idx]), idx)
-			idx++
-			n--
+	for b.Loop() {
+		n := numObjectsToInsert
+		idx := 0
+		for n > 0 {
+			txn := trie.Txn()
+			for range min(n, batchSize) {
+				txn.Insert(NetIPPrefixToIndexKey(addrs[idx]), idx)
+				idx++
+				n--
+			}
+			trie = txn.Commit()
 		}
-		trie = txn.Commit()
 	}
 
-	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
 
-func BenchmarkDB_LPMTxn_1_Insert(b *testing.B) {
+func Benchmark_txn_insert(b *testing.B) {
+	for _, batchSize := range []int{1, 10, 100} {
+		b.Run(fmt.Sprintf("batchSize=%d", batchSize), func(b *testing.B) {
+			benchmark_txn_insert_batch(b, batchSize)
+		})
+	}
+}
+
+func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
 	trie := New[int]()
+	txn := trie.Txn()
 
 	var addrs []netip.Prefix
-	for i := range b.N {
-		addr, _ := netip.AddrFromSlice(binary.BigEndian.AppendUint32(nil, uint32(i)))
+	for i := range numObjectsToInsert {
+		addr, _ := netip.AddrFromSlice(binary.LittleEndian.AppendUint32(nil, uint32(i)))
 		addrs = append(addrs, netip.PrefixFrom(addr, 32))
-	}
-
-	b.ResetTimer()
-
-	for i := range b.N {
-		txn := trie.Txn()
 		txn.Insert(NetIPPrefixToIndexKey(addrs[i]), i)
-		trie = txn.Commit()
+	}
+	trie = txn.Commit()
+
+	for b.Loop() {
+		n := numObjectsToInsert
+		idx := 0
+		for n > 0 {
+			txn := trie.Txn()
+			for range min(n, batchSize) {
+				txn.Delete(NetIPPrefixToIndexKey(addrs[idx]))
+				idx++
+				n--
+			}
+		}
 	}
 
-	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_txn_delete(b *testing.B) {
+	for _, batchSize := range []int{1, 10, 100} {
+		b.Run(fmt.Sprintf("batchSize=%d", batchSize), func(b *testing.B) {
+			benchmark_txn_delete_batch(b, batchSize)
+		})
+	}
+}
+
+func Benchmark_LPM_Lookup(b *testing.B) {
+	trie := New[int]()
+	keys := make([]index.Key, 0, numObjectsToInsert)
+	txn := trie.Txn()
+	for i := range numObjectsToInsert {
+		addr, _ := netip.AddrFromSlice(binary.BigEndian.AppendUint32(nil, uint32(i)))
+		key := NetIPPrefixToIndexKey(netip.PrefixFrom(addr, 32))
+		keys = append(keys, key)
+		txn.Insert(key, i)
+	}
+	trie = txn.Commit()
+
+	for b.Loop() {
+		for i, key := range keys {
+			val, found := trie.Lookup(key)
+			if !found || val != i {
+				b.Fatalf("lookup mismatch: %v %v", found, val)
+			}
+		}
+	}
+
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_LPM_All(b *testing.B) {
+	trie := New[int]()
+	txn := trie.Txn()
+	for i := range numObjectsToInsert {
+		addr, _ := netip.AddrFromSlice(binary.BigEndian.AppendUint32(nil, uint32(i)))
+		key := NetIPPrefixToIndexKey(netip.PrefixFrom(addr, 32))
+		txn.Insert(key, i)
+	}
+	trie = txn.Commit()
+
+	for b.Loop() {
+		for _, value := range trie.All().All {
+			if value < 0 || value >= numObjectsToInsert {
+				b.Fatalf("impossible value: %d", value)
+			}
+		}
+	}
+
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_LPM_Prefix(b *testing.B) {
+	trie := New[int]()
+	keys := make([]index.Key, 0, numObjectsToInsert)
+	txn := trie.Txn()
+	for i := range numObjectsToInsert {
+		addr, _ := netip.AddrFromSlice(binary.BigEndian.AppendUint32(nil, uint32(i)))
+		key := NetIPPrefixToIndexKey(netip.PrefixFrom(addr, 32))
+		keys = append(keys, key)
+		txn.Insert(key, i)
+	}
+	trie = txn.Commit()
+
+	prefix := NetIPPrefixToIndexKey(netip.PrefixFrom(netip.AddrFrom4([4]byte{0, 0, 0, 0}), 16))
+	prefixCount := 0
+	for _, key := range keys {
+		_, keyPrefixLen := DecodeLPMKey(key)
+		if keyPrefixLen < 16 {
+			continue
+		}
+		keyData, _ := DecodeLPMKey(key)
+		prefixData, _ := DecodeLPMKey(prefix)
+		if bytes.HasPrefix(keyData, prefixData) {
+			prefixCount++
+		}
+	}
+
+	for b.Loop() {
+		for _, value := range trie.Prefix(prefix).All {
+			if value < 0 || value >= numObjectsToInsert {
+				b.Fatalf("impossible value: %d", value)
+			}
+		}
+	}
+
+	b.ReportMetric(float64(prefixCount*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_LPM_LowerBound(b *testing.B) {
+	trie := New[int]()
+	keys := make([]index.Key, 0, numObjectsToInsert)
+	txn := trie.Txn()
+	for i := range numObjectsToInsert {
+		addr, _ := netip.AddrFromSlice(binary.BigEndian.AppendUint32(nil, uint32(i)))
+		key := NetIPPrefixToIndexKey(netip.PrefixFrom(addr, 32))
+		keys = append(keys, key)
+		txn.Insert(key, i)
+	}
+	trie = txn.Commit()
+
+	lowerBound := keys[numObjectsToInsert/2]
+	lowerBoundCount := numObjectsToInsert - (numObjectsToInsert / 2)
+
+	for b.Loop() {
+		for _, value := range trie.LowerBound(lowerBound).All {
+			if value < 0 || value >= numObjectsToInsert {
+				b.Fatalf("impossible value: %d", value)
+			}
+		}
+	}
+
+	b.ReportMetric(float64(lowerBoundCount*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
