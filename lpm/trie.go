@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math/bits"
 	"strings"
-	"unsafe"
 
 	"github.com/cilium/statedb/index"
 )
@@ -22,14 +21,17 @@ func New[T any]() Trie[T] {
 }
 
 type Trie[T any] struct {
-	root *lpmNode[T]
-	size int
+	root      *lpmNode[T]
+	size      int
+	prevTxnID uint64 // ID of the transaction that produced this
 }
 
 func (l *Trie[T]) Txn() *Txn[T] {
+	txnID := l.prevTxnID + 1
 	return &Txn[T]{
-		root: l.root,
-		size: l.size,
+		root:  l.root,
+		size:  l.size,
+		txnID: txnID,
 	}
 }
 
@@ -85,9 +87,17 @@ func (l *Trie[T]) LookupExact(key index.Key) (value T, found bool) {
 }
 
 type lpmNode[T any] struct {
-	children  [2]*lpmNode[T]
-	value     T
-	key       index.Key
+	children [2]*lpmNode[T]
+
+	// txnID is the ID of the transaction that last cloned this node. Used to detect
+	// if it can be mutated in-place.
+	txnID uint64
+
+	value T
+	key   index.Key
+
+	// imaginary is a node that holds no value but has children that share the
+	// common prefix.
 	imaginary bool
 }
 
@@ -100,16 +110,19 @@ type Txn[T any] struct {
 	// root is the current root of the trie
 	root *lpmNode[T]
 
-	// mutated is a probabilistic check of whether a node was cloned during
-	// this transaction and can thus be mutated in-place instead of cloning again.
-	mutated lpmNodeMutated[T]
-
 	// deletedParentsCache is the previously used chain of parents used during deletion.
 	// We cache it here so we don't need to allocate a fresh one for each deletion.
 	deletedParentsCache []lpmDeleteParent[T]
 
 	// size is the number of nodes currently in [root]
 	size int
+
+	// txnID is a monotonically increasing integer that is assigned when the Txn
+	// is created from a [Trie] and is used to detect whether a node has been
+	// cloned during this transaction or not to allow mutating it in place.
+	// txnID is also incremented when returning an iterator in order to not
+	// mutate the tree used by the iterator as that would mess up iteration.
+	txnID uint64
 }
 
 type lpmDeleteParent[T any] struct {
@@ -120,14 +133,15 @@ type lpmDeleteParent[T any] struct {
 // Clear the transaction for reuse.
 func (txn *Txn[T]) Clear() {
 	txn.size = 0
-	txn.mutated.clear()
 	txn.root = nil
+	txn.txnID = 0
 	clear(txn.deletedParentsCache)
 }
 
 func (txn *Txn[T]) Reuse(trie Trie[T]) *Txn[T] {
 	txn.size = trie.size
 	txn.root = trie.root
+	txn.txnID = trie.prevTxnID + 1
 	return txn
 }
 
@@ -135,13 +149,14 @@ func (txn *Txn[T]) clone(n *lpmNode[T]) *lpmNode[T] {
 	if n == nil {
 		return nil
 	}
-	if txn.mutated.exists(n) {
+
+	if n.txnID == txn.txnID {
 		return n
 	}
 
 	n2 := *n
 	n = &n2
-	txn.mutated.set(n)
+	n.txnID = txn.txnID
 	return n
 }
 
@@ -152,8 +167,8 @@ func (txn *Txn[T]) Insert(key index.Key, value T) error {
 		key:       key,
 		value:     value,
 		imaginary: false,
+		txnID:     txn.txnID,
 	}
-	txn.mutated.set(newNode)
 
 	txn.root = txn.clone(txn.root)
 	nodep := &txn.root
@@ -215,8 +230,8 @@ func (txn *Txn[T]) Insert(key index.Key, value T) error {
 	imaginary := &lpmNode[T]{
 		key:       EncodeLPMKey(node.key, matchLen),
 		imaginary: true,
+		txnID:     txn.txnID,
 	}
-	txn.mutated.set(imaginary)
 	bit := getBitAt(data, matchLen)
 	imaginary.children[bit] = newNode
 	imaginary.children[bit^1] = node
@@ -279,6 +294,7 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 		return
 	}
 
+	txn.size--
 	value = node.value
 
 	// Turn the node imaginary to mark it for removal.
@@ -290,8 +306,9 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 	// Reconstruct the parents, compressing the trie along the way.
 	// [node] will be the new root at the end of this.
 	for i := len(parents) - 1; i >= 0; i-- {
-		parents[i].node = txn.clone(parents[i].node)
-		parent := parents[i].node
+		oldParent := parents[i].node
+		parent := txn.clone(oldParent)
+		parents[i].node = parent
 		index := parents[i].index
 		if node.imaginary {
 			switch {
@@ -310,6 +327,12 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 		}
 		parent.children[index] = node
 		node = parent
+
+		if oldParent.txnID == txn.txnID {
+			// The parent was already cloned and thus all pointers upwards from here
+			// are already correct and we can stop.
+			return value, true
+		}
 	}
 
 	// Drop imaginary root nodes that only have a single child.
@@ -323,7 +346,6 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 	}
 
 	txn.root = node
-	txn.size--
 	return value, true
 }
 
@@ -339,7 +361,8 @@ func (txn *Txn[T]) All() *Iterator[T] {
 	if txn.root == nil {
 		return nil
 	}
-	txn.mutated.clear()
+	// Bump txnID to freeze the trie
+	txn.txnID++
 	return &Iterator[T]{start: txn.root}
 }
 
@@ -347,7 +370,8 @@ func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 	if txn.root == nil {
 		return nil
 	}
-	txn.mutated.clear()
+	// Bump txnID to freeze the trie
+	txn.txnID++
 
 	node := txn.root
 	data, prefixLen := DecodeLPMKey(key)
@@ -370,7 +394,8 @@ func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
 	if txn.root == nil {
 		return nil
 	}
-	txn.mutated.clear()
+	// Bump the txnID to freeze the trie
+	txn.txnID++
 
 	data, prefixLen := DecodeLPMKey(key)
 	node := txn.root
@@ -400,8 +425,9 @@ func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
 
 func (txn *Txn[T]) Commit() Trie[T] {
 	return Trie[T]{
-		root: txn.root,
-		size: txn.size,
+		root:      txn.root,
+		size:      txn.size,
+		prevTxnID: txn.txnID,
 	}
 }
 
@@ -487,11 +513,7 @@ func showKey(key index.Key) string {
 		if bits < 8 {
 			mask <<= (8 - bits)
 		}
-		//if len(data) == 4 { // "ipv4"
 		fmt.Fprintf(&w, "%d", b&mask)
-		/*} else { // "ipv6"
-			fmt.Fprintf(&w, "%x", b&mask)
-		}*/
 		if i != len(data)-1 {
 			fmt.Fprint(&w, ".")
 		}
@@ -499,45 +521,4 @@ func showKey(key index.Key) string {
 	}
 	fmt.Fprintf(&w, "/%d", totalBits)
 	return w.String()
-}
-
-const lpmNodeMutatedSize = 256 // must be power-of-two
-
-type lpmNodeMutated[T any] struct {
-	ptrs [lpmNodeMutatedSize]*lpmNode[T]
-	used bool
-}
-
-func (lnm *lpmNodeMutated[T]) set(n *lpmNode[T]) {
-	if lnm == nil {
-		return
-	}
-	ptrInt := uintptr(unsafe.Pointer(n))
-	lnm.ptrs[lnm.slot(ptrInt)] = n
-	lnm.used = true
-}
-
-func (lnm *lpmNodeMutated[T]) exists(n *lpmNode[T]) bool {
-	if lnm == nil {
-		return false
-	}
-	ptrInt := uintptr(unsafe.Pointer(n))
-	return lnm.ptrs[lnm.slot(ptrInt)] == n
-}
-
-func (nm *lpmNodeMutated[T]) slot(p uintptr) int {
-	p >>= 4 // ignore low order bits
-	// use some relevant bits from the pointer
-	slot := uint8(p) ^ uint8(p>>8) ^ uint8(p>>16)
-	return int(slot & (lpmNodeMutatedSize - 1))
-}
-
-func (lnm *lpmNodeMutated[T]) clear() {
-	if lnm == nil {
-		return
-	}
-	if lnm.used {
-		clear(lnm.ptrs[:])
-	}
-	lnm.used = false
 }
