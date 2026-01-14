@@ -149,6 +149,46 @@ func TestEncodeDecodeLPMKey(t *testing.T) {
 	roundtrip([]byte{0xa, 0xb}, 16)
 }
 
+func TestDeleteCompressionInvariants(t *testing.T) {
+	prefix := func(p string) index.Key {
+		key := netip.MustParsePrefix(p)
+		return EncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
+	}
+
+	var assertNoImaginarySingleChild func(*lpmNode[int])
+	assertNoImaginarySingleChild = func(node *lpmNode[int]) {
+		if node == nil {
+			return
+		}
+		if node.imaginary {
+			if node.children[0] == nil || node.children[1] == nil {
+				t.Fatalf("imaginary node with missing child: %s", showKey(node.key))
+			}
+		}
+		assertNoImaginarySingleChild(node.children[0])
+		assertNoImaginarySingleChild(node.children[1])
+	}
+
+	trie := New[int]()
+	txn := trie.Txn()
+	require.NoError(t, txn.Insert(prefix("0.0.0.0/1"), 1))
+	require.NoError(t, txn.Insert(prefix("64.0.0.0/2"), 2))
+	require.NoError(t, txn.Insert(prefix("128.0.0.0/1"), 3))
+	trie = txn.Commit()
+
+	txn = trie.Txn()
+	_, found := txn.Delete(prefix("64.0.0.0/2"))
+	require.True(t, found)
+	trie = txn.Commit()
+	assertNoImaginarySingleChild(trie.root)
+
+	txn = trie.Txn()
+	_, found = txn.Delete(prefix("0.0.0.0/1"))
+	require.True(t, found)
+	trie = txn.Commit()
+	assertNoImaginarySingleChild(trie.root)
+}
+
 func TestQuickRoundTripEncodeDecodeLPMKey(t *testing.T) {
 	maskData := func(data []byte, prefixLen PrefixLen) []byte {
 		dataLen := (prefixLen + 7) / 8
