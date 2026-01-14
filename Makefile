@@ -6,7 +6,7 @@ build:
 	go build ./...
 
 test:
-	PART_VALIDATE=1 go test ./... -cover -vet=all -test.count 1
+	PART_VALIDATE=1 LPM_VALIDATE=1 go test ./... -cover -vet=all -test.count 1
 
 test-race:
 	go test -race ./... -test.count 1

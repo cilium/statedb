@@ -161,6 +161,12 @@ func (txn *Txn[T]) clone(n *lpmNode[T]) *lpmNode[T] {
 }
 
 func (txn *Txn[T]) Insert(key index.Key, value T) error {
+	if runValidation {
+		defer func() {
+			validateTrieRoot(txn.root, txn.size, txn.txnID)
+		}()
+	}
+
 	data, prefixLen := DecodeLPMKey(key)
 	newNode := &lpmNode[T]{
 		children:  [2]*lpmNode[T]{},
@@ -244,6 +250,12 @@ func (txn *Txn[T]) Len() int {
 }
 
 func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
+	if runValidation {
+		defer func() {
+			validateTrieRoot(txn.root, txn.size, txn.txnID)
+		}()
+	}
+
 	// parents tracks the nodes encountered on our way to the node containing
 	// the value for [key].
 	var parents []lpmDeleteParent[T]
@@ -313,31 +325,34 @@ func (txn *Txn[T]) Delete(key index.Key) (value T, found bool) {
 		if node.imaginary {
 			switch {
 			case node.children[0] == nil && node.children[1] == nil:
-				// Node is empty and can be removed from the parent
+				// Node is empty and can be removed from the parent.
 				node = nil
-
-			case node.children[0] != nil && node.children[1] == nil && index == 0:
-				// One child and it matches the index at the parent
+			case node.children[0] != nil && node.children[1] == nil:
+				// Single child can be promoted regardless of side.
 				node = node.children[0]
-
-			case node.children[0] == nil && node.children[1] != nil && index == 1:
-				// One child and it matches the index at the parent
+			case node.children[0] == nil && node.children[1] != nil:
+				// Single child can be promoted regardless of side.
 				node = node.children[1]
 			}
 		}
 		parent.children[index] = node
 		node = parent
 
-		if oldParent.txnID == txn.txnID {
-			// The parent was already cloned and thus all pointers upwards from here
-			// are already correct and we can stop.
-			return value, true
+		if oldParent.txnID == txn.txnID && parent.imaginary {
+			if parent.children[0] != nil && parent.children[1] != nil {
+				// The parent was already cloned and all pointers upwards from here
+				// are already correct and we have 2 children so no need for compression.
+				// Thus we can stop early.
+				return value, true
+			}
 		}
 	}
 
 	// Drop imaginary root nodes that only have a single child.
 	if node.imaginary {
 		switch {
+		case node.children[0] == nil && node.children[1] == nil:
+			node = nil
 		case node.children[0] != nil && node.children[1] == nil:
 			node = node.children[0]
 		case node.children[0] == nil && node.children[1] != nil:
