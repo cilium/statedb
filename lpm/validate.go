@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-var runValidation = os.Getenv("LPM_VALIDATE") != ""
+var runValidation = os.Getenv("STATEDB_VALIDATE") != ""
 
 func validateTrieRoot[T any](node *lpmNode[T], size int, maxTxnID uint64) {
 	if !runValidation {

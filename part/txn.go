@@ -640,7 +640,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 	return newParent
 }
 
-var runValidation = os.Getenv("PART_VALIDATE") != ""
+var runValidation = os.Getenv("STATEDB_VALIDATE") != ""
 
 // validateTree checks that the resulting tree is well-formed and panics
 // if it is not.
