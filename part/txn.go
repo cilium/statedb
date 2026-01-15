@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"sync/atomic"
 )
 
 // Txn is a transaction against a tree. It allows doing efficient
@@ -16,6 +17,7 @@ type Txn[T any] struct {
 	root      *header[T]
 	oldRoot   *header[T]
 	rootWatch chan struct{}
+	prevTxn   *atomic.Pointer[Txn[T]]
 
 	dirty bool
 
@@ -53,15 +55,16 @@ func (txn *Txn[T]) All(yield func([]byte, T) bool) {
 
 // Clone returns a clone of the transaction for reading. The clone is unaffected
 // by any future changes done with the original transaction.
-func (txn *Txn[T]) Clone() *Tree[T] {
+func (txn *Txn[T]) Clone() Tree[T] {
 	// Invalidate in-place mutations so the returned clone won't be changed by
 	// further modifications in this transaction.
 	txn.txnID++
-	return &Tree[T]{
+	return Tree[T]{
 		opts:      txn.opts,
 		root:      txn.root,
 		rootWatch: txn.rootWatch,
 		size:      txn.size,
+		prevTxn:   txn.prevTxn,
 		prevTxnID: txn.txnID,
 	}
 }
@@ -166,7 +169,7 @@ func (txn *Txn[T]) Iterator() Iterator[T] {
 
 // CommitAndNotify commits the transaction and notifies by
 // closing the watch channels of all modified nodes.
-func (txn *Txn[T]) CommitAndNotify() *Tree[T] {
+func (txn *Txn[T]) CommitAndNotify() Tree[T] {
 	txn.Notify()
 	return txn.Commit()
 }
@@ -175,20 +178,21 @@ func (txn *Txn[T]) CommitAndNotify() *Tree[T] {
 // watch channels. Returns the new tree.
 // To close the watch channels call Notify(). You must call Notify() before
 // Tree.Txn().
-func (txn *Txn[T]) Commit() *Tree[T] {
+func (txn *Txn[T]) Commit() Tree[T] {
 	newRootWatch := txn.rootWatch
 	if txn.dirty {
 		newRootWatch = make(chan struct{})
 		validateTree(txn.oldRoot, nil, nil, txn.txnID)
 		validateTree(txn.root, nil, txn.watches, txn.txnID)
 	}
-	t := &Tree[T]{
+	t := Tree[T]{
 		opts:      txn.opts,
 		root:      txn.root,
 		rootWatch: newRootWatch,
 		size:      txn.size,
+		prevTxn:   txn.prevTxn,
+		prevTxnID: txn.txnID,
 	}
-	t.prevTxnID = txn.txnID
 	// Store this txn in the tree to reuse the allocation next time.
 	t.prevTxn.Store(txn)
 	return t

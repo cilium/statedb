@@ -147,18 +147,18 @@ func TestSingletonMap(t *testing.T) {
 		switch m.Len() {
 		case 0:
 			require.Nil(t, m.singleton)
-			require.Nil(t, m.tree)
+			require.False(t, m.hasTree)
 		case 1:
 			require.NotNil(t, m.singleton)
-			require.Nil(t, m.tree)
+			require.False(t, m.hasTree)
 		default:
 			require.Nil(t, m.singleton)
-			require.NotNil(t, m.tree)
+			require.True(t, m.hasTree)
 		}
 		if m.singleton != nil {
-			require.Nil(t, m.tree, "Tree should not be set if singleton set")
+			require.False(t, m.hasTree, "Tree should not be set if singleton set")
 		}
-		if m.tree != nil {
+		if m.hasTree {
 			require.Nil(t, m.singleton, "Singleton should not be set if tree set")
 		}
 	}
@@ -290,7 +290,7 @@ func TestMapTxn(t *testing.T) {
 
 	tree := txn.Commit()
 	assert.Equal(t, 0, tree.Len())
-	assert.Nil(t, tree.tree)
+	assert.False(t, tree.hasTree)
 	assert.Nil(t, tree.singleton)
 
 	// Add foo=>42
@@ -306,7 +306,7 @@ func TestMapTxn(t *testing.T) {
 
 	tree = txn.Commit()
 	assert.Equal(t, 1, tree.Len())
-	assert.Nil(t, tree.tree)
+	assert.False(t, tree.hasTree)
 	assert.NotNil(t, tree.singleton)
 	v, found = tree.Get("foo")
 	assert.True(t, found)
@@ -350,7 +350,7 @@ func TestMapTxn(t *testing.T) {
 
 	tree = txn.Commit()
 	assert.Equal(t, 2, tree.Len())
-	assert.NotNil(t, tree.tree)
+	assert.True(t, tree.hasTree)
 	assert.Nil(t, tree.singleton)
 	mp = maps.Collect(tree.All())
 	assert.Len(t, mp, 2)

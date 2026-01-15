@@ -21,7 +21,8 @@ import (
 // For Set-only use only [bytesFromKey] needs to be defined.
 type Set[T any] struct {
 	toBytes func(T) []byte
-	tree    *Tree[T]
+	tree    Tree[T]
+	hasTree bool
 }
 
 // NewSet creates a new set of T.
@@ -41,8 +42,9 @@ func NewSet[T any](values ...T) Set[T] {
 }
 
 func (s *Set[T]) ensureTree() {
-	if s.tree == nil {
+	if !s.hasTree {
 		s.tree = New[T](RootOnlyWatch)
+		s.hasTree = true
 	}
 	s.toBytes = lookupKeyType[T]()
 }
@@ -59,21 +61,22 @@ func (s Set[T]) Set(v T) Set[T] {
 // Delete returns a new set without the value. The original
 // set is unchanged.
 func (s Set[T]) Delete(v T) Set[T] {
-	if s.tree == nil {
+	if !s.hasTree {
 		return s
 	}
 	txn := s.tree.Txn()
 	txn.Delete(s.toBytes(v))
 	s.tree = txn.Commit()
 	if s.tree.Len() == 0 {
-		s.tree = nil
+		s.tree = Tree[T]{}
+		s.hasTree = false
 	}
 	return s
 }
 
 // Has returns true if the set has the value.
 func (s Set[T]) Has(v T) bool {
-	if s.tree == nil {
+	if !s.hasTree {
 		return false
 	}
 	_, _, found := s.tree.Get(s.toBytes(v))
@@ -85,7 +88,7 @@ func emptySeq[T any](yield func(T) bool) {
 
 // All returns an iterator for all values.
 func (s Set[T]) All() iter.Seq[T] {
-	if s.tree == nil {
+	if !s.hasTree {
 		return emptySeq[T]
 	}
 	return s.yieldAll
@@ -100,10 +103,10 @@ func (s Set[T]) yieldAll(yield func(v T) bool) {
 // Union returns a set that is the union of the values
 // in the input sets.
 func (s Set[T]) Union(s2 Set[T]) Set[T] {
-	if s2.tree == nil {
+	if !s2.hasTree {
 		return s
 	}
-	if s.tree == nil {
+	if !s.hasTree {
 		return s2
 	}
 	txn := s.tree.Txn()
@@ -118,7 +121,7 @@ func (s Set[T]) Union(s2 Set[T]) Set[T] {
 // Difference returns a set with values that only
 // appear in the first set.
 func (s Set[T]) Difference(s2 Set[T]) Set[T] {
-	if s.tree == nil || s2.tree == nil {
+	if !s.hasTree || !s2.hasTree {
 		return s
 	}
 
@@ -133,7 +136,7 @@ func (s Set[T]) Difference(s2 Set[T]) Set[T] {
 
 // Len returns the number of values in the set.
 func (s Set[T]) Len() int {
-	if s.tree == nil {
+	if !s.hasTree {
 		return 0
 	}
 	return s.tree.size
@@ -142,7 +145,7 @@ func (s Set[T]) Len() int {
 // Equal returns true if the two sets contain the equal keys.
 func (s Set[T]) Equal(other Set[T]) bool {
 	switch {
-	case s.tree == nil && other.tree == nil:
+	case !s.hasTree && !other.hasTree:
 		return true
 	case s.Len() != other.Len():
 		return false
@@ -172,7 +175,7 @@ func (s Set[T]) ToBytesFunc() func(T) []byte {
 }
 
 func (s Set[T]) MarshalJSON() ([]byte, error) {
-	if s.tree == nil {
+	if !s.hasTree {
 		return []byte("[]"), nil
 	}
 	var b bytes.Buffer
@@ -218,7 +221,8 @@ func (s *Set[T]) UnmarshalJSON(data []byte) error {
 	}
 	s.tree = txn.Commit()
 	if s.tree.Len() == 0 {
-		s.tree = nil
+		s.tree = Tree[T]{}
+		s.hasTree = false
 	}
 
 	t, err = dec.Token()

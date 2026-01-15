@@ -18,21 +18,22 @@ type Tree[T any] struct {
 	rootWatch chan struct{}
 	size      int // the number of objects in the tree
 	opts      options
-	prevTxn   atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
-	prevTxnID uint64                 // the transaction ID that produced this tree
+	prevTxn   *atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
+	prevTxnID uint64                  // the transaction ID that produced this tree
 }
 
 // New constructs a new tree.
-func New[T any](opts ...Option) *Tree[T] {
+func New[T any](opts ...Option) Tree[T] {
 	var o options
 	for _, opt := range opts {
 		opt(&o)
 	}
-	t := &Tree[T]{
+	t := Tree[T]{
 		root:      nil,
 		rootWatch: make(chan struct{}),
 		size:      0,
 		opts:      o,
+		prevTxn:   &atomic.Pointer[Txn[T]]{},
 	}
 	return t
 }
@@ -72,6 +73,7 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	txn.oldRoot = t.root
 	txn.rootWatch = t.rootWatch
 	txn.size = t.size
+	txn.prevTxn = t.prevTxn
 	txn.txnID = t.prevTxnID + 1
 	return txn
 }
@@ -112,7 +114,7 @@ func (t *Tree[T]) LowerBound(key []byte) Iterator[T] {
 
 // Insert inserts the key into the tree with the given value.
 // Returns the old value if it exists and a new tree.
-func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree *Tree[T]) {
+func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Insert(key, value)
 	tree = txn.CommitAndNotify()
@@ -123,7 +125,7 @@ func (t *Tree[T]) Insert(key []byte, value T) (old T, hadOld bool, tree *Tree[T]
 // function is called with the zero value for T. It is up to the
 // caller to not mutate the value in-place and to return a clone.
 // Returns the old value if it exists.
-func (t *Tree[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, hadOld bool, tree *Tree[T]) {
+func (t *Tree[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, hadOld bool, tree Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Modify(key, value, mod)
 	tree = txn.CommitAndNotify()
@@ -132,7 +134,7 @@ func (t *Tree[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, hadOld b
 
 // Delete the given key from the tree.
 // Returns the old value if it exists and the new tree.
-func (t *Tree[T]) Delete(key []byte) (old T, hadOld bool, tree *Tree[T]) {
+func (t *Tree[T]) Delete(key []byte) (old T, hadOld bool, tree Tree[T]) {
 	txn := t.Txn()
 	old, hadOld = txn.Delete(key)
 	tree = txn.CommitAndNotify()

@@ -216,7 +216,8 @@ func (txn *writeTxnState) addDeleteTracker(meta TableMeta, trackerName string, d
 		return tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
 
-	_, _, table.deleteTrackers = table.deleteTrackers.Insert([]byte(trackerName), dt)
+	_, _, updated := table.deleteTrackers.Insert([]byte(trackerName), dt)
+	table.deleteTrackers = &updated
 	txn.db.metrics.DeleteTrackerCount(meta.Name(), table.deleteTrackers.Len())
 
 	return nil
