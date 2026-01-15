@@ -32,7 +32,7 @@ type writeTxnState struct {
 	acquiredAt time.Time     // the time at which the transaction acquired the locks
 	duration   atomic.Uint64 // the transaction duration after it finished
 
-	tableEntries []tableEntry             // table entries being modified
+	tableEntries []*tableEntry            // table entries being modified
 	numTxns      int                      // number of index transactions opened
 	smus         internal.SortableMutexes // the (sorted) table locks
 	tableNames   []string
@@ -59,7 +59,7 @@ func txnFinalizer(handle *writeTxnHandle) {
 }
 
 func (txn *writeTxnState) getTableEntry(meta TableMeta) *tableEntry {
-	return &txn.tableEntries[meta.tablePos()]
+	return txn.tableEntries[meta.tablePos()]
 }
 
 // indexReadTxn returns a transaction to read from the specific index.
@@ -74,7 +74,7 @@ func (txn *writeTxnState) indexReadTxn(meta TableMeta, indexPos int) (tableIndex
 // indexWriteTxn returns a transaction to read/write to a specific index.
 // The created transaction is memoized and used for subsequent reads and/or writes.
 func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableIndexTxn, error) {
-	table := &txn.tableEntries[meta.tablePos()]
+	table := txn.tableEntries[meta.tablePos()]
 	if !table.locked {
 		return nil, tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
@@ -118,7 +118,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
-	table := &txn.tableEntries[meta.tablePos()]
+	table := txn.tableEntries[meta.tablePos()]
 	if !table.locked {
 		return object{}, false, nil, tableError(tableName, ErrTableNotLockedForWriting)
 	}
@@ -203,7 +203,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 }
 
 func (txn *writeTxnState) hasDeleteTrackers(meta TableMeta) bool {
-	table := &txn.tableEntries[meta.tablePos()]
+	table := txn.tableEntries[meta.tablePos()]
 	return table.deleteTrackers.Len() > 0
 }
 
@@ -211,7 +211,7 @@ func (txn *writeTxnState) addDeleteTracker(meta TableMeta, trackerName string, d
 	if txn == nil {
 		return ErrTransactionClosed
 	}
-	table := &txn.tableEntries[meta.tablePos()]
+	table := txn.tableEntries[meta.tablePos()]
 	if !table.locked {
 		return tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
@@ -230,7 +230,7 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 
 	// Look up table and allocate a new revision.
 	tableName := meta.Name()
-	table := &txn.tableEntries[meta.tablePos()]
+	table := txn.tableEntries[meta.tablePos()]
 	if !table.locked {
 		return object{}, false, tableError(tableName, ErrTableNotLockedForWriting)
 	}
@@ -368,7 +368,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// first as otherwise readers would wake up too early.
 	txnToNotify := make([]tableIndexTxnNotify, 0, txn.numTxns)
 	for pos := range txn.tableEntries {
-		table := &txn.tableEntries[pos]
+		table := txn.tableEntries[pos]
 		if !table.locked {
 			continue
 		}
@@ -401,7 +401,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 
 	// Insert the modified tables into the root tree of tables.
 	for pos := range txn.tableEntries {
-		table := &txn.tableEntries[pos]
+		table := txn.tableEntries[pos]
 		if !table.locked {
 			// Table was not locked so it might have changed.
 			// Update the entry from the current root.

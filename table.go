@@ -233,7 +233,7 @@ func (t *genTable[Obj]) getAcquiredInfo() string {
 	return fmt.Sprintf("%s (%s ago, locked for %s)", info.handle, since, internal.PrettyDuration(dur))
 }
 
-func (t *genTable[Obj]) tableEntry() tableEntry {
+func (t *genTable[Obj]) tableEntry() *tableEntry {
 	var entry tableEntry
 	entry.meta = t
 	deleteTrackers := part.New[anyDeleteTracker]()
@@ -253,7 +253,7 @@ func (t *genTable[Obj]) tableEntry() tableEntry {
 	entry.indexes[GraveyardRevisionIndexPos] = newRevisionIndex()
 	entry.indexes[GraveyardIndexPos] = newGraveyardIndex(primaryIndex)
 
-	return entry
+	return &entry
 }
 
 // newRevisionIndex constructs an index for storing objects by revision.
@@ -352,7 +352,7 @@ func (t *genTable[Obj]) PendingInitializers(txn ReadTxn) []string {
 }
 
 func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(WriteTxn) {
-	table := &txn.unwrap().tableEntries[t.pos]
+	table := txn.unwrap().tableEntries[t.pos]
 	if !table.locked {
 		panic(fmt.Sprintf("RegisterInitializer: Table %q not locked for writing", t.table))
 	}
@@ -379,7 +379,7 @@ func (t *genTable[Obj]) RegisterInitializer(txn WriteTxn, name string) func(Writ
 	var once sync.Once
 	return func(txn WriteTxn) {
 		once.Do(func() {
-			table := &txn.unwrap().tableEntries[t.pos]
+			table := txn.unwrap().tableEntries[t.pos]
 			if !table.locked {
 				panic(fmt.Sprintf("RegisterInitializer/MarkDone: Table %q not locked for writing", t.table))
 			}
