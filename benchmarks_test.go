@@ -95,6 +95,29 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_WriteTxn_CommitOnly_100Tables(b *testing.B) {
+	db := New(WithMetrics(&NopMetrics{}))
+	for i := range 99 {
+		newTestObjectTable(b, db, fmt.Sprintf("other%d", i))
+	}
+	table := newTestObjectTable(b, db, "test", tagsIndex)
+	b.ResetTimer()
+
+	for b.Loop() {
+		db.WriteTxn(table).Commit()
+	}
+}
+
+func BenchmarkDB_WriteTxn_CommitOnly_1Table(b *testing.B) {
+	db := New(WithMetrics(&NopMetrics{}))
+	table := newTestObjectTable(b, db, "test", tagsIndex)
+	b.ResetTimer()
+
+	for b.Loop() {
+		db.WriteTxn(table).Commit()
+	}
+}
+
 func BenchmarkDB_NewWriteTxn(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	for b.Loop() {
