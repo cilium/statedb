@@ -236,7 +236,8 @@ func (t *genTable[Obj]) getAcquiredInfo() string {
 func (t *genTable[Obj]) tableEntry() tableEntry {
 	var entry tableEntry
 	entry.meta = t
-	entry.deleteTrackers = part.New[anyDeleteTracker]()
+	deleteTrackers := part.New[anyDeleteTracker]()
+	entry.deleteTrackers = &deleteTrackers
 
 	// A new table is initialized, as no initializers are registered.
 	entry.indexes = make([]tableIndex, len(t.indexPositions))
