@@ -99,7 +99,7 @@ type dbState struct {
 	writeTxnPool        sync.Pool
 }
 
-type dbRoot = []tableEntry
+type dbRoot = []*tableEntry
 
 type Option func(*opts)
 
@@ -145,7 +145,7 @@ func (db *DB) updateWriteTxnPoolLocked(numTables int) {
 		func() any {
 			return &writeTxnState{
 				db:           db,
-				tableEntries: make([]tableEntry, 0, numTables),
+				tableEntries: make([]*tableEntry, 0, numTables),
 				smus:         make(internal.SortableMutexes, 0, defaultNumTables),
 				tableNames:   make([]string, 0, defaultNumTables),
 			}
@@ -212,10 +212,10 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
 	for i, table := range tables {
 		pos := table.tablePos()
-		tableEntry := &txn.tableEntries[pos]
-		tableEntry.indexes = slices.Clone(tableEntry.indexes)
-		tableEntry.locked = true
-
+		tableEntryCopy := *txn.tableEntries[pos]
+		tableEntryCopy.indexes = slices.Clone(tableEntryCopy.indexes)
+		tableEntryCopy.locked = true
+		txn.tableEntries[pos] = &tableEntryCopy
 		name := table.Name()
 		txn.tableNames[i] = name
 

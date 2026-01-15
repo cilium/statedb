@@ -62,7 +62,7 @@ func (dt *deleteTracker[Obj]) close() {
 	txn := wtxn.unwrap()
 	dt.db = nil
 	db := txn.db
-	table := &txn.tableEntries[dt.table.tablePos()]
+	table := txn.tableEntries[dt.table.tablePos()]
 	if !table.locked {
 		panic("BUG: Table not locked")
 	}

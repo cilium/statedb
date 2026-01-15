@@ -8,10 +8,10 @@ import (
 	"slices"
 )
 
-type readTxn []tableEntry
+type readTxn []*tableEntry
 
 func (r *readTxn) getTableEntry(meta TableMeta) *tableEntry {
-	return &(*r)[meta.tablePos()]
+	return (*r)[meta.tablePos()]
 }
 
 // indexReadTxn implements ReadTxn.
@@ -52,7 +52,7 @@ func (r *readTxn) WriteJSON(w io.Writer, tables ...string) error {
 			first = false
 		}
 
-		if err := writeTableAsJSON(buf, r, &table); err != nil {
+		if err := writeTableAsJSON(buf, r, table); err != nil {
 			return err
 		}
 	}
