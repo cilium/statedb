@@ -361,7 +361,7 @@ type anyDeleteTracker interface {
 }
 
 type tableInternal interface {
-	tableEntry() tableEntry
+	tableEntry() *tableEntry
 	tablePos() int
 	setTablePos(int)
 	indexPos(string) int

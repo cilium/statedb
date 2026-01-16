@@ -95,6 +95,27 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_WriteTxn_CommitOnly_100Tables(b *testing.B) {
+	db := New(WithMetrics(&NopMetrics{}))
+	for i := range 99 {
+		newTestObjectTable(b, db, fmt.Sprintf("other%d", i))
+	}
+	table := newTestObjectTable(b, db, "test", tagsIndex)
+
+	for b.Loop() {
+		db.WriteTxn(table).Commit()
+	}
+}
+
+func BenchmarkDB_WriteTxn_CommitOnly_1Table(b *testing.B) {
+	db := New(WithMetrics(&NopMetrics{}))
+	table := newTestObjectTable(b, db, "test", tagsIndex)
+
+	for b.Loop() {
+		db.WriteTxn(table).Commit()
+	}
+}
+
 func BenchmarkDB_NewWriteTxn(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 	for b.Loop() {
@@ -108,7 +129,6 @@ func BenchmarkDB_WriteTxnCommit100(b *testing.B) {
 	for i := range len(tables) {
 		tables[i], _ = NewTable(db, fmt.Sprintf("test%d", i), idIndex)
 	}
-	b.ResetTimer()
 
 	for b.Loop() {
 		db.WriteTxn(tables[len(tables)-1]).Commit()
@@ -450,7 +470,6 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	for b.Loop() {
 		txn := db.ReadTxn()
@@ -476,7 +495,6 @@ func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	query := Query[*testObject]{index: idIndex.indexName()}
 
@@ -506,7 +524,6 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	txn := db.ReadTxn()
 	for b.Loop() {
@@ -531,7 +548,6 @@ func BenchmarkDB_FullIteration_Get_Secondary(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	txn := db.ReadTxn()
 	for b.Loop() {
@@ -557,7 +573,6 @@ func BenchmarkDB_FullIteration_ReadTxnGet(b *testing.B) {
 		require.NoError(b, err)
 	}
 	wtxn.Commit()
-	b.ResetTimer()
 
 	for b.Loop() {
 		for _, q := range queries {

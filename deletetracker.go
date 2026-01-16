@@ -62,11 +62,12 @@ func (dt *deleteTracker[Obj]) close() {
 	txn := wtxn.unwrap()
 	dt.db = nil
 	db := txn.db
-	table := &txn.tableEntries[dt.table.tablePos()]
+	table := txn.tableEntries[dt.table.tablePos()]
 	if !table.locked {
 		panic("BUG: Table not locked")
 	}
-	_, _, table.deleteTrackers = table.deleteTrackers.Delete([]byte(dt.trackerName))
+	_, _, updated := table.deleteTrackers.Delete([]byte(dt.trackerName))
+	table.deleteTrackers = &updated
 	wtxn.Commit()
 
 	db.metrics.DeleteTrackerCount(dt.table.Name(), table.deleteTrackers.Len())

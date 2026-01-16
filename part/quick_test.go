@@ -25,7 +25,7 @@ var quickConfig = &quick.Config{
 func TestQuick_InsertGetPrefix(t *testing.T) {
 	t.Parallel()
 
-	var tree *Tree[string]
+	var tree Tree[string]
 	insert := func(key, value string) any {
 		watchChannels := []<-chan struct{}{}
 		// Add all possible watch channels for prefixes of the key
@@ -260,18 +260,18 @@ func TestQuick_Map(t *testing.T) {
 		switch m.Len() {
 		case 0:
 			require.Nil(t, m.singleton)
-			require.Nil(t, m.tree)
+			require.False(t, m.hasTree)
 		case 1:
 			require.NotNil(t, m.singleton)
-			require.Nil(t, m.tree)
+			require.False(t, m.hasTree)
 		default:
 			require.Nil(t, m.singleton)
-			require.NotNil(t, m.tree)
+			require.True(t, m.hasTree)
 		}
 		if m.singleton != nil {
-			require.Nil(t, m.tree, "Tree should not be set if singleton set")
+			require.False(t, m.hasTree, "Tree should not be set if singleton set")
 		}
-		if m.tree != nil {
+		if m.hasTree {
 			require.Nil(t, m.singleton, "Singleton should not be set if tree set")
 		}
 	}
