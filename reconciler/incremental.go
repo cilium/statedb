@@ -45,13 +45,13 @@ type opResult struct {
 	id       uint64 // the "pending" identifier
 }
 
-func (incr *incremental[Obj]) run(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) []error {
+func (incr *incremental[Obj]) run(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) (errs []error, lastRev statedb.Revision, changed bool) {
 	// Reconcile new and changed objects using either Operations
 	// or BatchOperations.
 	if incr.config.BatchOperations != nil {
-		incr.batch(ctx, txn, changes)
+		lastRev, changed = incr.batch(ctx, txn, changes)
 	} else {
-		incr.single(ctx, txn, changes)
+		lastRev, changed = incr.single(ctx, txn, changes)
 	}
 
 	// Process objects that need to be retried that were not cleared.
@@ -63,19 +63,22 @@ func (incr *incremental[Obj]) run(ctx context.Context, txn statedb.ReadTxn, chan
 	// Since all failures are retried, we can return the errors from the retry
 	// queue which includes both errors occurred in this round and the old
 	// errors.
-	errs := incr.retries.errors()
+	errs = incr.retries.errors()
 	incr.metrics.ReconciliationErrors(incr.moduleID, newErrors, len(errs))
 
 	// Prepare for next round
 	incr.numReconciled = 0
 	clear(incr.results)
 
-	return errs
+	return errs, lastRev, changed
 }
 
-func (incr *incremental[Obj]) single(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) {
+func (incr *incremental[Obj]) single(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) (lastRev statedb.Revision, changed bool) {
 	// Iterate in revision order through new and changed objects.
 	for change, rev := range changes {
+		lastRev = rev
+		changed = true
+
 		obj := change.Object
 
 		status := incr.config.GetObjectStatus(obj)
@@ -95,14 +98,19 @@ func (incr *incremental[Obj]) single(ctx context.Context, txn statedb.ReadTxn, c
 			break
 		}
 	}
+
+	return
 }
 
-func (incr *incremental[Obj]) batch(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) {
+func (incr *incremental[Obj]) batch(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) (lastRev statedb.Revision, changed bool) {
 	ops := incr.config.BatchOperations
 	updateBatch := []BatchEntry[Obj]{}
 	deleteBatch := []BatchEntry[Obj]{}
 
 	for change, rev := range changes {
+		lastRev = rev
+		changed = true
+
 		obj := change.Object
 
 		status := incr.config.GetObjectStatus(obj)
@@ -167,6 +175,8 @@ func (incr *incremental[Obj]) batch(ctx context.Context, txn statedb.ReadTxn, ch
 			incr.results[entry.Object] = opResult{rev: entry.Revision, id: status.ID, err: entry.Result, original: entry.original}
 		}
 	}
+
+	return
 }
 
 func (incr *incremental[Obj]) processRetries(ctx context.Context, txn statedb.ReadTxn) {

@@ -34,6 +34,12 @@ type Reconciler[Obj any] interface {
 	// that something has gone wrong in the reconciliation target and full
 	// reconciliation is needed to recover.
 	Prune()
+
+	// WaitUntilReconciled blocks until the reconciler has processed all
+	// table changes up to untilRevision. Returns the latest processed
+	// revision and ctx.Err() if the context is cancelled.
+	// Note: errors from Update/Delete are treated as reconciled.
+	WaitUntilReconciled(ctx context.Context, untilRevision statedb.Revision) (statedb.Revision, error)
 }
 
 // Params are the reconciler dependencies that are independent of the
