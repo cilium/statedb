@@ -71,17 +71,12 @@ var MemoNameIndex = statedb.Index[*Memo, string]{
 	Unique:  true,
 }
 
-// MemoStatusIndex indexes memos by their reconciliation status.
-// This is mainly used by the reconciler to implement WaitForReconciliation.
-var MemoStatusIndex = reconciler.NewStatusIndex((*Memo).GetStatus)
-
 // NewMemoTable creates and registers the memos table.
-func NewMemoTable(db *statedb.DB) (statedb.RWTable[*Memo], statedb.Index[*Memo, reconciler.StatusKind], error) {
+func NewMemoTable(db *statedb.DB) (statedb.RWTable[*Memo], error) {
 	tbl, err := statedb.NewTable(
 		db,
 		"memos",
 		MemoNameIndex,
-		MemoStatusIndex,
 	)
-	return tbl, MemoStatusIndex, err
+	return tbl, err
 }
