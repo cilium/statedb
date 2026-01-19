@@ -19,6 +19,7 @@ type reconciler[Obj comparable] struct {
 	retries              *retries
 	externalPruneTrigger chan struct{}
 	primaryIndexer       statedb.Indexer[Obj]
+	progress             *progressTracker
 }
 
 func (r *reconciler[Obj]) Prune() {
@@ -26,6 +27,10 @@ func (r *reconciler[Obj]) Prune() {
 	case r.externalPruneTrigger <- struct{}{}:
 	default:
 	}
+}
+
+func (r *reconciler[Obj]) WaitUntilReconciled(ctx context.Context, untilRevision statedb.Revision) (statedb.Revision, error) {
+	return r.progress.wait(ctx, untilRevision)
 }
 
 func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health) error {
@@ -101,7 +106,10 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 		// Perform incremental reconciliation and retries of previously failed
 		// objects.
-		errs := incremental.run(ctx, txn, changes)
+		errs, lastRevision, changed := incremental.run(ctx, txn, changes)
+		if changed {
+			r.progress.update(lastRevision)
+		}
 
 		if tableInitialized && (prune || externalPrune) {
 			if err := r.prune(ctx, txn); err != nil {
