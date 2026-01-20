@@ -68,9 +68,21 @@ func (l *Trie[T]) All() *Iterator[T] {
 	return &Iterator[T]{start: l.root}
 }
 
+func (l *Trie[T]) AllReverse() *ReverseIterator[T] {
+	if l.root == nil {
+		return nil
+	}
+	return &ReverseIterator[T]{start: l.root}
+}
+
 func (l *Trie[T]) Prefix(key index.Key) *Iterator[T] {
 	txn := Txn[T]{root: l.root, size: l.size}
 	return txn.Prefix(key)
+}
+
+func (l *Trie[T]) PrefixReverse(key index.Key) *ReverseIterator[T] {
+	txn := Txn[T]{root: l.root, size: l.size}
+	return txn.PrefixReverse(key)
 }
 
 func (l *Trie[T]) LowerBound(key index.Key) *Iterator[T] {
@@ -381,6 +393,15 @@ func (txn *Txn[T]) All() *Iterator[T] {
 	return &Iterator[T]{start: txn.root}
 }
 
+func (txn *Txn[T]) AllReverse() *ReverseIterator[T] {
+	if txn.root == nil {
+		return nil
+	}
+	// Bump txnID to freeze the trie
+	txn.txnID++
+	return &ReverseIterator[T]{start: txn.root}
+}
+
 func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 	if txn.root == nil {
 		return nil
@@ -403,6 +424,30 @@ func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 		return nil
 	}
 	return &Iterator[T]{start: node}
+}
+
+func (txn *Txn[T]) PrefixReverse(key index.Key) *ReverseIterator[T] {
+	if txn.root == nil {
+		return nil
+	}
+	// Bump txnID to freeze the trie
+	txn.txnID++
+
+	node := txn.root
+	data, prefixLen := DecodeLPMKey(key)
+
+	var matchLen PrefixLen
+	for node != nil {
+		matchLen = longestMatch(matchLen, node, data, prefixLen)
+		if matchLen == prefixLen || matchLen < node.prefixLen() {
+			break
+		}
+		node = node.children[getBitAt(data, node.prefixLen())]
+	}
+	if node == nil {
+		return nil
+	}
+	return &ReverseIterator[T]{start: node}
 }
 
 func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
