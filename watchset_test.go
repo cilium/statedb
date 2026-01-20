@@ -37,14 +37,18 @@ func TestWatchSet(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Empty(t, chs)
 
-	// Few channels, timed out context. With tiny 'settleTime' we wait for the context to cancel.
+	// Few channels, timed out context.
 	duration := 10 * time.Millisecond
-	ctx, cancel = context.WithTimeout(context.Background(), duration)
 	t0 := time.Now()
+	ctx, cancel = context.WithTimeout(context.Background(), duration)
+
+	// Wait with a settle time of 1ns. Since settle time only comes to play
+	// after at least one channel has closed this will block until [ctx]
+	// cancels (e.g. for [duration]).
 	chs, err = ws.Wait(ctx, time.Nanosecond)
 	require.ErrorIs(t, err, context.DeadlineExceeded)
 	require.Empty(t, chs)
-	require.True(t, time.Since(t0) > duration, "expected to wait until context cancels")
+	require.Greater(t, time.Since(t0), duration, "expected to wait until context times out")
 	cancel()
 
 	// One closed channel. Should wait until 'settleTime' expires.
