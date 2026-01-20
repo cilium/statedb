@@ -27,6 +27,10 @@ type lpmTestObject struct {
 	PortPrefixLen lpm.PrefixLen
 }
 
+func collectLPMIDs(seq iter.Seq2[lpmTestObject, Revision]) []uint16 {
+	return Collect(Map(seq, func(obj lpmTestObject) uint16 { return obj.ID }))
+}
+
 // TableHeader implements TableWritable.
 func (l lpmTestObject) TableHeader() []string {
 	return []string{
@@ -199,6 +203,40 @@ func TestLPMIndex(t *testing.T) {
 
 }
 
+func TestLPMIndex_PrefixReverse(t *testing.T) {
+	db := New()
+	tbl := newLPMTestTable(db)
+
+	wtxn := db.WriteTxn(tbl)
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            0,
+		Prefix:        netip.MustParsePrefix("1.0.0.0/8"),
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            1,
+		Prefix:        netip.MustParsePrefix("10.0.0.0/8"),
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            2,
+		Prefix:        netip.MustParsePrefix("10.0.0.0/24"),
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            3,
+		Prefix:        netip.MustParsePrefix("10.0.0.1/32"),
+		PortPrefixLen: 16,
+	})
+	txn := wtxn.Commit()
+
+	query := lpmPrefixIndex.QueryPrefix(netip.MustParsePrefix("10.0.0.0/8"))
+	forward := collectLPMIDs(tbl.Prefix(txn, query))
+	reverse := collectLPMIDs(tbl.PrefixReverse(txn, query))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
+}
+
 func TestLPMIndexNonUnique(t *testing.T) {
 	db := New()
 	tbl := newLPMNonUniqueTestTable(db)
@@ -251,6 +289,34 @@ func TestLPMIndexNonUnique(t *testing.T) {
 	objs = Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
 	require.Len(t, objs, 1)
 	require.EqualValues(t, 20, objs[0].ID)
+}
+
+func TestLPMIndex_ListReverse(t *testing.T) {
+	db := New()
+	tbl := newLPMNonUniqueTestTable(db)
+
+	wtxn := db.WriteTxn(tbl)
+	key := binary.BigEndian.AppendUint16(nil, 0x1234)
+	prefix := netip.MustParsePrefix("10.0.0.0/8")
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            10,
+		Prefix:        prefix,
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	tbl.Insert(wtxn, lpmTestObject{
+		ID:            20,
+		Prefix:        prefix.Masked(),
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	txn := wtxn.Commit()
+
+	query := lpmPortNonUniqueIndex.Query(key, 16)
+	forward := collectLPMIDs(tbl.List(txn, query))
+	reverse := collectLPMIDs(tbl.ListReverse(txn, query))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
 }
 
 func TestLPMIndexIteratorNonUnique(t *testing.T) {

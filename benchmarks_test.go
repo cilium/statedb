@@ -9,6 +9,7 @@ import (
 	"iter"
 	"log/slog"
 	"math/rand"
+	"net/netip"
 	"slices"
 	"testing"
 	"time"
@@ -461,6 +462,7 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 }
 
 const numObjectsIteration = 100000
+const numLPMObjectsIteration = 50000
 
 func BenchmarkDB_FullIteration_All(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
@@ -477,6 +479,32 @@ func BenchmarkDB_FullIteration_All(b *testing.B) {
 		for obj := range table.All(txn) {
 			if obj.ID != i {
 				b.Fatalf("expected ID %d, got %d", i, obj.ID)
+			}
+			i++
+		}
+		if numObjectsIteration != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsIteration, i)
+		}
+	}
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_FullIteration_AllReverse(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	wtxn := db.WriteTxn(table)
+	for i := range numObjectsIteration {
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+
+	for b.Loop() {
+		txn := db.ReadTxn()
+		i := uint64(0)
+		for obj := range table.AllReverse(txn) {
+			expected := uint64(numObjectsIteration - 1 - i)
+			if obj.ID != expected {
+				b.Fatalf("expected ID %d, got %d", expected, obj.ID)
 			}
 			i++
 		}
@@ -512,6 +540,66 @@ func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_FullIteration_PrefixReverse(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	wtxn := db.WriteTxn(table)
+	for i := range numObjectsIteration {
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+
+	query := Query[*testObject]{index: idIndex.indexName()}
+
+	for b.Loop() {
+		txn := db.ReadTxn()
+		i := uint64(0)
+		for obj := range table.PrefixReverse(txn, query) {
+			expected := uint64(numObjectsIteration - 1 - i)
+			if obj.ID != expected {
+				b.Fatalf("expected ID %d, got %d", expected, obj.ID)
+			}
+			i++
+		}
+		if numObjectsIteration != i {
+			b.Fatalf("expected to iterate %d objects, got %d", numObjectsIteration, i)
+		}
+	}
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_LPM_PrefixReverse(b *testing.B) {
+	db := New()
+	table := newLPMTestTable(db)
+
+	wtxn := db.WriteTxn(table)
+	for i := 0; i < numLPMObjectsIteration; i++ {
+		addr := netip.AddrFrom4([4]byte{10, byte(i >> 8), byte(i), 1})
+		prefix := netip.PrefixFrom(addr, 32)
+		_, _, err := table.Insert(wtxn, lpmTestObject{
+			ID:            uint16(i),
+			Prefix:        prefix,
+			PortPrefixLen: 16,
+		})
+		require.NoError(b, err)
+	}
+	txn := wtxn.Commit()
+
+	query := lpmPrefixIndex.QueryPrefix(netip.MustParsePrefix("10.0.0.0/8"))
+	b.ResetTimer()
+
+	for b.Loop() {
+		count := 0
+		for range table.PrefixReverse(txn, query) {
+			count++
+		}
+		if numLPMObjectsIteration != count {
+			b.Fatalf("expected to iterate %d objects, got %d", numLPMObjectsIteration, count)
+		}
+	}
+	b.ReportMetric(float64(numLPMObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 func BenchmarkDB_FullIteration_Get(b *testing.B) {
