@@ -438,9 +438,20 @@ func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revisio
 	return iter
 }
 
+func (t *genTable[Obj]) PrefixReverse(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
+	iter, _ := t.PrefixReverseWatch(txn, q)
+	return iter
+}
+
 func (t *genTable[Obj]) PrefixWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.prefix(q.key)
+	return objSeq[Obj](iter), watch
+}
+
+func (t *genTable[Obj]) PrefixReverseWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.prefixReverse(q.key)
 	return objSeq[Obj](iter), watch
 }
 
@@ -459,6 +470,17 @@ func (t *genTable[Obj]) AllWatch(txn ReadTxn) (iter.Seq2[Obj, Revision], <-chan 
 	}, watch
 }
 
+func (t *genTable[Obj]) AllReverse(txn ReadTxn) iter.Seq2[Obj, Revision] {
+	iter, _ := t.AllReverseWatch(txn)
+	return iter
+}
+
+func (t *genTable[Obj]) AllReverseWatch(txn ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, PrimaryIndexPos)
+	iter, watch := indexTxn.allReverse()
+	return objSeq[Obj](iter), watch
+}
+
 func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.ListWatch(txn, q)
 	return iter
@@ -467,6 +489,17 @@ func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision]
 func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
 	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.list(q.key)
+	return objSeq[Obj](iter), watch
+}
+
+func (t *genTable[Obj]) ListReverse(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
+	iter, _ := t.ListReverseWatch(txn, q)
+	return iter
+}
+
+func (t *genTable[Obj]) ListReverseWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.listReverse(q.key)
 	return objSeq[Obj](iter), watch
 }
 
