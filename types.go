@@ -110,6 +110,12 @@ type ChangeIterator[Obj any] interface {
 	//
 	// Next will panic if called with a WriteTxn that has locked the target table.
 	Next(ReadTxn) (iter.Seq2[Change[Obj], Revision], <-chan struct{})
+
+	// Close the change iterator. Once all change iterators for a given table are closed
+	// deleted objects for that table are no longer set aside for the change iterators.
+	//
+	// Calling this method is optional as each iterator has a finalizer that closes it.
+	Close()
 }
 
 // RWTable provides methods for modifying the table under a write transaction
