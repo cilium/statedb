@@ -43,6 +43,7 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 	if err != nil {
 		return fmt.Errorf("watching for changes failed: %w", err)
 	}
+	defer changeIterator.Close()
 
 	tableWatchChan := closedWatchChannel
 

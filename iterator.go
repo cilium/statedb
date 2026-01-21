@@ -6,6 +6,7 @@ package statedb
 import (
 	"fmt"
 	"iter"
+	"runtime"
 	"slices"
 
 	"github.com/cilium/statedb/index"
@@ -249,6 +250,11 @@ func (it *changeIterator[Obj]) nextAny(txn ReadTxn) (iter.Seq2[Change[any], Revi
 			}
 		}
 	}, watch
+}
+
+func (it *changeIterator[Obj]) Close() {
+	runtime.SetFinalizer(it, nil)
+	it.close()
 }
 
 func (it *changeIterator[Obj]) close() {
