@@ -544,11 +544,6 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 		table:          t,
 		watch:          closedWatchChannel,
 	}
-	// Set a finalizer to unregister the delete tracker when the iterator
-	// is dropped.
-	runtime.SetFinalizer(iter, func(iter *changeIterator[Obj]) {
-		iter.close()
-	})
 
 	itxn := txn.unwrap()
 	name := fmt.Sprintf("changes-%p", iter)
@@ -563,6 +558,13 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// Add a cleanup to unregister the delete tracker.
+	runtime.AddCleanup(
+		iter,
+		func(dt *deleteTracker[Obj]) { dt.close() },
+		iter.dt,
+	)
 
 	// Prime it.
 	iter.refresh(txn)

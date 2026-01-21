@@ -5,10 +5,12 @@ package reconciler_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -25,23 +27,24 @@ import (
 
 type waitObject struct {
 	ID     uint64
+	Fail   *atomic.Bool
 	Status reconciler.Status
 }
 
 // TableHeader implements statedb.TableWritable.
-func (w waitObject) TableHeader() []string {
-	return []string{"ID", "Status"}
+func (w *waitObject) TableHeader() []string {
+	return []string{"ID", "Fail", "Status"}
 }
 
 // TableRow implements statedb.TableWritable.
-func (w waitObject) TableRow() []string {
+func (w *waitObject) TableRow() []string {
+	fail := w.Fail.Load()
 	return []string{
 		fmt.Sprintf("%d", w.ID),
+		fmt.Sprintf("%t", fail),
 		w.Status.String(),
 	}
 }
-
-var _ statedb.TableWritable = waitObject{}
 
 func (w *waitObject) Clone() *waitObject {
 	w2 := *w
@@ -69,14 +72,19 @@ var waitObjectIDIndex = statedb.Index[*waitObject, uint64]{
 type waitOps struct {
 	started     chan struct{}
 	unblock     chan struct{}
-	startedOnce sync.Once
+	markStarted func()
 }
 
 func newWaitOps() *waitOps {
-	return &waitOps{
+	w := &waitOps{
 		started: make(chan struct{}),
 		unblock: make(chan struct{}),
 	}
+
+	w.markStarted = sync.OnceFunc(func() {
+		close(w.started)
+	})
+	return w
 }
 
 // Delete implements reconciler.Operations.
@@ -91,9 +99,10 @@ func (*waitOps) Prune(context.Context, statedb.ReadTxn, iter.Seq2[*waitObject, s
 
 // Update implements reconciler.Operations.
 func (w *waitOps) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, obj *waitObject) error {
-	w.startedOnce.Do(func() {
-		close(w.started)
-	})
+	w.markStarted()
+	if obj.Fail.Load() {
+		return errors.New("fail")
+	}
 	select {
 	case <-w.unblock:
 		return nil
@@ -140,6 +149,7 @@ func TestWaitUntilReconciled(t *testing.T) {
 						ops,
 						nil,
 						reconciler.WithoutPruning(),
+						reconciler.WithRetry(10*time.Millisecond, 10*time.Millisecond),
 					)
 					return err
 				}),
@@ -156,32 +166,42 @@ func TestWaitUntilReconciled(t *testing.T) {
 		defer cancel()
 
 		// Won't block if we query with 0 revision.
-		_, err := r.WaitUntilReconciled(waitCtx, 0)
+		_, retryRevision, err := r.WaitUntilReconciled(waitCtx, 0)
 		require.NoError(t, err)
+		require.Zero(t, retryRevision)
 
 		// Insert an object and wait for it to be reconciled.
 		wtxn := db.WriteTxn(table)
 		table.Insert(wtxn, &waitObject{
 			ID:     1,
+			Fail:   new(atomic.Bool),
 			Status: reconciler.StatusPending(),
 		})
 		revision := table.Revision(wtxn)
 		wtxn.Commit()
 
 		type waitResult struct {
-			rev statedb.Revision
-			err error
+			rev           statedb.Revision
+			retryRevision statedb.Revision
+			err           error
 		}
 		done := make(chan waitResult, 1)
 		go func() {
-			rev, err := r.WaitUntilReconciled(waitCtx, revision)
-			done <- waitResult{rev: rev, err: err}
+			rev, retryRevision, err := r.WaitUntilReconciled(waitCtx, revision)
+			done <- waitResult{rev: rev, err: err, retryRevision: retryRevision}
 		}()
 
-		synctest.Wait()
-		select {
-		case <-ops.started:
-		default:
+		started := false
+		for !started {
+			// Advance the fake time
+			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-ops.started:
+				started = true
+			default:
+			}
+		}
+		if !started {
 			t.Fatal("expected update to start")
 		}
 
@@ -192,14 +212,48 @@ func TestWaitUntilReconciled(t *testing.T) {
 		}
 
 		close(ops.unblock)
+
 		synctest.Wait()
 
 		select {
 		case result := <-done:
 			require.NoError(t, result.err)
-			require.Equal(t, revision, result.rev)
+			require.Zero(t, result.retryRevision)
 		default:
 			t.Fatal("expected WaitUntilReconciled to complete")
 		}
+
+		wtxn = db.WriteTxn(table)
+		obj := &waitObject{
+			ID:     2,
+			Fail:   new(atomic.Bool),
+			Status: reconciler.StatusPending(),
+		}
+		obj.Fail.Store(true)
+		table.Insert(wtxn, obj)
+
+		retryRevision = table.Revision(wtxn)
+		wtxn.Commit()
+
+		synctest.Wait()
+
+		origRetryRevision := retryRevision
+		rev, returnedRetryRevision, err := r.WaitUntilReconciled(waitCtx, origRetryRevision)
+		require.NoError(t, err)
+		require.Equal(t, origRetryRevision, rev)
+		require.Equal(t, origRetryRevision, returnedRetryRevision)
+
+		obj.Fail.Store(false)
+		// Advance the fake time enough that a retry has happened.
+		time.Sleep(time.Second)
+
+		obj, newRev, ok := table.Get(db.ReadTxn(), waitObjectIDIndex.Query(2))
+		require.True(t, ok && obj.Status.Kind == reconciler.StatusKindDone)
+
+		rev, returnedRetryRevision, err = r.WaitUntilReconciled(waitCtx, origRetryRevision)
+		require.NoError(t, err)
+		require.Equal(t, newRev, rev)
+		require.Zero(t, returnedRetryRevision)
+
 	})
 }
