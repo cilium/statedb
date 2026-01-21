@@ -29,7 +29,7 @@ func (r *reconciler[Obj]) Prune() {
 	}
 }
 
-func (r *reconciler[Obj]) WaitUntilReconciled(ctx context.Context, untilRevision statedb.Revision) (statedb.Revision, error) {
+func (r *reconciler[Obj]) WaitUntilReconciled(ctx context.Context, untilRevision statedb.Revision) (statedb.Revision, statedb.Revision, error) {
 	return r.progress.wait(ctx, untilRevision)
 }
 
@@ -106,10 +106,8 @@ func (r *reconciler[Obj]) reconcileLoop(ctx context.Context, health cell.Health)
 
 		// Perform incremental reconciliation and retries of previously failed
 		// objects.
-		errs, lastRevision, changed := incremental.run(ctx, txn, changes)
-		if changed {
-			r.progress.update(lastRevision)
-		}
+		errs, lastRevision, retryLowWatermark := incremental.run(ctx, txn, changes)
+		r.progress.update(lastRevision, retryLowWatermark)
 
 		if tableInitialized && (prune || externalPrune) {
 			if err := r.prune(ctx, txn); err != nil {
