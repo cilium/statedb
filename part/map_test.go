@@ -368,19 +368,38 @@ func TestMapTxn(t *testing.T) {
 	assert.Equal(t, 88, v)
 	tree = txn.Commit()
 
-	// Transaction can be reused after commit
+	// Transaction can be reused after commit (singleton case)
+	assert.Nil(t, tree.tree.root)
+	assert.False(t, tree.hasTree)
 	txn.Set("baz", 99)
-	mp = maps.Collect(txn.All())
-	assert.Len(t, mp, 2)
-	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
 	mp = maps.Collect(tree.All())
 	assert.Len(t, mp, 1)
 	assert.Equal(t, map[string]int{"bar": 88}, mp)
+	mp = maps.Collect(txn.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
+
+	// Set again since All() bumps txnID
+	txn.Set("baz", 99)
+	tree = txn.Commit()
+
+	// Transaction can be reused after commit (non-singleton case)
+	assert.NotNil(t, tree.tree.root)
+	assert.True(t, tree.hasTree)
+	txn.Set("baz", 999)
+
+	mp = maps.Collect(tree.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
+
+	mp = maps.Collect(txn.All())
+	assert.Len(t, mp, 2)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 999}, mp)
 
 	tree = txn.Commit()
 	mp = maps.Collect(tree.All())
 	assert.Len(t, mp, 2)
-	assert.Equal(t, map[string]int{"bar": 88, "baz": 99}, mp)
+	assert.Equal(t, map[string]int{"bar": 88, "baz": 999}, mp)
 }
 
 func TestUint64Map(t *testing.T) {
