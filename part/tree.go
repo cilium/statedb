@@ -19,7 +19,7 @@ type Tree[T any] struct {
 	size      int // the number of objects in the tree
 	opts      options
 	prevTxn   *atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
-	prevTxnID uint64                  // the transaction ID that produced this tree
+	nextTxnID uint64                  // the next transaction ID to use
 }
 
 // New constructs a new tree.
@@ -74,7 +74,7 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	txn.rootWatch = t.rootWatch
 	txn.size = t.size
 	txn.prevTxn = t.prevTxn
-	txn.txnID = t.prevTxnID + 1
+	txn.txnID = t.nextTxnID
 	return txn
 }
 

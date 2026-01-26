@@ -65,7 +65,7 @@ func (txn *Txn[T]) Clone() Tree[T] {
 		rootWatch: txn.rootWatch,
 		size:      txn.size,
 		prevTxn:   txn.prevTxn,
-		prevTxnID: txn.txnID,
+		nextTxnID: txn.txnID,
 	}
 }
 
@@ -185,13 +185,14 @@ func (txn *Txn[T]) Commit() Tree[T] {
 		validateTree(txn.oldRoot, nil, nil, txn.txnID)
 		validateTree(txn.root, nil, txn.watches, txn.txnID)
 	}
+	txn.txnID++
 	t := Tree[T]{
 		opts:      txn.opts,
 		root:      txn.root,
 		rootWatch: newRootWatch,
 		size:      txn.size,
 		prevTxn:   txn.prevTxn,
-		prevTxnID: txn.txnID,
+		nextTxnID: txn.txnID,
 	}
 	// Store this txn in the tree to reuse the allocation next time.
 	t.prevTxn.Store(txn)
