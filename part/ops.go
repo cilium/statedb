@@ -20,6 +20,11 @@ type Ops[T any] interface {
 	// the given prefix are upserted or deleted.
 	Prefix(key []byte) (Iterator[T], <-chan struct{})
 
+	// PrefixReverse returns a reverse iterator for all objects that start with
+	// the given prefix, and a channel that closes when any objects matching the
+	// given prefix are upserted or deleted.
+	PrefixReverse(key []byte) (ReverseIterator[T], <-chan struct{})
+
 	// LowerBound returns an iterator for all objects that have a
 	// key equal or higher than the given 'key'.
 	LowerBound(key []byte) Iterator[T]
@@ -31,6 +36,9 @@ type Ops[T any] interface {
 
 	// Iterator returns an iterator for all objects.
 	Iterator() Iterator[T]
+
+	// ReverseIterator returns an iterator for all objects in reverse order.
+	ReverseIterator() ReverseIterator[T]
 
 	// PrintTree to the standard output. For debugging.
 	PrintTree()

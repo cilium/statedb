@@ -95,7 +95,7 @@ func (it *Iterator[T]) Next() (key []byte, value T, ok bool) {
 		it.start = nil
 		if node.size() > 0 {
 			it.edges = make([][]*header[T], 1, 32)
-			it.edges = append(it.edges, node.children())
+			it.edges[0] = node.children()
 		}
 		if leaf := node.getLeaf(); leaf != nil {
 			return leaf.fullKey(), leaf.value, true
@@ -138,6 +138,104 @@ func newIterator[T any](start *header[T]) Iterator[T] {
 	return Iterator[T]{start: start}
 }
 
+type reverseFrame[T any] struct {
+	children []*header[T]
+	leaf     *leaf[T]
+}
+
+func newReverseFrame[T any](node *header[T]) reverseFrame[T] {
+	return reverseFrame[T]{children: node.children(), leaf: node.getLeaf()}
+}
+
+func (f *reverseFrame[T]) nextChild() *header[T] {
+	// Find the next non-nil child (node256 may have holes)
+	for i := len(f.children) - 1; i >= 0; i-- {
+		if child := f.children[i]; child != nil {
+			f.children = f.children[:i]
+			return child
+		}
+	}
+	f.children = nil
+	return nil
+}
+
+// ReverseIterator iterates over key/value pairs in reverse order.
+type ReverseIterator[T any] struct {
+	start *header[T]
+	stack []reverseFrame[T]
+}
+
+// All calls yield for every value in reverse order. Can be called multiple times.
+func (it ReverseIterator[T]) All(yield func(key []byte, value T) bool) {
+	// Try to use a stack-allocated stack of frames to avoid heap allocations.
+	var stackArray [32]reverseFrame[T]
+	stack := stackArray[0:0:32]
+
+	switch {
+	case it.start != nil:
+		stack = append(stack, newReverseFrame(it.start))
+	case len(it.stack) > 0:
+		stack = append(stack, it.stack...)
+	default:
+		return
+	}
+
+	for len(stack) > 0 {
+		frame := &stack[len(stack)-1]
+		if child := frame.nextChild(); child != nil {
+			stack = append(stack, newReverseFrame(child))
+			continue
+		}
+
+		if leaf := frame.leaf; leaf != nil {
+			frame.leaf = nil
+			if !yield(leaf.fullKey(), leaf.value) {
+				return
+			}
+			continue
+		}
+
+		stack = stack[:len(stack)-1]
+	}
+}
+
+// Next returns the next key, value and true if the value exists,
+// otherwise it returns false.
+func (it *ReverseIterator[T]) Next() (key []byte, value T, ok bool) {
+	if it == nil {
+		return
+	}
+
+	if it.stack == nil {
+		if it.start == nil {
+			return
+		}
+		it.stack = make([]reverseFrame[T], 1, 32)
+		it.stack[0] = newReverseFrame(it.start)
+		it.start = nil
+	}
+
+	for len(it.stack) > 0 {
+		frame := &it.stack[len(it.stack)-1]
+		if child := frame.nextChild(); child != nil {
+			it.stack = append(it.stack, newReverseFrame(child))
+			continue
+		}
+
+		if leaf := frame.leaf; leaf != nil {
+			frame.leaf = nil
+			return leaf.fullKey(), leaf.value, true
+		}
+
+		it.stack = it.stack[:len(it.stack)-1]
+	}
+	return
+}
+
+func newReverseIterator[T any](start *header[T]) ReverseIterator[T] {
+	return ReverseIterator[T]{start: start}
+}
+
 func prefixSearch[T any](root *header[T], rootWatch <-chan struct{}, prefix []byte) (Iterator[T], <-chan struct{}) {
 	if root == nil {
 		return newIterator[T](nil), rootWatch
@@ -171,6 +269,11 @@ func prefixSearch[T any](root *header[T], rootWatch <-chan struct{}, prefix []by
 			return newIterator[T](nil), watch
 		}
 	}
+}
+
+func prefixSearchReverse[T any](root *header[T], rootWatch <-chan struct{}, prefix []byte) (ReverseIterator[T], <-chan struct{}) {
+	iter, watch := prefixSearch(root, rootWatch, prefix)
+	return newReverseIterator(iter.start), watch
 }
 
 func traverseToMin[T any](n *header[T], edges [][]*header[T]) [][]*header[T] {
