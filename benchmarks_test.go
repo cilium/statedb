@@ -514,6 +514,37 @@ func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_ListDelete(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+
+	tags := make([]string, 0, numObjectsIteration)
+	txn := db.WriteTxn(table)
+	for i := range numObjectsIteration {
+		tag := fmt.Sprintf("tag-%d", i)
+		tags = append(tags, tag)
+		_, _, err := table.Insert(txn, &testObject{
+			ID:   uint64(i),
+			Tags: part.NewSet(tag),
+		})
+		require.NoError(b, err)
+	}
+	txn.Commit()
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		for _, tag := range tags {
+			query := tagsIndex.Query(tag)
+			for obj := range table.List(txn, query) {
+				_, _, err := table.Delete(txn, obj)
+				require.NoError(b, err)
+			}
+		}
+		txn.Abort()
+	}
+
+	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_FullIteration_Get(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
