@@ -118,6 +118,10 @@ func (r *partIndex) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partList(r.unique, &r.tree, key)
 }
 
+func (r *partIndex) listView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return r.list(key)
+}
+
 var emptyTableIndexIterator = &singletonTableIndexIterator{}
 
 func partList(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
@@ -194,9 +198,17 @@ func (r *partIndex) all() (tableIndexIterator, <-chan struct{}) {
 	return &r.tree, r.rootWatch()
 }
 
+func (r *partIndex) allView() (tableIndexIterator, <-chan struct{}) {
+	return r.all()
+}
+
 // prefix implements tableIndex.
 func (r *partIndex) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partPrefix(r.unique, &r.tree, ikey)
+}
+
+func (r *partIndex) prefixView(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	return r.prefix(ikey)
 }
 
 func partPrefix(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
@@ -213,6 +225,10 @@ func partPrefix(unique bool, tree part.Ops[object], key index.Key) (tableIndexIt
 // lowerBound implements tableIndexTxn.
 func (r *partIndex) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partLowerBound(r.unique, &r.tree, ikey), r.rootWatch()
+}
+
+func (r *partIndex) lowerBoundView(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	return r.lowerBound(ikey)
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -259,14 +275,43 @@ func (r *partIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
 	return &snapshot, r.rootWatch()
 }
 
+func (r *partIndexTxn) allView() (tableIndexIterator, <-chan struct{}) {
+	return r.tx.IteratorView(), r.rootWatch()
+}
+
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partList(r.unique, r.tx, ikey)
 }
 
+func (r *partIndexTxn) listView(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	if r.unique {
+		obj, watch, ok := r.tx.Get(ikey)
+		if ok {
+			return &singletonTableIndexIterator{ikey, obj}, watch
+		}
+		return emptyTableIndexIterator, watch
+	}
+	key := encodeNonUniqueBytes(ikey)
+	iter, watch := r.tx.PrefixView(key)
+	return newNonUniquePartIterator(iter, false, key), watch
+}
+
 // lowerBound implements tableIndexTxn.
 func (r *partIndexTxn) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partLowerBound(r.unique, r.tx, ikey), r.rootWatch()
+}
+
+func (r *partIndexTxn) lowerBoundView(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	key := ikey
+	if !r.unique {
+		key = encodeNonUniqueBytes(key)
+	}
+	iter := r.tx.LowerBoundView(key)
+	if r.unique {
+		return &iter, r.rootWatch()
+	}
+	return newNonUniqueLowerBoundPartIterator(iter, key), r.rootWatch()
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -333,6 +378,18 @@ func (r *partIndexTxn) notify() {
 // prefix implements tableIndexTxn.
 func (r *partIndexTxn) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partPrefix(r.unique, r.tx, ikey)
+}
+
+func (r *partIndexTxn) prefixView(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	key := ikey
+	if !r.unique {
+		key = encodeNonUniqueBytes(key)
+	}
+	iter, watch := r.tx.PrefixView(key)
+	if r.unique {
+		return iter, watch
+	}
+	return newNonUniquePartIterator(iter, true, key), watch
 }
 
 func (r *partIndexTxn) objectToKey(obj object) index.Key {

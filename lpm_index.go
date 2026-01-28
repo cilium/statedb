@@ -203,6 +203,10 @@ func (l lpmIndex) all() (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.All()), l.watch
 }
 
+func (l lpmIndex) allView() (tableIndexIterator, <-chan struct{}) {
+	return l.all()
+}
+
 // get implements tableIndex.
 func (l lpmIndex) get(ikey index.Key) (object, <-chan struct{}, bool) {
 	entry, found := l.lpm.Lookup(ikey)
@@ -229,9 +233,17 @@ func (l lpmIndex) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return &entry, l.watch
 }
 
+func (l lpmIndex) listView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return l.list(key)
+}
+
 // lowerBound implements tableIndex.
 func (l lpmIndex) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.LowerBound(key)), l.watch
+}
+
+func (l lpmIndex) lowerBoundView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return l.lowerBound(key)
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -247,6 +259,10 @@ func (l lpmIndex) objectToKey(obj object) index.Key {
 // prefix implements tableIndex.
 func (l lpmIndex) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.Prefix(key)), l.watch
+}
+
+func (l lpmIndex) prefixView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return l.prefix(key)
 }
 
 // rootWatch implements tableIndex.
@@ -285,6 +301,10 @@ type lpmIndexTxn struct {
 // all implements tableIndexTxn.
 func (l *lpmIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.tx.All()), l.index.watch
+}
+
+func (l *lpmIndexTxn) allView() (tableIndexIterator, <-chan struct{}) {
+	return newLPMIterator(l.tx.AllView()), l.index.watch
 }
 
 // commit implements tableIndexTxn.
@@ -342,9 +362,17 @@ func (l *lpmIndexTxn) list(key index.Key) (tableIndexIterator, <-chan struct{}) 
 	return &entry, l.index.watch
 }
 
+func (l *lpmIndexTxn) listView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return l.list(key)
+}
+
 // lowerBound implements tableIndexTxn.
 func (l *lpmIndexTxn) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.tx.LowerBound(key)), l.index.watch
+}
+
+func (l *lpmIndexTxn) lowerBoundView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return newLPMIterator(l.tx.LowerBoundView(key)), l.index.watch
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -368,6 +396,10 @@ func (l *lpmIndexTxn) objectToKey(obj object) index.Key {
 // prefix implements tableIndexTxn.
 func (l *lpmIndexTxn) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.tx.Prefix(key)), l.index.watch
+}
+
+func (l *lpmIndexTxn) prefixView(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return newLPMIterator(l.tx.PrefixView(key)), l.index.watch
 }
 
 // reindex implements tableIndexTxn.
@@ -581,6 +613,7 @@ func (e *lpmEntry) appendObjects(dst []object) []object {
 	}
 	return dst
 }
+
 
 type lpmIteratorAdapter struct {
 	iter *lpm.Iterator[lpmEntry]

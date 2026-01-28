@@ -381,13 +381,81 @@ func (txn *Txn[T]) All() *Iterator[T] {
 	return &Iterator[T]{start: txn.root}
 }
 
+func (txn *Txn[T]) AllView() *Iterator[T] {
+	if txn.root == nil {
+		return nil
+	}
+	return &Iterator[T]{start: txn.root}
+}
+
+func (txn *Txn[T]) AllSlice() []T {
+	if txn.root == nil {
+		return nil
+	}
+	values := make([]T, 0, txn.size)
+	(&Iterator[T]{start: txn.root}).All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
 func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 	if txn.root == nil {
 		return nil
 	}
 	// Bump txnID to freeze the trie
 	txn.txnID++
+	return txn.prefixIterator(key)
+}
 
+func (txn *Txn[T]) PrefixView(key index.Key) *Iterator[T] {
+	return txn.prefixIterator(key)
+}
+
+func (txn *Txn[T]) PrefixSlice(key index.Key) []T {
+	iter := txn.prefixIterator(key)
+	if iter == nil {
+		return nil
+	}
+	values := make([]T, 0, 16)
+	iter.All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
+func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
+	if txn.root == nil {
+		return nil
+	}
+	// Bump the txnID to freeze the trie
+	txn.txnID++
+	return txn.lowerBoundIterator(key)
+}
+
+func (txn *Txn[T]) LowerBoundView(key index.Key) *Iterator[T] {
+	return txn.lowerBoundIterator(key)
+}
+
+func (txn *Txn[T]) LowerBoundSlice(key index.Key) []T {
+	iter := txn.lowerBoundIterator(key)
+	if iter == nil {
+		return nil
+	}
+	values := make([]T, 0, 16)
+	iter.All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
+func (txn *Txn[T]) prefixIterator(key index.Key) *Iterator[T] {
+	if txn.root == nil {
+		return nil
+	}
 	node := txn.root
 	data, prefixLen := DecodeLPMKey(key)
 
@@ -405,13 +473,10 @@ func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 	return &Iterator[T]{start: node}
 }
 
-func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
+func (txn *Txn[T]) lowerBoundIterator(key index.Key) *Iterator[T] {
 	if txn.root == nil {
 		return nil
 	}
-	// Bump the txnID to freeze the trie
-	txn.txnID++
-
 	data, prefixLen := DecodeLPMKey(key)
 	node := txn.root
 	stack := make([]*lpmNode[T], 0, 32)

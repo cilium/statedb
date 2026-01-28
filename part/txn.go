@@ -53,6 +53,18 @@ func (txn *Txn[T]) All(yield func([]byte, T) bool) {
 	Iterator[T]{start: txn.root}.All(yield)
 }
 
+func (txn *Txn[T]) AllSlice() []T {
+	if txn.root == nil {
+		return nil
+	}
+	values := make([]T, 0, txn.size)
+	Iterator[T]{start: txn.root}.All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
 // Clone returns a clone of the transaction for reading. The clone is unaffected
 // by any future changes done with the original transaction.
 func (txn *Txn[T]) Clone() Tree[T] {
@@ -152,6 +164,22 @@ func (txn *Txn[T]) Prefix(key []byte) (Iterator[T], <-chan struct{}) {
 	return prefixSearch(txn.root, txn.rootWatch, key)
 }
 
+// PrefixView returns an iterator without bumping txnID.
+// Use only when the caller does not need to freeze the view.
+func (txn *Txn[T]) PrefixView(key []byte) (Iterator[T], <-chan struct{}) {
+	return prefixSearch(txn.root, txn.rootWatch, key)
+}
+
+func (txn *Txn[T]) PrefixSlice(key []byte) []T {
+	iter, _ := prefixSearch(txn.root, txn.rootWatch, key)
+	values := make([]T, 0, 16)
+	iter.All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
 // LowerBound returns an iterator for all objects that have a
 // key equal or higher than the given 'key'.
 func (txn *Txn[T]) LowerBound(key []byte) Iterator[T] {
@@ -160,10 +188,32 @@ func (txn *Txn[T]) LowerBound(key []byte) Iterator[T] {
 	return lowerbound(txn.root, key)
 }
 
+// LowerBoundView returns an iterator without bumping txnID.
+// Use only when the caller does not need to freeze the view.
+func (txn *Txn[T]) LowerBoundView(key []byte) Iterator[T] {
+	return lowerbound(txn.root, key)
+}
+
+func (txn *Txn[T]) LowerBoundSlice(key []byte) []T {
+	iter := lowerbound(txn.root, key)
+	values := make([]T, 0, 16)
+	iter.All(func(_ []byte, value T) bool {
+		values = append(values, value)
+		return true
+	})
+	return values
+}
+
 // Iterator returns an iterator for all objects.
 func (txn *Txn[T]) Iterator() Iterator[T] {
 	// Bump txnID in order to freeze the current tree.
 	txn.txnID++
+	return newIterator(txn.root)
+}
+
+// IteratorView returns an iterator without bumping txnID.
+// Use only when the caller does not need to freeze the view.
+func (txn *Txn[T]) IteratorView() Iterator[T] {
 	return newIterator(txn.root)
 }
 

@@ -433,6 +433,17 @@ func (t *genTable[Obj]) LowerBoundWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Ob
 	return objSeq[Obj](iter), watch
 }
 
+func (t *genTable[Obj]) LowerBoundSlice(txn ReadTxn, q Query[Obj]) []Obj {
+	objs, _ := t.LowerBoundSliceWatch(txn, q)
+	return objs
+}
+
+func (t *genTable[Obj]) LowerBoundSliceWatch(txn ReadTxn, q Query[Obj]) ([]Obj, <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.lowerBoundView(q.key)
+	return collectTableIndexObjs[Obj](iter), watch
+}
+
 func (t *genTable[Obj]) Prefix(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.PrefixWatch(txn, q)
 	return iter
@@ -442,6 +453,17 @@ func (t *genTable[Obj]) PrefixWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, R
 	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.prefix(q.key)
 	return objSeq[Obj](iter), watch
+}
+
+func (t *genTable[Obj]) PrefixSlice(txn ReadTxn, q Query[Obj]) []Obj {
+	objs, _ := t.PrefixSliceWatch(txn, q)
+	return objs
+}
+
+func (t *genTable[Obj]) PrefixSliceWatch(txn ReadTxn, q Query[Obj]) ([]Obj, <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.prefixView(q.key)
+	return collectTableIndexObjs[Obj](iter), watch
 }
 
 func (t *genTable[Obj]) All(txn ReadTxn) iter.Seq2[Obj, Revision] {
@@ -459,6 +481,17 @@ func (t *genTable[Obj]) AllWatch(txn ReadTxn) (iter.Seq2[Obj, Revision], <-chan 
 	}, watch
 }
 
+func (t *genTable[Obj]) AllSlice(txn ReadTxn) []Obj {
+	objs, _ := t.AllSliceWatch(txn)
+	return objs
+}
+
+func (t *genTable[Obj]) AllSliceWatch(txn ReadTxn) ([]Obj, <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, PrimaryIndexPos)
+	iter, watch := indexTxn.allView()
+	return collectTableIndexObjs[Obj](iter), watch
+}
+
 func (t *genTable[Obj]) List(txn ReadTxn, q Query[Obj]) iter.Seq2[Obj, Revision] {
 	iter, _ := t.ListWatch(txn, q)
 	return iter
@@ -468,6 +501,17 @@ func (t *genTable[Obj]) ListWatch(txn ReadTxn, q Query[Obj]) (iter.Seq2[Obj, Rev
 	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
 	iter, watch := indexTxn.list(q.key)
 	return objSeq[Obj](iter), watch
+}
+
+func (t *genTable[Obj]) ListSlice(txn ReadTxn, q Query[Obj]) []Obj {
+	objs, _ := t.ListSliceWatch(txn, q)
+	return objs
+}
+
+func (t *genTable[Obj]) ListSliceWatch(txn ReadTxn, q Query[Obj]) ([]Obj, <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.listView(q.key)
+	return collectTableIndexObjs[Obj](iter), watch
 }
 
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {

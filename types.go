@@ -35,6 +35,13 @@ type Table[Obj any] interface {
 	// channel that is closed when the table changes.
 	AllWatch(ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{})
 
+	// AllSlice returns all objects in the table.
+	AllSlice(ReadTxn) []Obj
+
+	// AllSliceWatch returns all objects in the table and a watch channel that is
+	// closed when the table changes.
+	AllSliceWatch(ReadTxn) ([]Obj, <-chan struct{})
+
 	// List returns sequence of objects matching the given query.
 	List(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
 
@@ -42,6 +49,14 @@ type Table[Obj any] interface {
 	// and a watch channel that is closed if the query results are
 	// invalidated by a write to the table.
 	ListWatch(ReadTxn, Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{})
+
+	// ListSlice returns all objects matching the given query.
+	ListSlice(ReadTxn, Query[Obj]) []Obj
+
+	// ListSliceWatch returns all objects matching the given query and a watch
+	// channel that is closed if the query results are invalidated by a write to
+	// the table.
+	ListSliceWatch(ReadTxn, Query[Obj]) ([]Obj, <-chan struct{})
 
 	// Get returns the first matching object for the query.
 	Get(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
@@ -60,12 +75,26 @@ type Table[Obj any] interface {
 	// are not possible with a lower bound search.
 	LowerBoundWatch(ReadTxn, Query[Obj]) (seq iter.Seq2[Obj, Revision], watch <-chan struct{})
 
+	// LowerBoundSlice returns objects that have a key greater or equal to the query.
+	LowerBoundSlice(ReadTxn, Query[Obj]) []Obj
+
+	// LowerBoundSliceWatch returns objects that have a key greater or equal to the query
+	// and a watch channel that is closed when anything in the table changes.
+	LowerBoundSliceWatch(ReadTxn, Query[Obj]) (seq []Obj, watch <-chan struct{})
+
 	// Prefix searches the table by key prefix.
 	Prefix(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
 
 	// PrefixWatch searches the table by key prefix. Returns an iterator and a watch
 	// channel that closes when the query results have become stale.
 	PrefixWatch(ReadTxn, Query[Obj]) (seq iter.Seq2[Obj, Revision], watch <-chan struct{})
+
+	// PrefixSlice searches the table by key prefix.
+	PrefixSlice(ReadTxn, Query[Obj]) []Obj
+
+	// PrefixSliceWatch searches the table by key prefix. Returns all objects and a watch
+	// channel that closes when the query results have become stale.
+	PrefixSliceWatch(ReadTxn, Query[Obj]) (seq []Obj, watch <-chan struct{})
 
 	// Changes returns an iterator for changes happening to the table.
 	// This uses the revision index to iterate over the objects in the order
@@ -396,10 +425,14 @@ type tableIndexReader interface {
 	len() int
 	get(key index.Key) (object, <-chan struct{}, bool)
 	prefix(key index.Key) (tableIndexIterator, <-chan struct{})
+	prefixView(key index.Key) (tableIndexIterator, <-chan struct{})
 	lowerBound(key index.Key) (tableIndexIterator, <-chan struct{})
+	lowerBoundView(key index.Key) (tableIndexIterator, <-chan struct{})
 	lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{})
 	list(key index.Key) (tableIndexIterator, <-chan struct{})
+	listView(key index.Key) (tableIndexIterator, <-chan struct{})
 	all() (tableIndexIterator, <-chan struct{})
+	allView() (tableIndexIterator, <-chan struct{})
 	rootWatch() <-chan struct{}
 	objectToKey(obj object) index.Key
 }

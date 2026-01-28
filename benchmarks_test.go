@@ -515,6 +515,13 @@ func BenchmarkDB_FullIteration_Prefix(b *testing.B) {
 }
 
 func BenchmarkDB_ListDelete(b *testing.B) {
+	benchmarkDB_ListDelete(b, false)
+}
+func BenchmarkDB_ListSliceDelete(b *testing.B) {
+	benchmarkDB_ListDelete(b, true)
+}
+
+func benchmarkDB_ListDelete(b *testing.B, useSlice bool) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
 
 	tags := make([]string, 0, numObjectsIteration)
@@ -534,9 +541,16 @@ func BenchmarkDB_ListDelete(b *testing.B) {
 		txn := db.WriteTxn(table)
 		for _, tag := range tags {
 			query := tagsIndex.Query(tag)
-			for obj := range table.List(txn, query) {
-				_, _, err := table.Delete(txn, obj)
-				require.NoError(b, err)
+			if useSlice {
+				for _, obj := range table.ListSlice(txn, query) {
+					_, _, err := table.Delete(txn, obj)
+					require.NoError(b, err)
+				}
+			} else {
+				for obj := range table.List(txn, query) {
+					_, _, err := table.Delete(txn, obj)
+					require.NoError(b, err)
+				}
 			}
 		}
 		txn.Abort()
