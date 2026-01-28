@@ -514,6 +514,17 @@ func (t *genTable[Obj]) ListSliceWatch(txn ReadTxn, q Query[Obj]) ([]Obj, <-chan
 	return collectTableIndexObjs[Obj](iter), watch
 }
 
+func (t *genTable[Obj]) ListSliceRevision(txn ReadTxn, q Query[Obj]) []ObjWithRevision[Obj] {
+	objs, _ := t.ListSliceRevisionWatch(txn, q)
+	return objs
+}
+
+func (t *genTable[Obj]) ListSliceRevisionWatch(txn ReadTxn, q Query[Obj]) ([]ObjWithRevision[Obj], <-chan struct{}) {
+	indexTxn := txn.mustIndexReadTxn(t, t.indexPos(q.index))
+	iter, watch := indexTxn.listView(q.key)
+	return collectTableIndexObjsWithRevision[Obj](iter), watch
+}
+
 func (t *genTable[Obj]) Insert(txn WriteTxn, obj Obj) (oldObj Obj, hadOld bool, err error) {
 	oldObj, hadOld, _, err = t.InsertWatch(txn, obj)
 	return

@@ -60,6 +60,14 @@ func (t *testObject) String() string {
 	return fmt.Sprintf("testObject{ID: %d, Tags: %v}", t.ID, t.Tags)
 }
 
+func collectIDs(objs []*testObject) []uint64 {
+	ids := make([]uint64, len(objs))
+	for i, obj := range objs {
+		ids[i] = obj.ID
+	}
+	return ids
+}
+
 func (t *testObject) MarshalJSON() ([]byte, error) {
 	if t.Tags.Has("json-panic") {
 		panic("json-panic")
@@ -886,6 +894,49 @@ func TestDB_GetList(t *testing.T) {
 	require.Len(t, items, 5, "expected Get(odd) to return 5 items")
 	for i, item := range items {
 		require.EqualValues(t, item.ID, i*2+1, "expected items[%d].ID to equal %d", i, i*2+1)
+	}
+}
+
+func TestDB_Slices(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	wtxn := db.WriteTxn(table)
+	for i := 1; i <= 6; i++ {
+		tag := "odd"
+		if i%2 == 0 {
+			tag = "even"
+		}
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i), Tags: part.NewSet(tag)})
+		require.NoError(t, err)
+	}
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+
+	require.Equal(t, collectIDs(Collect(table.All(txn))), collectIDs(table.AllSlice(txn)))
+	require.Equal(t, collectIDs(Collect(table.LowerBound(txn, idIndex.Query(3)))), collectIDs(table.LowerBoundSlice(txn, idIndex.Query(3))))
+	require.Equal(t, collectIDs(Collect(table.List(txn, tagsIndex.Query("even")))), collectIDs(table.ListSlice(txn, tagsIndex.Query("even"))))
+	require.Equal(t, collectIDs(Collect(table.Prefix(txn, tagsIndex.Query("o")))), collectIDs(table.PrefixSlice(txn, tagsIndex.Query("o"))))
+
+	oddSlice, watch := table.ListSliceWatch(txn, tagsIndex.Query("odd"))
+	require.Equal(t, collectIDs(Collect(table.List(txn, tagsIndex.Query("odd")))), collectIDs(oddSlice))
+	select {
+	case <-watch:
+		t.Fatalf("ListSliceWatch channel closed before changes")
+	default:
+	}
+
+	wtxn = db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 7, Tags: part.NewSet("odd")})
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	select {
+	case <-watch:
+	case <-time.After(watchCloseTimeout):
+		t.Fatalf("ListSliceWatch channel not closed after change")
 	}
 }
 

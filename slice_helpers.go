@@ -11,3 +11,15 @@ func collectTableIndexObjs[Obj any](iter tableIndexIterator) []Obj {
 	})
 	return objs
 }
+
+func collectTableIndexObjsWithRevision[Obj any](iter tableIndexIterator) []ObjWithRevision[Obj] {
+	var objs []ObjWithRevision[Obj]
+	iter.All(func(_ []byte, obj object) bool {
+		objs = append(objs, ObjWithRevision[Obj]{
+			Object:   obj.data.(Obj),
+			Revision: obj.revision,
+		})
+		return true
+	})
+	return objs
+}

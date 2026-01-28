@@ -18,6 +18,11 @@ type (
 	Revision  = uint64
 )
 
+type ObjWithRevision[Obj any] struct {
+	Object   Obj
+	Revision Revision
+}
+
 // Table provides methods for querying the contents of a table.
 type Table[Obj any] interface {
 	// TableMeta for querying table metadata that is independent of
@@ -57,6 +62,13 @@ type Table[Obj any] interface {
 	// channel that is closed if the query results are invalidated by a write to
 	// the table.
 	ListSliceWatch(ReadTxn, Query[Obj]) ([]Obj, <-chan struct{})
+
+	// ListSliceRevision returns all objects matching the given query with revisions.
+	ListSliceRevision(ReadTxn, Query[Obj]) []ObjWithRevision[Obj]
+
+	// ListSliceRevisionWatch returns all objects matching the given query with revisions and a
+	// watch channel that is closed if the query results are invalidated by a write to the table.
+	ListSliceRevisionWatch(ReadTxn, Query[Obj]) ([]ObjWithRevision[Obj], <-chan struct{})
 
 	// Get returns the first matching object for the query.
 	Get(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
