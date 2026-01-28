@@ -261,14 +261,12 @@ func (r *partIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
 
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	snapshot := r.tx.Clone()
-	return partList(r.unique, &snapshot, ikey)
+	return partList(r.unique, r.tx, ikey)
 }
 
 // lowerBound implements tableIndexTxn.
 func (r *partIndexTxn) lowerBound(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	snapshot := r.tx.Clone()
-	return partLowerBound(r.unique, &snapshot, ikey), r.rootWatch()
+	return partLowerBound(r.unique, r.tx, ikey), r.rootWatch()
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -276,8 +274,7 @@ func (r *partIndexTxn) lowerBoundNext(key index.Key) (func() ([]byte, object, bo
 	if !r.unique {
 		key = encodeNonUniqueBytes(key)
 	}
-	snapshot := r.tx.Clone()
-	iter := snapshot.LowerBound(key)
+	iter := r.tx.LowerBound(key)
 	if r.unique {
 		return iter.Next, r.rootWatch()
 	}
@@ -335,8 +332,7 @@ func (r *partIndexTxn) notify() {
 
 // prefix implements tableIndexTxn.
 func (r *partIndexTxn) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
-	snapshot := r.tx.Clone()
-	return partPrefix(r.unique, &snapshot, ikey)
+	return partPrefix(r.unique, r.tx, ikey)
 }
 
 func (r *partIndexTxn) objectToKey(obj object) index.Key {
