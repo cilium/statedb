@@ -120,7 +120,7 @@ func TestDB_Quick(t *testing.T) {
 
 	numInserted, numRemoved := 0, 0
 
-	check := func(a, b string, remove bool) bool {
+	check := func(a, b string, remove bool, useModify bool) bool {
 		txn := db.WriteTxn(table)
 		if remove {
 			key := pickRandom()
@@ -152,13 +152,31 @@ func TestDB_Quick(t *testing.T) {
 
 		getObj, _, getWatch, getFound := table.GetWatch(txn, aIndex.Query(a))
 
-		old, hadOld, err := table.Insert(txn, quickObj{a, b})
-		require.NoError(t, err, "Insert")
+		expected, found := values[a]
+		expectedB := b
+
+		var (
+			old    quickObj
+			hadOld bool
+			err    error
+		)
+		if useModify {
+			old, hadOld, err = table.Modify(txn, quickObj{a, b}, func(old, new quickObj) quickObj {
+				new.B = old.B + new.B
+				return new
+			})
+			require.NoError(t, err, "Modify")
+			if found {
+				expectedB = expected + b
+			}
+		} else {
+			old, hadOld, err = table.Insert(txn, quickObj{a, b})
+			require.NoError(t, err, "Insert")
+		}
 		numInserted++
 
 		require.Equal(t, getFound, hadOld)
 
-		expected, found := values[a]
 		if found {
 			if !hadOld {
 				t.Logf("object was updated but old value not returned")
@@ -174,7 +192,7 @@ func TestDB_Quick(t *testing.T) {
 				return false
 			}
 		}
-		values[a] = b
+		values[a] = expectedB
 
 		if len(values) != table.NumObjects(txn) {
 			t.Logf("wrong object count")
@@ -270,6 +288,7 @@ func TestDB_Quick(t *testing.T) {
 		//
 		// Check against the secondary (non-unique index)
 		//
+		queryB := expectedB
 
 		// Non-unique indexes return the same number of objects as we've inserted.
 		if len(values) != seqLen(table.Prefix(rtxn, bIndex.Query(""))) {
@@ -284,15 +303,15 @@ func TestDB_Quick(t *testing.T) {
 
 		// Get returns the first match, but since the index is non-unique, this might
 		// not be the one that we just inserted.
-		obj, _, found = table.Get(rtxn, bIndex.Query(b))
-		if !found || obj.B != b {
-			t.Logf("Get(%q) via bIndex not found (%v) or wrong B (%q vs %q)", b, found, obj.B, b)
+		obj, _, found = table.Get(rtxn, bIndex.Query(queryB))
+		if !found || obj.B != queryB {
+			t.Logf("Get(%q) via bIndex not found (%v) or wrong B (%q vs %q)", queryB, found, obj.B, queryB)
 			return false
 		}
 
 		found = false
-		for obj := range table.List(rtxn, bIndex.Query(b)) {
-			if obj.B != b {
+		for obj := range table.List(rtxn, bIndex.Query(queryB)) {
+			if obj.B != queryB {
 				t.Logf("List() via bIndex wrong B")
 				return false
 			}
@@ -306,8 +325,8 @@ func TestDB_Quick(t *testing.T) {
 		}
 
 		visited := map[string]struct{}{}
-		for obj := range table.Prefix(rtxn, bIndex.Query(b)) {
-			if !strings.HasPrefix(obj.B, b) {
+		for obj := range table.Prefix(rtxn, bIndex.Query(queryB)) {
+			if !strings.HasPrefix(obj.B, queryB) {
 				t.Logf("Prefix() via bIndex has wrong prefix")
 				return false
 			}
@@ -318,20 +337,20 @@ func TestDB_Quick(t *testing.T) {
 			visited[obj.A] = struct{}{}
 		}
 
-		anyObjs, err = anyTable.Prefix(rtxn, "b", b)
+		anyObjs, err = anyTable.Prefix(rtxn, "b", queryB)
 		require.NoError(t, err, "AnyTable.Prefix")
 		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
-			if !strings.HasPrefix(obj.B, b) {
-				t.Logf("AnyTable.Prefix() via bIndex has wrong prefix: %q vs %q", obj.B, b)
+			if !strings.HasPrefix(obj.B, queryB) {
+				t.Logf("AnyTable.Prefix() via bIndex has wrong prefix: %q vs %q", obj.B, queryB)
 				return false
 			}
 		}
 
 		visited = map[string]struct{}{}
-		for obj := range table.LowerBound(rtxn, bIndex.Query(b)) {
-			if cmp.Compare(obj.B, b) < 0 {
-				t.Logf("LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(b))
+		for obj := range table.LowerBound(rtxn, bIndex.Query(queryB)) {
+			if cmp.Compare(obj.B, queryB) < 0 {
+				t.Logf("LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(queryB))
 				return false
 			}
 			if _, found := visited[obj.A]; found {
@@ -341,12 +360,12 @@ func TestDB_Quick(t *testing.T) {
 			visited[obj.A] = struct{}{}
 		}
 
-		anyObjs, err = anyTable.LowerBound(rtxn, "b", b)
+		anyObjs, err = anyTable.LowerBound(rtxn, "b", queryB)
 		require.NoError(t, err, "AnyTable.LowerBound")
 		for anyObj := range anyObjs {
 			obj := anyObj.(quickObj)
-			if cmp.Compare(obj.B, b) < 0 {
-				t.Logf("AnyTable.LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(b))
+			if cmp.Compare(obj.B, queryB) < 0 {
+				t.Logf("AnyTable.LowerBound() via bIndex has wrong objects, expected %v >= %v", []byte(obj.B), []byte(queryB))
 				return false
 			}
 		}
@@ -371,7 +390,7 @@ func TestDB_Quick(t *testing.T) {
 		// than the default quick value generation to hit the more interesting cases
 		// often.
 		Values: func(args []reflect.Value, rand *rand.Rand) {
-			if len(args) != 3 {
+			if len(args) != 4 {
 				panic("unexpected args count")
 			}
 			for i := range args[:2] {
@@ -382,6 +401,8 @@ func TestDB_Quick(t *testing.T) {
 			}
 			// Remove 33% of the time
 			args[2] = reflect.ValueOf(rand.Intn(3) == 1)
+			// Use Modify 50% of the time
+			args[3] = reflect.ValueOf(rand.Intn(2) == 0)
 		},
 	}))
 
