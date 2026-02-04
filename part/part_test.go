@@ -672,7 +672,7 @@ func Test_modify(t *testing.T) {
 
 	txn := tree.Txn()
 	for i := range 1000 {
-		old, hadOld := txn.Modify(key, 123, func(x, _ int) int { return x + 1 })
+		old, _, hadOld := txn.Modify(key, 123, func(x, _ int) int { return x + 1 })
 		require.True(t, hadOld)
 		require.Equal(t, i+1, old)
 	}
