@@ -755,6 +755,37 @@ func TestDB_Modify(t *testing.T) {
 	require.EqualValues(t, 1, objs[0].ID)
 }
 
+func TestDB_ModifyUpdatesSecondaryIndex(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	txn := db.WriteTxn(table)
+	_, _, err := table.Insert(txn, &testObject{ID: uint64(1), Tags: part.NewSet("foo")})
+	require.NoError(t, err, "Insert failed")
+
+	_, hadOld, err := table.Modify(txn, &testObject{ID: uint64(1)}, func(old, new *testObject) *testObject {
+		return &testObject{
+			ID:   1,
+			Tags: old.Tags.Set("bar"),
+		}
+	})
+	require.NoError(t, err, "Modify failed")
+	require.True(t, hadOld, "expected hadOld to be true")
+
+	rtxn := txn.Commit()
+
+	obj, _, found := table.Get(rtxn, tagsIndex.Query("bar"))
+	require.True(t, found, "expected tags index to include merged tag")
+	require.EqualValues(t, 1, obj.ID)
+	require.True(t, obj.Tags.Has("foo"))
+	require.True(t, obj.Tags.Has("bar"))
+
+	obj, _, found = table.Get(rtxn, tagsIndex.Query("foo"))
+	require.True(t, found, "expected tags index to retain existing tag")
+	require.EqualValues(t, 1, obj.ID)
+}
+
 func TestDB_Revision(t *testing.T) {
 	t.Parallel()
 
