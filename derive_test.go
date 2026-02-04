@@ -111,12 +111,15 @@ func TestDerive(t *testing.T) {
 		cell.Module(
 			"test", "Test",
 
-			cell.Provide(func(db_ *DB) (Table[*testObject], RWTable[derived], error) {
-				db = db_
-				inTable = MustNewTable(db, "test", idIndex)
-				outTable = MustNewTable(db, "derived", derivedIdIndex)
-				return inTable, outTable, nil
-			}),
+			cell.Provide(
+				job.Registry.NewGroup,
+
+				func(db_ *DB) (Table[*testObject], RWTable[derived], error) {
+					db = db_
+					inTable = MustNewTable(db, "test", idIndex)
+					outTable = MustNewTable(db, "derived", derivedIdIndex)
+					return inTable, outTable, nil
+				}),
 
 			cell.Invoke(Derive("testObject-to-derived", transform)),
 		),
