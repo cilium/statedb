@@ -28,6 +28,22 @@ func iteratorToValues[T any](it *Iterator[T]) iter.Seq[T] {
 	}
 }
 
+func iteratorToKeys[T any](it *Iterator[T]) []string {
+	var keys []string
+	for key := range it.All {
+		keys = append(keys, string(key))
+	}
+	return keys
+}
+
+func reverseIteratorToKeys[T any](it *ReverseIterator[T]) []string {
+	var keys []string
+	for key := range it.All {
+		keys = append(keys, string(key))
+	}
+	return keys
+}
+
 func TestTrie(t *testing.T) {
 	lpm := New[int]()
 
@@ -120,6 +136,60 @@ func TestTrie(t *testing.T) {
 	lpm = txn.Commit()
 	require.True(t, found)
 	require.Equal(t, 999, v)
+}
+
+func TestTrie_AllReverse(t *testing.T) {
+	trie := New[int]()
+	keys := []string{
+		"10.1.1.1/32",
+		"10.0.0.0/8",
+		"192.168.1.0/24",
+		"192.168.1.5/32",
+	}
+
+	prefixKey := func(p string) index.Key {
+		key := netip.MustParsePrefix(p)
+		return EncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
+	}
+
+	txn := trie.Txn()
+	for i, k := range keys {
+		txn.Insert(prefixKey(k), i)
+	}
+	trie = txn.Commit()
+
+	forward := iteratorToKeys(trie.All())
+	reverse := reverseIteratorToKeys(trie.AllReverse())
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
+}
+
+func TestTrie_PrefixReverse(t *testing.T) {
+	trie := New[int]()
+	keys := []string{
+		"10.1.1.1/32",
+		"10.0.0.0/8",
+		"10.0.0.0/24",
+		"10.0.0.1/32",
+		"192.168.1.5/32",
+	}
+
+	prefixKey := func(p string) index.Key {
+		key := netip.MustParsePrefix(p)
+		return EncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
+	}
+
+	txn := trie.Txn()
+	for i, k := range keys {
+		txn.Insert(prefixKey(k), i)
+	}
+	trie = txn.Commit()
+
+	query := prefixKey("10.0.0.0/8")
+	forward := iteratorToKeys(trie.Prefix(query))
+	reverse := reverseIteratorToKeys(trie.PrefixReverse(query))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
 }
 
 func TestEncodeDecodeLPMKey(t *testing.T) {

@@ -152,6 +152,15 @@ func (txn *Txn[T]) Prefix(key []byte) (Iterator[T], <-chan struct{}) {
 	return prefixSearch(txn.root, txn.rootWatch, key)
 }
 
+// PrefixReverse returns a reverse iterator for all objects that start with the
+// given prefix, and a channel that closes when any objects matching the prefix
+// are upserted or deleted.
+func (txn *Txn[T]) PrefixReverse(key []byte) (ReverseIterator[T], <-chan struct{}) {
+	// Bump txnID in order to freeze the current tree.
+	txn.txnID++
+	return prefixSearchReverse(txn.root, txn.rootWatch, key)
+}
+
 // LowerBound returns an iterator for all objects that have a
 // key equal or higher than the given 'key'.
 func (txn *Txn[T]) LowerBound(key []byte) Iterator[T] {
@@ -165,6 +174,13 @@ func (txn *Txn[T]) Iterator() Iterator[T] {
 	// Bump txnID in order to freeze the current tree.
 	txn.txnID++
 	return newIterator(txn.root)
+}
+
+// ReverseIterator returns an iterator for all objects in reverse order.
+func (txn *Txn[T]) ReverseIterator() ReverseIterator[T] {
+	// Bump txnID in order to freeze the current tree.
+	txn.txnID++
+	return newReverseIterator(txn.root)
 }
 
 // CommitAndNotify commits the transaction and notifies by

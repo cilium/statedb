@@ -1329,6 +1329,51 @@ func TestIterator(t *testing.T) {
 	require.Equal(t, 0, v)
 }
 
+func TestReverseIterator(t *testing.T) {
+	tree := New[int]()
+	it := tree.ReverseIterator()
+	for range it.All {
+		t.Fatalf("All yielded value from empty tree")
+	}
+
+	_, _, tree = tree.Insert([]byte("bbb"), 2)
+	_, _, tree = tree.Insert([]byte("aaa"), 1)
+
+	it = tree.ReverseIterator()
+	var values []int
+	for _, v := range it.All {
+		values = append(values, v)
+	}
+	require.Equal(t, []int{2, 1}, values)
+
+	it = tree.ReverseIterator()
+	k, v, ok := it.Next()
+	require.True(t, ok)
+	require.Equal(t, "bbb", string(k))
+	require.Equal(t, 2, v)
+
+	values = nil
+	for _, v := range it.All {
+		values = append(values, v)
+	}
+	require.Equal(t, []int{1}, values)
+}
+
+func TestPrefixReverse(t *testing.T) {
+	tree := New[int]()
+	_, _, tree = tree.Insert([]byte("a"), 1)
+	_, _, tree = tree.Insert([]byte("aa"), 2)
+	_, _, tree = tree.Insert([]byte("ab"), 3)
+	_, _, tree = tree.Insert([]byte("b"), 4)
+
+	iter, _ := tree.PrefixReverse([]byte("a"))
+	var keys []string
+	for key := range iter.All {
+		keys = append(keys, string(key))
+	}
+	require.Equal(t, []string{"ab", "aa", "a"}, keys)
+}
+
 func Benchmark_Insert_RootOnlyWatch(b *testing.B) {
 	benchmark_Insert(b, RootOnlyWatch)
 }
@@ -1538,6 +1583,23 @@ func Benchmark_Iterator_All(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func Benchmark_ReverseIterator_All(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		for _, j := range tree.ReverseIterator().All {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func Benchmark_Iterator_Next(b *testing.B) {
 	tree := New[uint64](RootOnlyWatch)
 	for j := uint64(1); j <= numObjectsToInsert; j++ {
@@ -1554,6 +1616,128 @@ func Benchmark_Iterator_Next(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_ReverseIterator_Next(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+	b.ResetTimer()
+
+	for b.Loop() {
+		iter := tree.ReverseIterator()
+		for _, j, ok := iter.Next(); ok; _, j, ok = iter.Next() {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Prefix_All(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		key := make([]byte, 1+8)
+		if j%2 == 0 {
+			key[0] = 'a'
+		} else {
+			key[0] = 'b'
+		}
+		binary.BigEndian.PutUint64(key[1:], j)
+		_, _, tree = tree.Insert(key, j)
+	}
+	prefix := []byte{'a'}
+	b.ResetTimer()
+
+	for b.Loop() {
+		iter, _ := tree.Prefix(prefix)
+		for _, j := range iter.All {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert/2*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_Prefix_Next(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		key := make([]byte, 1+8)
+		if j%2 == 0 {
+			key[0] = 'a'
+		} else {
+			key[0] = 'b'
+		}
+		binary.BigEndian.PutUint64(key[1:], j)
+		_, _, tree = tree.Insert(key, j)
+	}
+	prefix := []byte{'a'}
+	b.ResetTimer()
+
+	for b.Loop() {
+		iter, _ := tree.Prefix(prefix)
+		for _, j, ok := iter.Next(); ok; _, j, ok = iter.Next() {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert/2*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_PrefixReverse_All(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		key := make([]byte, 1+8)
+		if j%2 == 0 {
+			key[0] = 'a'
+		} else {
+			key[0] = 'b'
+		}
+		binary.BigEndian.PutUint64(key[1:], j)
+		_, _, tree = tree.Insert(key, j)
+	}
+	prefix := []byte{'a'}
+	b.ResetTimer()
+
+	for b.Loop() {
+		iter, _ := tree.PrefixReverse(prefix)
+		for _, j := range iter.All {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert/2*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_PrefixReverse_Next(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		key := make([]byte, 1+8)
+		if j%2 == 0 {
+			key[0] = 'a'
+		} else {
+			key[0] = 'b'
+		}
+		binary.BigEndian.PutUint64(key[1:], j)
+		_, _, tree = tree.Insert(key, j)
+	}
+	prefix := []byte{'a'}
+	b.ResetTimer()
+
+	for b.Loop() {
+		iter, _ := tree.PrefixReverse(prefix)
+		for _, j, ok := iter.Next(); ok; _, j, ok = iter.Next() {
+			if j < 1 || j > numObjectsToInsert+1 {
+				b.Fatalf("impossible value: %d", j)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert/2*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
 func Benchmark_Hashmap_Insert(b *testing.B) {

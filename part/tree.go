@@ -99,6 +99,13 @@ func (t *Tree[T]) Prefix(prefix []byte) (Iterator[T], <-chan struct{}) {
 	return prefixSearch(t.root, t.rootWatch, prefix)
 }
 
+// PrefixReverse returns a reverse iterator for all objects that start with the
+// given prefix, and a channel that closes when any objects matching the prefix
+// are upserted or deleted.
+func (t *Tree[T]) PrefixReverse(prefix []byte) (ReverseIterator[T], <-chan struct{}) {
+	return prefixSearchReverse(t.root, t.rootWatch, prefix)
+}
+
 // RootWatch returns a watch channel for the root of the tree.
 // Since this is the channel associated with the root, this closes
 // when there are any changes to the tree.
@@ -144,6 +151,11 @@ func (t *Tree[T]) Delete(key []byte) (old T, hadOld bool, tree Tree[T]) {
 // Iterator returns an iterator for all objects.
 func (t *Tree[T]) Iterator() Iterator[T] {
 	return newIterator(t.root)
+}
+
+// ReverseIterator returns an iterator for all objects in reverse order.
+func (t *Tree[T]) ReverseIterator() ReverseIterator[T] {
+	return newReverseIterator(t.root)
 }
 
 // All iterates over all objects
