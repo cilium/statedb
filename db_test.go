@@ -592,6 +592,29 @@ func TestDB_Changes(t *testing.T) {
 
 	assert.EqualValues(t, 0, expvarInt(metrics.ObjectCountVar.Get("test")), "ObjectCount")
 	assert.EqualValues(t, 0, expvarInt(metrics.GraveyardObjectCountVar.Get("test")), "GraveyardObjectCount")
+
+	// Create another iterator and test observing changes using a WriteTxn
+	// that is mutating the table. This will observe the changes up to the
+	// point WriteTxn() was called, but not changes made in the WriteTxn.
+	wtxn = db.WriteTxn(table)
+	iter3, err := table.Changes(wtxn)
+	require.NoError(t, err, "failed to create ChangeIterator")
+	_, _, err = table.Insert(wtxn, &testObject{ID: 1})
+	require.NoError(t, err, "Insert failed")
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, &testObject{ID: 2})
+	require.NoError(t, err, "Insert failed")
+	changes, _ = iter3.Next(wtxn)
+	// We don't observe the insert of ID 2
+	count = 0
+	for change := range changes {
+		require.EqualValues(t, 1, change.Object.ID)
+		count++
+	}
+	require.Equal(t, 1, count)
+	wtxn.Abort()
 }
 
 func TestDB_Observable(t *testing.T) {
