@@ -203,6 +203,10 @@ func (l lpmIndex) all() (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.All()), l.watch
 }
 
+// allReverse implements tableIndex.
+func (l lpmIndex) allReverse() (tableIndexIterator, <-chan struct{}) {
+	return newLPMReverseIterator(l.lpm.AllReverse()), l.watch
+}
 // get implements tableIndex.
 func (l lpmIndex) get(ikey index.Key) (object, <-chan struct{}, bool) {
 	entry, found := l.lpm.Lookup(ikey)
@@ -229,6 +233,14 @@ func (l lpmIndex) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return &entry, l.watch
 }
 
+// listReverse implements tableIndex.
+func (l lpmIndex) listReverse(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	entry, found := l.lpm.Lookup(key)
+	if !found || entry.len() == 0 {
+		return emptyTableIndexIterator, l.watch
+	}
+	return &lpmEntryReverseIterator{entry: &entry}, l.watch
+}
 // lowerBound implements tableIndex.
 func (l lpmIndex) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.LowerBound(key)), l.watch
@@ -249,6 +261,10 @@ func (l lpmIndex) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.lpm.Prefix(key)), l.watch
 }
 
+// prefixReverse implements tableIndex.
+func (l lpmIndex) prefixReverse(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return newLPMReverseIterator(l.lpm.PrefixReverse(key)), l.watch
+}
 // rootWatch implements tableIndex.
 func (l lpmIndex) rootWatch() <-chan struct{} {
 	return l.watch
@@ -287,6 +303,10 @@ func (l *lpmIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.tx.All()), l.index.watch
 }
 
+// allReverse implements tableIndexTxn.
+func (l *lpmIndexTxn) allReverse() (tableIndexIterator, <-chan struct{}) {
+	return newLPMReverseIterator(l.tx.AllReverse()), l.index.watch
+}
 // commit implements tableIndexTxn.
 func (l *lpmIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
 	lpm := l.tx.Commit()
@@ -342,6 +362,14 @@ func (l *lpmIndexTxn) list(key index.Key) (tableIndexIterator, <-chan struct{}) 
 	return &entry, l.index.watch
 }
 
+// listReverse implements tableIndexTxn.
+func (l *lpmIndexTxn) listReverse(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	entry, found := l.tx.Lookup(key)
+	if !found || entry.len() == 0 {
+		return emptyTableIndexIterator, l.index.watch
+	}
+	return &lpmEntryReverseIterator{entry: &entry}, l.index.watch
+}
 // lowerBound implements tableIndexTxn.
 func (l *lpmIndexTxn) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return newLPMIterator(l.tx.LowerBound(key)), l.index.watch
@@ -370,6 +398,10 @@ func (l *lpmIndexTxn) prefix(key index.Key) (tableIndexIterator, <-chan struct{}
 	return newLPMIterator(l.tx.Prefix(key)), l.index.watch
 }
 
+// prefixReverse implements tableIndexTxn.
+func (l *lpmIndexTxn) prefixReverse(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return newLPMReverseIterator(l.tx.PrefixReverse(key)), l.index.watch
+}
 // reindex implements tableIndexTxn.
 func (l *lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
 	var newKeys index.KeySet
@@ -570,6 +602,20 @@ func (e *lpmEntry) All(yield func([]byte, object) bool) {
 	}
 }
 
+func (e *lpmEntry) AllReverse(yield func([]byte, object) bool) {
+	if e == nil || !e.used {
+		return
+	}
+	for i := len(e.tail) - 1; i >= 0; i-- {
+		if !yield(e.secondary, e.tail[i].obj) {
+			return
+		}
+	}
+	if !yield(e.secondary, e.head.obj) {
+		return
+	}
+}
+
 func (e *lpmEntry) appendObjects(dst []object) []object {
 	dst = dst[:0]
 	if e == nil || !e.used {
@@ -599,6 +645,37 @@ func (l *lpmIteratorAdapter) All(yield func([]byte, object) bool) {
 		}
 		return true
 	})
+}
+
+type lpmReverseIteratorAdapter struct {
+	iter *lpm.ReverseIterator[lpmEntry]
+}
+
+func newLPMReverseIterator(iter *lpm.ReverseIterator[lpmEntry]) tableIndexIterator {
+	return &lpmReverseIteratorAdapter{iter: iter}
+}
+
+func (l *lpmReverseIteratorAdapter) All(yield func([]byte, object) bool) {
+	if l.iter == nil {
+		return
+	}
+	l.iter.All(func(key []byte, entry lpmEntry) bool {
+		entry.AllReverse(func(_ []byte, obj object) bool {
+			return yield(key, obj)
+		})
+		return true
+	})
+}
+
+type lpmEntryReverseIterator struct {
+	entry *lpmEntry
+}
+
+func (l *lpmEntryReverseIterator) All(yield func([]byte, object) bool) {
+	if l.entry == nil {
+		return
+	}
+	l.entry.AllReverse(yield)
 }
 
 type lpmNextIterator struct {

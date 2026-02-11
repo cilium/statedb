@@ -127,6 +127,11 @@ func example() {
     ...
   }
 
+  // Iterate over all objects in reverse order
+  for obj := range myObjects.AllReverse() {
+    ...
+  }
+
   // Iterate with revision
   for obj, revision := range myObjects.All() {
     ...
@@ -147,6 +152,9 @@ func example() {
   // Iterate objects where ID is between 0x1000_0000 and 0x1fff_ffff
   objs, watch = myObjects.PrefixWatch(txn, IDIndex.Query(0x1000_0000))
   for obj := range objs { ... }
+
+  // Iterate objects where ID is between 0x1000_0000 and 0x1fff_ffff in reverse order
+  for obj := range myObjects.PrefixReverse(txn, IDIndex.Query(0x1000_0000)) { ... }
 }
 ```
 

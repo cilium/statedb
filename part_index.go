@@ -118,6 +118,11 @@ func (r *partIndex) list(key index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partList(r.unique, &r.tree, key)
 }
 
+// listReverse implements tableIndex.
+func (r *partIndex) listReverse(key index.Key) (tableIndexIterator, <-chan struct{}) {
+	return partListReverse(r.unique, &r.tree, key)
+}
+
 var emptyTableIndexIterator = &singletonTableIndexIterator{}
 
 func partList(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
@@ -139,6 +144,20 @@ func partList(unique bool, tree part.Ops[object], key index.Key) (tableIndexIter
 	// longer key sharing the same prefix.
 	iter, watch := tree.Prefix(key)
 	return newNonUniquePartIterator(iter, false, key), watch
+}
+
+func partListReverse(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
+	if unique {
+		obj, watch, ok := tree.Get(key)
+		if ok {
+			return &singletonTableIndexIterator{key, obj}, watch
+		}
+		return emptyTableIndexIterator, watch
+	}
+
+	key = encodeNonUniqueBytes(key)
+	iter, watch := tree.PrefixReverse(key)
+	return newNonUniquePartReverseIterator(iter, false, key), watch
 }
 
 // rootWatch implements tableIndex.
@@ -194,9 +213,19 @@ func (r *partIndex) all() (tableIndexIterator, <-chan struct{}) {
 	return &r.tree, r.rootWatch()
 }
 
+// allReverse implements tableIndex.
+func (r *partIndex) allReverse() (tableIndexIterator, <-chan struct{}) {
+	return partReverseAll(&r.tree), r.rootWatch()
+}
+
 // prefix implements tableIndex.
 func (r *partIndex) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	return partPrefix(r.unique, &r.tree, ikey)
+}
+
+// prefixReverse implements tableIndex.
+func (r *partIndex) prefixReverse(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	return partPrefixReverse(r.unique, &r.tree, ikey)
 }
 
 func partPrefix(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
@@ -208,6 +237,17 @@ func partPrefix(unique bool, tree part.Ops[object], key index.Key) (tableIndexIt
 		return iter, watch
 	}
 	return newNonUniquePartIterator(iter, true, key), watch
+}
+
+func partPrefixReverse(unique bool, tree part.Ops[object], key index.Key) (tableIndexIterator, <-chan struct{}) {
+	if !unique {
+		key = encodeNonUniqueBytes(key)
+	}
+	iter, watch := tree.PrefixReverse(key)
+	if unique {
+		return iter, watch
+	}
+	return newNonUniquePartReverseIterator(iter, true, key), watch
 }
 
 // lowerBound implements tableIndexTxn.
@@ -259,10 +299,22 @@ func (r *partIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
 	return &snapshot, r.rootWatch()
 }
 
+// allReverse implements tableIndexTxn.
+func (r *partIndexTxn) allReverse() (tableIndexIterator, <-chan struct{}) {
+	snapshot := r.tx.Clone()
+	return partReverseAll(&snapshot), r.rootWatch()
+}
+
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	snapshot := r.tx.Clone()
 	return partList(r.unique, &snapshot, ikey)
+}
+
+// listReverse implements tableIndexTxn.
+func (r *partIndexTxn) listReverse(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	snapshot := r.tx.Clone()
+	return partListReverse(r.unique, &snapshot, ikey)
 }
 
 // lowerBound implements tableIndexTxn.
@@ -337,6 +389,12 @@ func (r *partIndexTxn) notify() {
 func (r *partIndexTxn) prefix(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
 	snapshot := r.tx.Clone()
 	return partPrefix(r.unique, &snapshot, ikey)
+}
+
+// prefixReverse implements tableIndexTxn.
+func (r *partIndexTxn) prefixReverse(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	snapshot := r.tx.Clone()
+	return partPrefixReverse(r.unique, &snapshot, ikey)
 }
 
 func (r *partIndexTxn) objectToKey(obj object) index.Key {
@@ -532,6 +590,44 @@ func (it *nonUniquePartIterator) Next() ([]byte, object, bool) {
 
 var _ tableIndexIterator = &nonUniquePartIterator{}
 
+type nonUniquePartReverseIterator struct {
+	iter         part.ReverseIterator[object]
+	prefixSearch bool
+	searchKey    []byte
+}
+
+func (it *nonUniquePartReverseIterator) All(yield func([]byte, object) bool) {
+	var visited map[string]struct{}
+	if it.prefixSearch {
+		visited = map[string]struct{}{}
+	}
+	for key, iobj := range it.iter.All {
+		nuk := nonUniqueKey(key)
+		secondaryLen := nuk.secondaryLen()
+
+		switch {
+		case !it.prefixSearch && secondaryLen != len(it.searchKey):
+			continue
+		case it.prefixSearch && secondaryLen < len(it.searchKey):
+			continue
+		}
+
+		if it.prefixSearch {
+			primary := nuk.encodedPrimary()
+			if _, found := visited[string(primary)]; found {
+				continue
+			}
+			visited[string(primary)] = struct{}{}
+		}
+
+		if !yield(key, iobj) {
+			return
+		}
+	}
+}
+
+var _ tableIndexIterator = &nonUniquePartReverseIterator{}
+
 // nonUniqueSeq returns a sequence of objects for a non-unique index.
 // Non-unique indexes work by concatenating the secondary key with the
 // primary key and then prefix searching for the items:
@@ -552,6 +648,14 @@ var _ tableIndexIterator = &nonUniquePartIterator{}
 // We yield "aaaa\0bbb4", skip "aaa\0abab3" and yield "aaaa\0ccc4".
 func newNonUniquePartIterator(iter part.Iterator[object], prefixSearch bool, searchKey []byte) tableIndexIterator {
 	return &nonUniquePartIterator{
+		iter:         iter,
+		prefixSearch: prefixSearch,
+		searchKey:    searchKey,
+	}
+}
+
+func newNonUniquePartReverseIterator(iter part.ReverseIterator[object], prefixSearch bool, searchKey []byte) tableIndexIterator {
+	return &nonUniquePartReverseIterator{
 		iter:         iter,
 		prefixSearch: prefixSearch,
 		searchKey:    searchKey,
@@ -636,3 +740,19 @@ func (s *singletonTableIndexIterator) All(yield func([]byte, object) bool) {
 }
 
 var _ tableIndexIterator = &singletonTableIndexIterator{}
+
+type partReverseIteratorAdapter struct {
+	iter part.ReverseIterator[object]
+}
+
+func (p *partReverseIteratorAdapter) All(yield func([]byte, object) bool) {
+	for key, obj := range p.iter.All {
+		if !yield(key, obj) {
+			return
+		}
+	}
+}
+
+func partReverseAll(tree part.Ops[object]) tableIndexIterator {
+	return &partReverseIteratorAdapter{iter: tree.ReverseIterator()}
+}

@@ -367,6 +367,31 @@ func TestDB_Prefix(t *testing.T) {
 	require.Equal(t, Collect(Map(iter, (*testObject).getID)), []uint64{71, 82, 99})
 }
 
+func TestDB_PrefixReverse(t *testing.T) {
+	t.Parallel()
+
+	db, table := newTestDBWithMetrics(t, &NopMetrics{}, tagsIndex)
+
+	{
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: 42, Tags: part.NewSet("a", "b")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, &testObject{ID: 82, Tags: part.NewSet("abc")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, &testObject{ID: 71, Tags: part.NewSet("ab")})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, &testObject{ID: 99, Tags: part.NewSet("abcd")})
+		require.NoError(t, err, "Insert failed")
+		txn.Commit()
+	}
+
+	txn := db.ReadTxn()
+	forward := Collect(Map(table.Prefix(txn, tagsIndex.Query("ab")), (*testObject).getID))
+	reverse := Collect(Map(table.PrefixReverse(txn, tagsIndex.Query("ab")), (*testObject).getID))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
+}
+
 func TestDB_Changes(t *testing.T) {
 	t.Parallel()
 
@@ -740,6 +765,29 @@ func TestDB_All(t *testing.T) {
 	}
 }
 
+func TestDB_AllReverse(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t)
+
+	{
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: uint64(1)})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, &testObject{ID: uint64(2)})
+		require.NoError(t, err, "Insert failed")
+		_, _, err = table.Insert(txn, &testObject{ID: uint64(3)})
+		require.NoError(t, err, "Insert failed")
+		txn.Commit()
+	}
+
+	txn := db.ReadTxn()
+	forward := Collect(Map(table.All(txn), (*testObject).getID))
+	reverse := Collect(Map(table.AllReverse(txn), (*testObject).getID))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
+}
+
 func TestDB_Modify(t *testing.T) {
 	t.Parallel()
 
@@ -941,6 +989,31 @@ func TestDB_GetList(t *testing.T) {
 	for i, item := range items {
 		require.EqualValues(t, item.ID, i*2+1, "expected items[%d].ID to equal %d", i, i*2+1)
 	}
+}
+
+func TestDB_ListReverse(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	{
+		txn := db.WriteTxn(table)
+		for i := 1; i <= 10; i++ {
+			tag := "odd"
+			if i%2 == 0 {
+				tag = "even"
+			}
+			_, _, err := table.Insert(txn, &testObject{ID: uint64(i), Tags: part.NewSet(tag)})
+			require.NoError(t, err)
+		}
+		txn.Commit()
+	}
+
+	txn := db.ReadTxn()
+	forward := Collect(Map(table.List(txn, tagsIndex.Query("odd")), (*testObject).getID))
+	reverse := Collect(Map(table.ListReverse(txn, tagsIndex.Query("odd")), (*testObject).getID))
+	slices.Reverse(forward)
+	require.Equal(t, forward, reverse)
 }
 
 func TestDB_CommitAbort(t *testing.T) {

@@ -35,6 +35,13 @@ type Table[Obj any] interface {
 	// channel that is closed when the table changes.
 	AllWatch(ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{})
 
+	// AllReverse returns a sequence of all objects in the table in reverse order.
+	AllReverse(ReadTxn) iter.Seq2[Obj, Revision]
+
+	// AllReverseWatch returns a sequence of all objects in the table in reverse
+	// order and a watch channel that is closed when the table changes.
+	AllReverseWatch(ReadTxn) (iter.Seq2[Obj, Revision], <-chan struct{})
+
 	// List returns sequence of objects matching the given query.
 	List(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
 
@@ -42,6 +49,14 @@ type Table[Obj any] interface {
 	// and a watch channel that is closed if the query results are
 	// invalidated by a write to the table.
 	ListWatch(ReadTxn, Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{})
+
+	// ListReverse returns sequence of objects matching the given query in reverse order.
+	ListReverse(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
+
+	// ListReverseWatch returns an iterator for all objects matching the given query
+	// in reverse order and a watch channel that is closed if the query results are
+	// invalidated by a write to the table.
+	ListReverseWatch(ReadTxn, Query[Obj]) (iter.Seq2[Obj, Revision], <-chan struct{})
 
 	// Get returns the first matching object for the query.
 	Get(ReadTxn, Query[Obj]) (obj Obj, rev Revision, found bool)
@@ -63,9 +78,16 @@ type Table[Obj any] interface {
 	// Prefix searches the table by key prefix.
 	Prefix(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
 
+	// PrefixReverse searches the table by key prefix in reverse order.
+	PrefixReverse(ReadTxn, Query[Obj]) iter.Seq2[Obj, Revision]
+
 	// PrefixWatch searches the table by key prefix. Returns an iterator and a watch
 	// channel that closes when the query results have become stale.
 	PrefixWatch(ReadTxn, Query[Obj]) (seq iter.Seq2[Obj, Revision], watch <-chan struct{})
+
+	// PrefixReverseWatch searches the table by key prefix in reverse order. Returns an iterator
+	// and a watch channel that closes when the query results have become stale.
+	PrefixReverseWatch(ReadTxn, Query[Obj]) (seq iter.Seq2[Obj, Revision], watch <-chan struct{})
 
 	// Changes returns an iterator for changes happening to the table.
 	// This uses the revision index to iterate over the objects in the order
@@ -411,10 +433,13 @@ type tableIndexReader interface {
 	len() int
 	get(key index.Key) (object, <-chan struct{}, bool)
 	prefix(key index.Key) (tableIndexIterator, <-chan struct{})
+	prefixReverse(key index.Key) (tableIndexIterator, <-chan struct{})
 	lowerBound(key index.Key) (tableIndexIterator, <-chan struct{})
 	lowerBoundNext(key index.Key) (func() ([]byte, object, bool), <-chan struct{})
 	list(key index.Key) (tableIndexIterator, <-chan struct{})
+	listReverse(key index.Key) (tableIndexIterator, <-chan struct{})
 	all() (tableIndexIterator, <-chan struct{})
+	allReverse() (tableIndexIterator, <-chan struct{})
 	rootWatch() <-chan struct{}
 	objectToKey(obj object) index.Key
 }
