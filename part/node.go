@@ -361,18 +361,7 @@ func (n *header[T]) findIndex(key byte) (*header[T], int) {
 		}
 		return nil, i
 	case nodeKind16:
-		n16 := n.node16()
-		size := n16.size()
-		for i := 0; i < int(size); i++ {
-			k := n16.keys[i]
-			if k >= key {
-				if k == key {
-					return n16.children[i], i
-				}
-				return nil, i
-			}
-		}
-		return nil, size
+		return n.findIndexN16(key)
 	case nodeKind48:
 		children := n.children()
 		idx := sort.Search(len(children), func(i int) bool {
