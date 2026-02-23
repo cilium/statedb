@@ -168,6 +168,10 @@ func (txn *Txn[T]) CommitOnly() *Tree[T] {
 	return t
 }
 
+// watchesReuseThreshold is the threshold at which the [txn.watches] hash
+// map is reused for next transaction.
+const watchesReuseThreshold = 64
+
 // Notify closes the watch channels of nodes that were
 // mutated as part of this transaction. Must be called before
 // Tree.Txn() is used again.
@@ -175,8 +179,12 @@ func (txn *Txn[T]) Notify() {
 	for ch := range txn.watches {
 		close(ch)
 	}
-	clear(txn.watches)
-
+	// Clear or reallocate the watches hash map for the next transaction.
+	if len(txn.watches) <= watchesReuseThreshold {
+		clear(txn.watches)
+	} else {
+		txn.watches = make(map[chan struct{}]struct{})
+	}
 	if !txn.opts.rootOnlyWatch() {
 		validateRemovedWatches(txn.oldRoot, txn.root)
 	}
