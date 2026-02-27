@@ -1662,6 +1662,81 @@ func Benchmark_findIndex16(b *testing.B) {
 	}
 }
 
+func Benchmark_find48(b *testing.B) {
+	n := &node48[bool]{
+		header:   header[bool]{},
+		children: [48]*header[bool]{},
+		leaf:     nil,
+		index:    [256]uint8{},
+	}
+	keyBytes := [48]byte{}
+	leaves := [48]leaf[bool]{}
+	for i := range 48 {
+		keyBytes[i] = byte(i)
+		leaves[i].prefixP = &keyBytes[i]
+		leaves[i].prefixLen = 1
+		leaves[i].setKind(nodeKindLeaf)
+		n.children[i] = leaves[i].self()
+		n.index[byte(i)] = uint8(i + 1)
+	}
+	n.setKind(nodeKind48)
+	n.setSize(48)
+
+	for b.Loop() {
+		n.find(48)
+	}
+}
+
+func Benchmark_findIndex48_hit(b *testing.B) {
+	n := &node48[bool]{
+		header:   header[bool]{},
+		children: [48]*header[bool]{},
+		leaf:     nil,
+		index:    [256]uint8{},
+	}
+	keyBytes := [48]byte{}
+	leaves := [48]leaf[bool]{}
+	for i := range 48 {
+		keyBytes[i] = byte(i)
+		leaves[i].prefixP = &keyBytes[i]
+		leaves[i].prefixLen = 1
+		leaves[i].setKind(nodeKindLeaf)
+		n.children[i] = leaves[i].self()
+		n.index[byte(i)] = uint8(i + 1)
+	}
+	n.setKind(nodeKind48)
+	n.setSize(48)
+
+	for b.Loop() {
+		n.findIndex(47)
+	}
+}
+
+func Benchmark_findIndex48_miss(b *testing.B) {
+	n := &node48[bool]{
+		header:   header[bool]{},
+		children: [48]*header[bool]{},
+		leaf:     nil,
+		index:    [256]uint8{},
+	}
+	keyBytes := [48]byte{}
+	leaves := [48]leaf[bool]{}
+	for i := range 48 {
+		keyBytes[i] = byte(i)
+		leaves[i].prefixP = &keyBytes[i]
+		leaves[i].prefixLen = 1
+		leaves[i].setKind(nodeKindLeaf)
+		n.children[i] = leaves[i].self()
+		n.index[byte(i)] = uint8(i + 1)
+	}
+	n.setKind(nodeKind48)
+	n.setSize(48)
+
+	for b.Loop() {
+		n.findIndex(48)
+	}
+}
+
 func Benchmark_find4(b *testing.B) {
 	n := &node4[bool]{
 		header:   header[bool]{},
