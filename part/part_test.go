@@ -1667,20 +1667,17 @@ func Benchmark_find48(b *testing.B) {
 		header:   header[bool]{},
 		children: [48]*header[bool]{},
 		leaf:     nil,
-		index:    [256]int8{},
+		index:    [256]uint8{},
 	}
 	keyBytes := [48]byte{}
 	leaves := [48]leaf[bool]{}
-	for i := range n.index {
-		n.index[i] = -1
-	}
 	for i := range 48 {
 		keyBytes[i] = byte(i)
 		leaves[i].prefixP = &keyBytes[i]
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = int8(i)
+		n.index[byte(i)] = uint8(i + 1)
 	}
 	n.setKind(nodeKind48)
 	n.setSize(48)
@@ -1695,7 +1692,7 @@ func Benchmark_findIndex48_hit(b *testing.B) {
 		header:   header[bool]{},
 		children: [48]*header[bool]{},
 		leaf:     nil,
-		index:    [256]int8{},
+		index:    [256]uint8{},
 	}
 	keyBytes := [48]byte{}
 	leaves := [48]leaf[bool]{}
@@ -1705,7 +1702,7 @@ func Benchmark_findIndex48_hit(b *testing.B) {
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = int8(i + 1)
+		n.index[byte(i)] = uint8(i + 1)
 	}
 	n.setKind(nodeKind48)
 	n.setSize(48)
@@ -1720,20 +1717,17 @@ func Benchmark_findIndex48_miss(b *testing.B) {
 		header:   header[bool]{},
 		children: [48]*header[bool]{},
 		leaf:     nil,
-		index:    [256]int8{},
+		index:    [256]uint8{},
 	}
 	keyBytes := [48]byte{}
 	leaves := [48]leaf[bool]{}
-	for i := range n.index {
-		n.index[i] = -1
-	}
 	for i := range 48 {
 		keyBytes[i] = byte(i)
 		leaves[i].prefixP = &keyBytes[i]
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = int8(i)
+		n.index[byte(i)] = uint8(i + 1)
 	}
 	n.setKind(nodeKind48)
 	n.setSize(48)

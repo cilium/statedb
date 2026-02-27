@@ -587,15 +587,15 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 		demoted.setKind(nodeKind48)
 		demoted.setSize(size - 1)
 		demoted.setTxnID(txn.txnID)
-		n48 := demoted.node48()
-		n48.leaf = parent.getLeaf()
-		children := n48.children[:0]
-		for k, n := range parent.node256().children[:] {
-			if k != index && n != nil {
-				n48.index[k] = int8(len(children))
-				children = append(children, n)
+			n48 := demoted.node48()
+			n48.leaf = parent.getLeaf()
+			children := n48.children[:0]
+			for k, n := range parent.node256().children[:] {
+				if k != index && n != nil {
+					n48.index[k] = uint8(len(children) + 1)
+					children = append(children, n)
+				}
 			}
-		}
 		newParent = demoted
 	case parent.kind() == nodeKind48 && size <= 17:
 		demoted := (&node16[T]{header: *parent}).self()
