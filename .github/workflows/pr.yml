@@ -10,6 +10,8 @@ env:
 jobs:
   test:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
     steps:
       - uses: actions/setup-go@v2
         with:
@@ -29,11 +31,11 @@ jobs:
         if: success() || failure()
         run: |
           echo '```' >> results.comment
-          
+
       - name: results
         if: success() || failure()
-        uses: thollander/actions-comment-pull-request@v2
+        uses: thollander/actions-comment-pull-request@v3
         with:
-          comment_tag: results
-          filePath: results.comment
+          comment-tag: results
+          file-path: results.comment
 
