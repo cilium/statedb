@@ -158,7 +158,7 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 
 	// Register for changes.
 	wtxn := h.db.WriteTxn(tableMeta)
-	changeIter, err := tableMeta.anyChanges(wtxn)
+	changeIter, err := AnyTable{Meta: tableMeta}.Changes(wtxn)
 	wtxn.Commit()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -171,7 +171,7 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 	defer ticker.Stop()
 
 	for {
-		changes, watch := changeIter.nextAny(h.db.ReadTxn())
+		changes, watch := changeIter.NextAny(h.db.ReadTxn())
 		for change := range changes {
 			err := enc.Encode(change)
 			if err != nil {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package statedb
+package hive
 
 import (
 	"bytes"
@@ -18,13 +18,14 @@ import (
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/script"
+	"github.com/cilium/statedb"
 	"github.com/liggitt/tabwriter"
 	"github.com/spf13/pflag"
 	"go.yaml.in/yaml/v3"
 	"golang.org/x/time/rate"
 )
 
-func ScriptCommands(db *DB) hive.ScriptCmdsOut {
+func ScriptCommands(db *statedb.DB) hive.ScriptCmdsOut {
 	return hive.NewScriptCmds(map[string]script.Cmd{
 		"db":             DBCmd(db),
 		"db/show":        ShowCmd(db),
@@ -41,7 +42,7 @@ func ScriptCommands(db *DB) hive.ScriptCmdsOut {
 	})
 }
 
-func DBCmd(db *DB) script.Cmd {
+func DBCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Describe StateDB configuration",
@@ -79,13 +80,13 @@ func DBCmd(db *DB) script.Cmd {
 		func(s *script.State, args ...string) (script.WaitFunc, error) {
 			txn := db.ReadTxn()
 			tbls := db.GetTables(txn)
-			slices.SortFunc(tbls, func(a, b TableMeta) int { return cmp.Compare(a.Name(), b.Name()) })
+			slices.SortFunc(tbls, func(a, b statedb.TableMeta) int { return cmp.Compare(a.Name(), b.Name()) })
 			w := newTabWriter(s.LogWriter())
 			fmt.Fprintf(w, "Name\tObject count\tZombie objects\tIndexes\tInitializers\tGo type\tLast WriteTxn\n")
 			for _, tbl := range tbls {
 				idxs := strings.Join(tbl.Indexes(), ", ")
 				fmt.Fprintf(w, "%s\t%d\t%d\t%s\t%v\t%s\t%s\n",
-					tbl.Name(), tbl.NumObjects(txn), tbl.numDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.typeName(), tbl.getAcquiredInfo())
+					tbl.Name(), tbl.NumObjects(txn), tbl.NumDeletedObjects(txn), idxs, tbl.PendingInitializers(txn), tbl.TypeName(), tbl.AcquiredInfo())
 			}
 			w.Flush()
 			return nil, nil
@@ -93,7 +94,7 @@ func DBCmd(db *DB) script.Cmd {
 	)
 }
 
-func InitializedCmd(db *DB) script.Cmd {
+func InitializedCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Wait until all or specific tables have been initialized",
@@ -126,7 +127,7 @@ func InitializedCmd(db *DB) script.Cmd {
 
 			if len(args) > 0 {
 				// Specific tables requested, look them up.
-				tbls = make([]TableMeta, 0, len(args))
+				tbls = make([]statedb.TableMeta, 0, len(args))
 				for _, tableName := range args {
 					found := false
 					for _, tbl := range allTbls {
@@ -163,7 +164,7 @@ func InitializedCmd(db *DB) script.Cmd {
 	)
 }
 
-func autocompleteTableName(db *DB, before []string, cur string) []string {
+func autocompleteTableName(db *statedb.DB, before []string, cur string) []string {
 	var suggestions []string
 	for _, tbl := range db.GetTables(db.ReadTxn()) {
 		if cur == "" || strings.HasPrefix(tbl.Name(), cur) {
@@ -174,7 +175,7 @@ func autocompleteTableName(db *DB, before []string, cur string) []string {
 	return suggestions
 }
 
-func autocompleteColumnNames(db *DB, args []string, cur string) []string {
+func autocompleteColumnNames(db *statedb.DB, args []string, cur string) []string {
 	if len(args) < 1 {
 		return nil
 	}
@@ -206,7 +207,7 @@ func autocompleteColumnNames(db *DB, args []string, cur string) []string {
 	return suggestions
 }
 
-func ShowCmd(db *DB) script.Cmd {
+func ShowCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Show the contents of a table",
@@ -286,7 +287,7 @@ func ShowCmd(db *DB) script.Cmd {
 		})
 }
 
-func CompareCmd(db *DB) script.Cmd {
+func CompareCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Compare table",
@@ -347,7 +348,7 @@ func CompareCmd(db *DB) script.Cmd {
 			if meta == nil {
 				return nil, fmt.Errorf("table %q not found", tableName)
 			}
-			tbl := AnyTable{Meta: meta}
+			tbl := statedb.AnyTable{Meta: meta}
 			header := tbl.TableHeader()
 
 			data, err := os.ReadFile(s.Path(fileName))
@@ -387,7 +388,7 @@ func CompareCmd(db *DB) script.Cmd {
 
 				objs, watch := tbl.AllWatch(db.ReadTxn())
 				for obj := range objs {
-					rowRaw := takeColumns(obj.(TableWritable).TableRow(), columnIndexes)
+					rowRaw := takeColumns(obj.(statedb.TableWritable).TableRow(), columnIndexes)
 					row := joinByPositions(rowRaw, columnPositions, padByTabs)
 					if grepRe != nil && !grepRe.Match([]byte(row)) {
 						continue
@@ -438,7 +439,7 @@ func CompareCmd(db *DB) script.Cmd {
 		})
 }
 
-func EmptyCmd(db *DB) script.Cmd {
+func EmptyCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Assert that given table(s) are empty",
@@ -459,7 +460,7 @@ func EmptyCmd(db *DB) script.Cmd {
 				if meta == nil {
 					return nil, fmt.Errorf("table %q not found", tableName)
 				}
-				tbl := AnyTable{Meta: meta}
+				tbl := statedb.AnyTable{Meta: meta}
 				if n := tbl.NumObjects(txn); n != 0 {
 					return nil, fmt.Errorf("table %q not empty, found %d obects", tableName, n)
 				}
@@ -468,7 +469,7 @@ func EmptyCmd(db *DB) script.Cmd {
 		})
 }
 
-func InsertCmd(db *DB) script.Cmd {
+func InsertCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Insert object into a table",
@@ -492,7 +493,7 @@ func InsertCmd(db *DB) script.Cmd {
 	)
 }
 
-func DeleteCmd(db *DB) script.Cmd {
+func DeleteCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Delete an object from the table",
@@ -517,16 +518,16 @@ func DeleteCmd(db *DB) script.Cmd {
 	)
 }
 
-func getTable(db *DB, tableName string) (*AnyTable, ReadTxn, error) {
+func getTable(db *statedb.DB, tableName string) (*statedb.AnyTable, statedb.ReadTxn, error) {
 	txn := db.ReadTxn()
 	meta := db.GetTable(txn, tableName)
 	if meta == nil {
 		return nil, nil, fmt.Errorf("table %q not found", tableName)
 	}
-	return &AnyTable{Meta: meta}, txn, nil
+	return &statedb.AnyTable{Meta: meta}, txn, nil
 }
 
-func insertOrDelete(insert bool, db *DB, s *script.State, args ...string) (script.WaitFunc, error) {
+func insertOrDelete(insert bool, db *statedb.DB, s *script.State, args ...string) (script.WaitFunc, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("expected table and path(s)")
 	}
@@ -567,7 +568,7 @@ func insertOrDelete(insert bool, db *DB, s *script.State, args ...string) (scrip
 	return nil, nil
 }
 
-func PrefixCmd(db *DB) script.Cmd {
+func PrefixCmd(db *statedb.DB) script.Cmd {
 	return queryCmd(db,
 		queryCmdPrefix,
 		"Query table by prefix",
@@ -577,7 +578,7 @@ func PrefixCmd(db *DB) script.Cmd {
 	)
 }
 
-func LowerBoundCmd(db *DB) script.Cmd {
+func LowerBoundCmd(db *statedb.DB) script.Cmd {
 	return queryCmd(db,
 		queryCmdLowerBound,
 		"Query table by lower bound search",
@@ -588,7 +589,7 @@ func LowerBoundCmd(db *DB) script.Cmd {
 	)
 }
 
-func ListCmd(db *DB) script.Cmd {
+func ListCmd(db *statedb.DB) script.Cmd {
 	return queryCmd(db,
 		queryCmdList,
 		"List objects in the table",
@@ -598,7 +599,7 @@ func ListCmd(db *DB) script.Cmd {
 	)
 }
 
-func GetCmd(db *DB) script.Cmd {
+func GetCmd(db *statedb.DB) script.Cmd {
 	return queryCmd(db,
 		queryCmdGet,
 		"Get the first matching object",
@@ -615,7 +616,7 @@ const (
 	queryCmdGet
 )
 
-func queryCmd(db *DB, query int, summary string, detail []string) script.Cmd {
+func queryCmd(db *statedb.DB, query int, summary string, detail []string) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: summary,
@@ -652,7 +653,7 @@ func queryCmd(db *DB, query int, summary string, detail []string) script.Cmd {
 	)
 }
 
-func runQueryCmd(query int, db *DB, s *script.State, args []string) (script.WaitFunc, error) {
+func runQueryCmd(query int, db *statedb.DB, s *script.State, args []string) (script.WaitFunc, error) {
 	file, err := s.Flags.GetString("out")
 	if err != nil {
 		return nil, err
@@ -743,7 +744,7 @@ func runQueryCmd(query int, db *DB, s *script.State, args []string) (script.Wait
 	}, nil
 }
 
-func WatchCmd(db *DB) script.Cmd {
+func WatchCmd(db *statedb.DB) script.Cmd {
 	return script.Command(
 		script.CmdUsage{
 			Summary: "Watch a table for changes",
@@ -789,9 +790,9 @@ func WatchCmd(db *DB) script.Cmd {
 				if err := limiter.Wait(s.Context()); err != nil {
 					break
 				}
-				changes, watch := iter.nextAny(db.ReadTxn())
+				changes, watch := iter.NextAny(db.ReadTxn())
 				for change := range changes {
-					row := change.Object.(TableWritable).TableRow()
+					row := change.Object.(statedb.TableWritable).TableRow()
 					if change.Deleted {
 						fmt.Fprintf(tw, "%s (deleted)%s", strings.Join(row, "\t"), magicStrikethroughNewline)
 					} else {
@@ -823,7 +824,7 @@ func firstOfSeq2[A, B any](it iter.Seq2[A, B]) iter.Seq2[A, B] {
 	}
 }
 
-func writeObjects(tbl *AnyTable, it iter.Seq2[any, Revision], w io.Writer, columns []string, format string) error {
+func writeObjects(tbl *statedb.AnyTable, it iter.Seq2[any, statedb.Revision], w io.Writer, columns []string, format string) error {
 	if len(columns) > 0 && format != "table" {
 		return fmt.Errorf("--columns not supported with non-table formats")
 	}
@@ -910,11 +911,6 @@ loop:
 	return columnIndexes, nil
 }
 
-// splitHeaderLine takes a header of column names separated by any
-// number of whitespaces and returns the names and their starting positions.
-// e.g. "Foo  Bar Baz" would result in ([Foo,Bar,Baz],[0,5,9]).
-// With this information we can take a row in the database and format it
-// the same way as our test data.
 func splitHeaderLine(line string) (names []string, pos []int) {
 	start := 0
 	skip := true
@@ -941,13 +937,6 @@ func splitHeaderLine(line string) (names []string, pos []int) {
 	return
 }
 
-// splitByPositions takes a "row" line and the positions of the header columns
-// and extracts the values.
-// e.g. if we have the positions [0,5,9] (from header "Foo  Bar Baz") and
-// line is "1    a   b", then we'd extract [1,a,b].
-// The whitespace on the right of the start position (e.g. "1  \t") is trimmed.
-// This of course requires that the table is properly formatted in a way that the
-// header columns are indented to fit the data exactly.
 func splitByPositions(line string, positions []int, splitByTabs bool) []string {
 	out := make([]string, 0, len(positions))
 	start := 0
@@ -974,11 +963,6 @@ func splitByPositions(line string, positions []int, splitByTabs bool) []string {
 	return out
 }
 
-// joinByPositions is the reverse of splitByPositions, it takes the columns of a
-// row and the starting positions of each and joins into a single line.
-// e.g. [1,a,b] and positions [0,5,9] expands to "1    a   b".
-// NOTE: This does not deal well with mixing tabs and spaces. The test input
-// data should preferably just use spaces.
 func joinByPositions(row []string, positions []int, padByTabs bool) string {
 	var w strings.Builder
 	prev := 0
@@ -997,10 +981,6 @@ func joinByPositions(row []string, positions []int, padByTabs bool) string {
 	return w.String()
 }
 
-// strikethroughWriter writes a line of text that is striken through
-// if the line contains the magic character at the end before \n.
-// This is used to strike through a tab-formatted line without messing
-// up with the widths of the cells.
 type strikethroughWriter struct {
 	buf           []byte
 	strikethrough bool
@@ -1008,10 +988,6 @@ type strikethroughWriter struct {
 }
 
 var (
-	// Magic character to use at the end of the line to denote that this should be
-	// striken through.
-	// This is to avoid messing up the width calculations in the tab writer, which
-	// would happen if ANSI codes were used directly.
 	magicStrikethrough        = byte('\xfe')
 	magicStrikethroughNewline = "\xfe\n"
 )
@@ -1070,7 +1046,6 @@ func (s *strikethroughWriter) Write(p []byte) (n int, err error) {
 }
 
 var (
-	// Use color red and the strikethrough escape
 	beginStrikethrough = []byte("\033[9m\033[31m")
 	endStrikethrough   = []byte("\033[0m")
 	newline            = []byte("\n")
@@ -1089,9 +1064,6 @@ func newTabWriter(out io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(out, minWidth, width, padding, padChar, flags)
 }
 
-// sortArgs sorts the arguments to bring '-arg' first. Allows mixing
-// the argument order. If e.g. key starts with '-', then it'll just
-// need to be quoted: "db/get foo '-mykey'"
 func sortedArgs(args []string) []string {
 	return slices.SortedStableFunc(
 		slices.Values(args),

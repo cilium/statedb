@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
+	statedbhive "github.com/cilium/statedb/hive"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/reconciler"
 	"golang.org/x/time/rate"
@@ -126,7 +127,7 @@ func main() {
 
 	hive := hive.New(
 		cell.SimpleHealthCell,
-		statedb.Cell,
+		statedbhive.Cell,
 		job.Cell,
 
 		cell.Module(

@@ -252,6 +252,16 @@ type TableMeta interface {
 	// increments in a write transaction on each Insert and Delete.
 	Revision(ReadTxn) Revision
 
+	// NumDeletedObjects returns the number of objects in the graveyard.
+	NumDeletedObjects(ReadTxn) int
+
+	// TypeName returns the 'Obj' type as a string.
+	TypeName() string
+
+	// AcquiredInfo returns information about the last write transaction
+	// against the table.
+	AcquiredInfo() string
+
 	// Internal unexported methods used only internally.
 	tableInternal
 }
@@ -389,7 +399,7 @@ type tableInternal interface {
 	getIndexer(name string) *anyIndexer
 	secondary() []anyIndexer               // Secondary indexers (if any)
 	sortableMutex() internal.SortableMutex // The sortable mutex for locking the table for writing
-	anyChanges(txn WriteTxn) (anyChangeIterator, error)
+	anyChanges(txn WriteTxn) (AnyChangeIterator, error)
 	typeName() string                       // Returns the 'Obj' type as string
 	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
 	numDeletedObjects(txn ReadTxn) int      // Number of objects in graveyard

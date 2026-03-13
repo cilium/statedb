@@ -4,10 +4,8 @@
 package statedb
 
 import (
-	"context"
 	"fmt"
 	"iter"
-	"log/slog"
 	"math/rand"
 	"slices"
 	"testing"
@@ -16,9 +14,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/cilium/hive"
-	"github.com/cilium/hive/cell"
-	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
 )
@@ -603,26 +598,12 @@ var (
 func BenchmarkDB_PropagationDelay(b *testing.B) {
 	const batchSize = 10
 
-	var (
-		db     *DB
-		table1 RWTable[*testObject]
-		table2 RWTable[*testObject2]
-	)
-
-	h := hive.New(
-		Cell, // DB
-		cell.Invoke(func(db_ *DB) error {
-			db = db_
-			table1 = MustNewTable(db, "test", idIndex)
-			table2 = MustNewTable(db, "test2", id2Index)
-			return nil
-		}),
-	)
-
-	log := hivetest.Logger(b, hivetest.LogLevel(slog.LevelError))
-	require.NoError(b, h.Start(log, context.TODO()))
+	db := New()
+	table1 := MustNewTable(db, "test", idIndex)
+	table2 := MustNewTable(db, "test2", id2Index)
+	require.NoError(b, db.Start())
 	b.Cleanup(func() {
-		assert.NoError(b, h.Stop(log, context.TODO()))
+		assert.NoError(b, db.Stop())
 	})
 
 	b.ResetTimer()

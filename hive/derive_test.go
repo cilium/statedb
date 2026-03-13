@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package statedb
+package hive
 
 import (
 	"context"
@@ -13,10 +13,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/cilium/hive"
+	ciliumhive "github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/job"
+	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
 )
@@ -26,12 +27,10 @@ type derived struct {
 	Deleted bool
 }
 
-// TableHeader implements TableWritable.
 func (d derived) TableHeader() []string {
 	return []string{"ID", "Deleted"}
 }
 
-// TableRow implements TableWritable.
 func (d derived) TableRow() []string {
 	return []string{
 		fmt.Sprintf("%d", d.ID),
@@ -39,9 +38,9 @@ func (d derived) TableRow() []string {
 	}
 }
 
-var _ TableWritable = derived{}
+var _ statedb.TableWritable = derived{}
 
-var derivedIdIndex = Index[derived, uint64]{
+var derivedIdIndex = statedb.Index[derived, uint64]{
 	Name: "id",
 	FromObject: func(t derived) index.KeySet {
 		return index.NewKeySet(index.Uint64(t.ID))
@@ -53,20 +52,16 @@ var derivedIdIndex = Index[derived, uint64]{
 type nopHealth struct {
 }
 
-// Degraded implements cell.Health.
 func (*nopHealth) Degraded(reason string, err error) {
 }
 
-// NewScope implements cell.Health.
 func (h *nopHealth) NewScope(name string) cell.Health {
 	return h
 }
 
-// OK implements cell.Health.
 func (*nopHealth) OK(status string) {
 }
 
-// Stopped implements cell.Health.
 func (*nopHealth) Stopped(reason string) {
 }
 
@@ -83,9 +78,9 @@ func TestDerive(t *testing.T) {
 	t.Parallel()
 
 	var (
-		db       *DB
-		inTable  RWTable[*testObject]
-		outTable RWTable[derived]
+		db       *statedb.DB
+		inTable  statedb.RWTable[*testObject]
+		outTable statedb.RWTable[derived]
 	)
 
 	transform := func(obj *testObject, deleted bool) (derived, DeriveResult) {
@@ -104,7 +99,7 @@ func TestDerive(t *testing.T) {
 		return derived{ID: obj.ID, Deleted: false}, DeriveInsert
 	}
 
-	h := hive.New(
+	h := ciliumhive.New(
 		Cell, // DB
 		job.Cell,
 		cell.Provide(newNopHealth),
@@ -112,10 +107,10 @@ func TestDerive(t *testing.T) {
 			"test", "Test",
 
 			cell.Provide(
-				func(db_ *DB) (Table[*testObject], RWTable[derived], error) {
+				func(db_ *statedb.DB) (statedb.Table[*testObject], statedb.RWTable[derived], error) {
 					db = db_
-					inTable = MustNewTable(db, "test", idIndex)
-					outTable = MustNewTable(db, "derived", derivedIdIndex)
+					inTable = statedb.MustNewTable(db, "test", idIndex)
+					outTable = statedb.MustNewTable(db, "derived", derivedIdIndex)
 					return inTable, outTable, nil
 				},
 				job.Registry.NewGroup,
@@ -129,8 +124,7 @@ func TestDerive(t *testing.T) {
 
 	getDerived := func() []derived {
 		txn := db.ReadTxn()
-		objs := Collect(outTable.All(txn))
-		// Log so we can trace the failed eventually calls
+		objs := statedb.Collect(outTable.All(txn))
 		t.Logf("derived: %+v", objs)
 		return objs
 	}
