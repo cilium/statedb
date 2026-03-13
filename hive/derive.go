@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package statedb
+package hive
 
 import (
 	"context"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
+	"github.com/cilium/statedb"
 )
 
 type DeriveResult int
@@ -24,9 +25,9 @@ type DeriveParams[In, Out any] struct {
 
 	Lifecycle cell.Lifecycle
 	JobGroup  job.Group
-	DB        *DB
-	InTable   Table[In]
-	OutTable  RWTable[Out]
+	DB        *statedb.DB
+	InTable   statedb.Table[In]
+	OutTable  statedb.RWTable[Out]
 }
 
 // Derive constructs and registers a job to transform objects from the input table to the

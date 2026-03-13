@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
+	statedbhive "github.com/cilium/statedb/hive"
 	"github.com/cilium/statedb/reconciler"
 )
 
@@ -107,7 +108,7 @@ var Hive = hive.NewWithOptions(
 		},
 	},
 
-	statedb.Cell,
+	statedbhive.Cell,
 	job.Cell,
 
 	cell.SimpleHealthCell,

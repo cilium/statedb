@@ -1,13 +1,10 @@
-module github.com/cilium/statedb
+module github.com/cilium/statedb/part
 
 go 1.25
 
 require (
-	github.com/cilium/statedb/part v0.0.0
 	github.com/stretchr/testify v1.8.4
-	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.3
-	golang.org/x/time v0.5.0
 )
 
 require (
@@ -18,5 +15,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/cilium/statedb/part => ./part

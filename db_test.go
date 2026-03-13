@@ -5,13 +5,11 @@ package statedb
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"expvar"
 	"fmt"
 	"iter"
-	"log/slog"
 	"net/netip"
 	"runtime"
 	"slices"
@@ -24,12 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
-	"github.com/cilium/hive"
-	"github.com/cilium/hive/cell"
-	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
-	"github.com/cilium/stream"
 )
 
 // Amount of time to wait for the watch channel to close in tests
@@ -149,28 +143,12 @@ func newTestDB(t testing.TB, secondaryIndexers ...Indexer[*testObject]) (*DB, RW
 }
 
 func newTestDBWithMetrics(t testing.TB, metrics Metrics, secondaryIndexers ...Indexer[*testObject]) (*DB, RWTable[*testObject]) {
-	var (
-		db    *DB
-		table RWTable[*testObject]
-	)
-
-	h := hive.New(
-		cell.Provide(func() Metrics { return metrics }),
-		Cell, // DB
-		cell.Invoke(func(db_ *DB) {
-			table = newTestObjectTable(t, db_, "test", secondaryIndexers...)
-
-			// Use a short GC interval.
-			db_.setGCRateLimitInterval(50 * time.Millisecond)
-
-			db = db_
-		}),
-	)
-
-	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
-	require.NoError(t, h.Start(log, context.TODO()))
+	db := New(WithMetrics(metrics))
+	table := newTestObjectTable(t, db, "test", secondaryIndexers...)
+	db.setGCRateLimitInterval(50 * time.Millisecond)
+	require.NoError(t, db.Start())
 	t.Cleanup(func() {
-		assert.NoError(t, h.Stop(log, context.TODO()))
+		assert.NoError(t, db.Stop())
 	})
 	return db, table
 }
@@ -615,50 +593,6 @@ func TestDB_Changes(t *testing.T) {
 	}
 	require.Equal(t, 1, count)
 	wtxn.Abort()
-}
-
-func TestDB_Observable(t *testing.T) {
-	t.Parallel()
-
-	db, table, _ := newTestDB(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	events := stream.ToChannel(ctx, Observable(db, table))
-
-	txn := db.WriteTxn(table)
-	_, hadOld, err := table.Insert(txn, &testObject{ID: uint64(1)})
-	require.False(t, hadOld, "Expected no prior object")
-	require.NoError(t, err, "Insert failed")
-	_, hadOld, err = table.Insert(txn, &testObject{ID: uint64(2)})
-	require.False(t, hadOld, "Expected no prior object")
-	require.NoError(t, err, "Insert failed")
-	txn.Commit()
-
-	event := <-events
-	require.False(t, event.Deleted, "expected insert")
-	require.Equal(t, uint64(1), event.Object.ID)
-	event = <-events
-	require.False(t, event.Deleted, "expected insert")
-	require.Equal(t, uint64(2), event.Object.ID)
-
-	txn = db.WriteTxn(table)
-	_, hadOld, err = table.Delete(txn, &testObject{ID: uint64(1)})
-	require.True(t, hadOld, "Expected that object was deleted")
-	require.NoError(t, err, "Delete failed")
-	_, hadOld, err = table.Delete(txn, &testObject{ID: uint64(2)})
-	require.True(t, hadOld, "Expected that object was deleted")
-	require.NoError(t, err, "Delete failed")
-	txn.Commit()
-
-	event = <-events
-	require.True(t, event.Deleted, "expected delete")
-	require.Equal(t, uint64(1), event.Object.ID)
-	event = <-events
-	require.True(t, event.Deleted, "expected delete")
-	require.Equal(t, uint64(2), event.Object.ID)
-
-	cancel()
-	ev, ok := <-events
-	require.False(t, ok, "expected channel to close, got event: %+v", ev)
 }
 
 func TestDB_NumObjects(t *testing.T) {
