@@ -48,12 +48,37 @@ func BenchmarkDB_WriteTxn_100(b *testing.B) {
 	benchmarkDB_WriteTxn_batch(b, 100)
 }
 
+func BenchmarkDB_WriteTxn_100_Pebble(b *testing.B) {
+	benchmarkDB_WriteTxn_batch_pebble(b, 100)
+}
+
 func BenchmarkDB_WriteTxn_1000(b *testing.B) {
 	benchmarkDB_WriteTxn_batch(b, 1000)
 }
 
 func benchmarkDB_WriteTxn_batch(b *testing.B, batchSize int) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+	n := b.N
+	b.ResetTimer()
+
+	for n > 0 {
+		txn := db.WriteTxn(table)
+		toWrite := min(n, batchSize)
+		for i := range toWrite {
+			_, _, err := table.Insert(txn, &testObject{ID: uint64(i)})
+			if err != nil {
+				b.Fatalf("Insert error: %s", err)
+			}
+		}
+		txn.Commit()
+		n -= toWrite
+	}
+
+	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func benchmarkDB_WriteTxn_batch_pebble(b *testing.B, batchSize int) {
+	db, table := newPebbleBenchmarkDB(b)
 	n := b.N
 	b.ResetTimer()
 
@@ -411,6 +436,33 @@ func BenchmarkDB_RandomLookup(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_RandomLookup_Pebble(b *testing.B) {
+	db, table := newPebbleBenchmarkDB(b)
+
+	wtxn := db.WriteTxn(table)
+	queries := []Query[*testObject]{}
+	for i := range numObjectsToInsert {
+		queries = append(queries, pebbleIDIndex.Query(uint64(i)))
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+	rand.Shuffle(numObjectsToInsert, func(i, j int) {
+		queries[i], queries[j] = queries[j], queries[i]
+	})
+
+	for b.Loop() {
+		txn := db.ReadTxn()
+		for _, q := range queries {
+			_, _, ok := table.Get(txn, q)
+			if !ok {
+				b.Fatal("object not found")
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_SequentialLookup(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	wtxn := db.WriteTxn(table)
@@ -419,6 +471,29 @@ func BenchmarkDB_SequentialLookup(b *testing.B) {
 	for i := range numObjectsToInsert {
 		queries = append(queries, idIndex.Query(uint64(i)))
 		ids = append(ids, uint64(i))
+		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
+		require.NoError(b, err)
+	}
+	wtxn.Commit()
+
+	txn := db.ReadTxn()
+	for b.Loop() {
+		for _, q := range queries {
+			_, _, ok := table.Get(txn, q)
+			if !ok {
+				b.Fatalf("Object not found")
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func BenchmarkDB_SequentialLookup_Pebble(b *testing.B) {
+	db, table := newPebbleBenchmarkDB(b)
+	wtxn := db.WriteTxn(table)
+	queries := []Query[*testObject]{}
+	for i := range numObjectsToInsert {
+		queries = append(queries, pebbleIDIndex.Query(uint64(i)))
 		_, _, err := table.Insert(wtxn, &testObject{ID: uint64(i)})
 		require.NoError(b, err)
 	}
@@ -535,6 +610,21 @@ func BenchmarkDB_FullIteration_Get(b *testing.B) {
 		}
 	}
 	b.ReportMetric(float64(numObjectsIteration*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func newPebbleBenchmarkDB(b *testing.B) (*DB, RWTable[*testObject]) {
+	b.Helper()
+	db := New(
+		WithMetrics(&NopMetrics{}),
+		WithPebble(b.TempDir(), nil),
+	)
+	require.NoError(b, db.Start())
+	b.Cleanup(func() {
+		require.NoError(b, db.Stop())
+	})
+	table, err := NewTable(db, "benchmark-pebble", pebbleIDIndex)
+	require.NoError(b, err)
+	return db, table
 }
 
 func BenchmarkDB_FullIteration_Get_Secondary(b *testing.B) {
