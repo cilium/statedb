@@ -450,7 +450,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// the root lock.
 	currentRoot := *db.root.Load()
 	if txn.pebbleBatch != nil {
-		if err := txn.pebbleBatch.batch.Commit(pebble.NoSync); err != nil {
+		if err := txn.pebbleBatch.batch.Commit(pebble.Sync); err != nil {
 			db.mu.Unlock()
 			panic(err)
 		}
