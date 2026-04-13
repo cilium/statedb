@@ -208,3 +208,103 @@ func TestMultipleReconcilers(t *testing.T) {
 
 	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
 }
+
+func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
+	var table statedb.RWTable[*multiStatusObject]
+
+	var ops1, ops2 multiMockOps
+	var db *statedb.DB
+	metrics := reconciler.NewUnpublishedExpVarMetrics()
+
+	hive := hive.New(
+		statedb.Cell,
+		job.Cell,
+		cell.Provide(
+			cell.NewSimpleHealth,
+			func() reconciler.Metrics {
+				return metrics
+			},
+			func(r job.Registry, h cell.Health) job.Group {
+				return r.NewGroup(h)
+			},
+		),
+		cell.Invoke(func(db_ *statedb.DB) (err error) {
+			db = db_
+			table, err = statedb.NewTable(db, "objects", multiStatusIndex)
+			return err
+		}),
+		cell.Module("test", "Reconcilers in one module",
+			cell.Invoke(func(params reconciler.Params) error {
+				_, err := reconciler.Register(
+					params,
+					table,
+					(*multiStatusObject).Clone,
+					func(obj *multiStatusObject, s reconciler.Status) *multiStatusObject {
+						obj.Statuses = obj.Statuses.Set("left", s)
+						return obj
+					},
+					func(obj *multiStatusObject) reconciler.Status {
+						return obj.Statuses.Get("left")
+					},
+					&ops1,
+					nil,
+					reconciler.WithName("left"),
+					reconciler.WithRetry(time.Hour, time.Hour),
+				)
+				return err
+			}),
+			cell.Invoke(func(params reconciler.Params) error {
+				_, err := reconciler.Register(
+					params,
+					table,
+					(*multiStatusObject).Clone,
+					func(obj *multiStatusObject, s reconciler.Status) *multiStatusObject {
+						obj.Statuses = obj.Statuses.Set("right", s)
+						return obj
+					},
+					func(obj *multiStatusObject) reconciler.Status {
+						return obj.Statuses.Get("right")
+					},
+					&ops2,
+					nil,
+					reconciler.WithName("right"),
+					reconciler.WithRetry(time.Hour, time.Hour),
+				)
+				return err
+			}),
+		),
+	)
+
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+	require.NoError(t, hive.Start(log, context.TODO()), "Start")
+
+	wtxn := db.WriteTxn(table)
+	table.Insert(wtxn, &multiStatusObject{
+		ID:       1,
+		Statuses: reconciler.NewStatusSet(),
+	})
+	wtxn.Commit()
+
+	for {
+		obj, _, watch, found := table.GetWatch(db.ReadTxn(), multiStatusIndex.Query(1))
+		if found &&
+			obj.Statuses.Get("left").Kind == reconciler.StatusKindDone &&
+			obj.Statuses.Get("right").Kind == reconciler.StatusKindDone {
+
+			break
+		}
+		<-watch
+	}
+
+	require.NotNil(t, metrics.ReconciliationCountVar.Get("test/left"))
+	require.NotNil(t, metrics.ReconciliationCountVar.Get("test/right"))
+	require.NotNil(t, metrics.ReconciliationCurrentErrorsVar.Get("test/left"))
+	require.NotNil(t, metrics.ReconciliationCurrentErrorsVar.Get("test/right"))
+	assert.NotEqual(t, "0", metrics.ReconciliationCountVar.Get("test/left").String())
+	assert.NotEqual(t, "0", metrics.ReconciliationCountVar.Get("test/right").String())
+	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/left").String())
+	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/right").String())
+	assert.Nil(t, metrics.ReconciliationCountVar.Get("test"))
+
+	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
+}
