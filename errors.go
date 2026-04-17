@@ -45,6 +45,25 @@ var (
 	// it to exists. This error is not returned by Insert or Delete, but may be returned by
 	// CompareAndSwap or CompareAndDelete.
 	ErrObjectNotFound = errors.New("object not found")
+
+	// ErrRestoreAlreadyCalled indicates that Restore() was invoked more than once.
+	ErrRestoreAlreadyCalled = errors.New("restore already called")
+
+	// ErrRestoreAfterUse indicates that Restore() was invoked after the database
+	// had already been populated in-memory.
+	ErrRestoreAfterUse = errors.New("restore called after database use")
+
+	// ErrPebbleIndexKeyCount indicates that a PebbleIndex produced zero or more than
+	// one key for an object.
+	ErrPebbleIndexKeyCount = errors.New("pebble index requires exactly one key per object")
+
+	// ErrPebbleIndexConflict indicates that a unique PebbleIndex row is already
+	// owned by another object.
+	ErrPebbleIndexConflict = errors.New("pebble index conflict")
+
+	// ErrPebbleNotConfigured indicates that a PebbleIndex was used without
+	// configuring the DB with WithPebble().
+	ErrPebbleNotConfigured = errors.New("pebble backend not configured")
 )
 
 // tableError wraps an error with the table name.

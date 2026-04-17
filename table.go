@@ -81,15 +81,18 @@ func NewTableAny[Obj any](
 	}
 
 	toAnyIndexer := func(idx Indexer[Obj], pos int) anyIndexer {
+		_, isPebble := any(idx).(pebbleIndexer)
 		return anyIndexer{
 			name:          idx.indexName(),
 			fromString:    idx.fromString,
 			newTableIndex: idx.newTableIndex,
+			isPebble:      isPebble,
 			pos:           pos,
 		}
 	}
 
 	table := &genTable[Obj]{
+		db:                   db,
 		table:                tableName,
 		smu:                  internal.NewSortableMutex(),
 		primaryAnyIndexer:    toAnyIndexer(primaryIndexer, PrimaryIndexPos),
@@ -166,6 +169,7 @@ func validateTableName(name string) error {
 }
 
 type genTable[Obj any] struct {
+	db                   *DB
 	pos                  int
 	table                TableName
 	smu                  internal.SortableMutex
@@ -243,10 +247,23 @@ func (t *genTable[Obj]) tableEntry() *tableEntry {
 	entry.indexes = make([]tableIndex, len(t.indexPositions))
 
 	primaryIndex := t.primaryIndexer.newTableIndex()
+	if binder, ok := primaryIndex.(interface {
+		bind(*DB, TableMeta, string, tableIndex)
+	}); ok {
+		binder.bind(t.db, t, t.primaryIndexer.indexName(), primaryIndex)
+		entry.hasPebble = true
+	}
 	entry.indexes[PrimaryIndexPos] = primaryIndex
 
 	for _, indexer := range t.secondaryAnyIndexers {
-		entry.indexes[t.indexPos(indexer.name)] = indexer.newTableIndex()
+		idx := indexer.newTableIndex()
+		if binder, ok := idx.(interface {
+			bind(*DB, TableMeta, string, tableIndex)
+		}); ok {
+			binder.bind(t.db, t, indexer.name, primaryIndex)
+			entry.hasPebble = true
+		}
+		entry.indexes[t.indexPos(indexer.name)] = idx
 	}
 	// For revision indexes we only need to watch the root.
 	entry.indexes[RevisionIndexPos] = newRevisionIndex()
