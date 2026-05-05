@@ -214,6 +214,7 @@ func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
 
 	var ops1, ops2 multiMockOps
 	var db *statedb.DB
+	var health *cell.SimpleHealth
 	metrics := reconciler.NewUnpublishedExpVarMetrics()
 
 	hive := hive.New(
@@ -228,8 +229,8 @@ func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
 				return r.NewGroup(h)
 			},
 		),
-		cell.Invoke(func(db_ *statedb.DB) (err error) {
-			db = db_
+		cell.Invoke(func(db_ *statedb.DB, h *cell.SimpleHealth) (err error) {
+			db, health = db_, h
 			table, err = statedb.NewTable(db, "objects", multiStatusIndex)
 			return err
 		}),
@@ -305,6 +306,11 @@ func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
 	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/left").String())
 	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/right").String())
 	assert.Nil(t, metrics.ReconciliationCountVar.Get("test"))
+
+	assert.NotNil(t, health.GetChild("job-reconcile-left"))
+	assert.NotNil(t, health.GetChild("job-refresh-left"))
+	assert.NotNil(t, health.GetChild("job-reconcile-right"))
+	assert.NotNil(t, health.GetChild("job-refresh-right"))
 
 	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
 }
