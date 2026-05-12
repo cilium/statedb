@@ -73,6 +73,49 @@ func (t *testObject) MarshalJSON() ([]byte, error) {
 	return json.Marshal(t2)
 }
 
+func (t *testObject) MarshalBinary() ([]byte, error) {
+	payload := struct {
+		ID     uint64   `json:"id"`
+		Key    string   `json:"key,omitempty"`
+		Prefix string   `json:"prefix,omitempty"`
+		Tags   []string `json:"tags,omitempty"`
+	}{
+		ID:     t.ID,
+		Key:    t.Key,
+		Prefix: "",
+		Tags:   slices.Collect(t.Tags.All()),
+	}
+	if t.Prefix.IsValid() {
+		payload.Prefix = t.Prefix.String()
+	}
+	return json.Marshal(payload)
+}
+
+func (t *testObject) UnmarshalBinary(data []byte) error {
+	var payload struct {
+		ID     uint64   `json:"id"`
+		Key    string   `json:"key,omitempty"`
+		Prefix string   `json:"prefix,omitempty"`
+		Tags   []string `json:"tags,omitempty"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	var prefix netip.Prefix
+	if payload.Prefix != "" {
+		parsed, err := netip.ParsePrefix(payload.Prefix)
+		if err != nil {
+			return err
+		}
+		prefix = parsed
+	}
+	t.ID = payload.ID
+	t.Key = payload.Key
+	t.Prefix = prefix
+	t.Tags = part.NewSet(payload.Tags...)
+	return nil
+}
+
 func (t *testObject) TableHeader() []string {
 	return []string{"ID", "Key", "Prefix", "Tags"}
 }
@@ -123,6 +166,30 @@ var (
 			return Just(obj.Prefix)
 		},
 		Unique: true,
+	}
+
+	pebbleIDIndex = PebbleIndex[*testObject, uint64]{
+		Name: "pebble-id",
+		FromObject: func(t *testObject) index.KeySet {
+			return index.NewKeySet(index.Uint64(t.ID))
+		},
+		FromKey:    index.Uint64,
+		FromString: index.Uint64String,
+		NewObj: func() *testObject {
+			return &testObject{}
+		},
+	}
+
+	pebbleKeyIndex = PebbleIndex[*testObject, string]{
+		Name: "pebble-key",
+		FromObject: func(t *testObject) index.KeySet {
+			return index.NewKeySet(index.String(t.Key))
+		},
+		FromKey:    index.String,
+		FromString: index.FromString,
+		NewObj: func() *testObject {
+			return &testObject{}
+		},
 	}
 )
 
@@ -983,6 +1050,166 @@ func TestDB_CommitAbort(t *testing.T) {
 	require.Equal(t, rev, newRev, "expected unchanged revision")
 	require.EqualValues(t, obj.ID, 123, "expected obj.ID to equal 123")
 	require.Zero(t, obj.Tags.Len(), "expected no tags")
+}
+
+func newPebbleTestTable(t testing.TB, path string, primary Indexer[*testObject], secondary ...Indexer[*testObject]) (*DB, RWTable[*testObject]) {
+	t.Helper()
+	db := New(WithPebble(path, nil))
+	require.NoError(t, db.Start())
+	table, err := NewTable(db, "pebble-test", primary, secondary...)
+	require.NoError(t, err)
+	return db, table
+}
+
+func TestDB_PebbleSecondaryRestore(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir()
+	db, table := newPebbleTestTable(t, path, idIndex, pebbleKeyIndex)
+
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1, Key: "one", Tags: part.NewSet("a")})
+	require.NoError(t, err)
+	_, _, err = table.Insert(wtxn, &testObject{ID: 2, Key: "two", Tags: part.NewSet("b")})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+
+	_, rev, found := table.Get(rtxn, idIndex.Query(2))
+	require.True(t, found)
+
+	require.NoError(t, db.Stop())
+
+	db2 := New(WithPebble(path, nil))
+	require.NoError(t, db2.Start())
+	defer func() { require.NoError(t, db2.Stop()) }()
+
+	table2, err := NewTable(db2, "pebble-test", idIndex, pebbleKeyIndex)
+	require.NoError(t, err)
+
+	rtxn2 := db2.ReadTxn()
+	_, _, found = table2.Get(rtxn2, idIndex.Query(1))
+	require.False(t, found)
+	obj, _, found := table2.Get(rtxn2, pebbleKeyIndex.Query("two"))
+	require.True(t, found)
+	require.EqualValues(t, 2, obj.ID)
+
+	require.NoError(t, db2.Restore())
+
+	rtxn2 = db2.ReadTxn()
+	obj, restoredRev, found := table2.Get(rtxn2, idIndex.Query(2))
+	require.True(t, found)
+	require.EqualValues(t, 2, obj.ID)
+	require.Equal(t, rev, restoredRev)
+	require.EqualValues(t, 2, table2.NumObjects(rtxn2))
+}
+
+func TestDB_PebblePrimaryRestore(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir()
+	db, table := newPebbleTestTable(t, path, pebbleIDIndex, keyIndex)
+
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 7, Key: "seven", Tags: part.NewSet("x")})
+	require.NoError(t, err)
+	_, _, err = table.Insert(wtxn, &testObject{ID: 8, Key: "eight", Tags: part.NewSet("y")})
+	require.NoError(t, err)
+	committed := wtxn.Commit()
+	_, rev, found := table.Get(committed, pebbleIDIndex.Query(8))
+	require.True(t, found)
+
+	require.NoError(t, db.Stop())
+
+	db2 := New(WithPebble(path, nil))
+	require.NoError(t, db2.Start())
+	defer func() { require.NoError(t, db2.Stop()) }()
+
+	table2, err := NewTable(db2, "pebble-test", pebbleIDIndex, keyIndex)
+	require.NoError(t, err)
+	require.NoError(t, db2.Restore())
+
+	rtxn := db2.ReadTxn()
+	obj, restoredRev, found := table2.Get(rtxn, pebbleIDIndex.Query(8))
+	require.True(t, found)
+	require.EqualValues(t, 8, obj.ID)
+	require.Equal(t, rev, restoredRev)
+
+	obj, _, found = table2.Get(rtxn, keyIndex.Query("seven"))
+	require.True(t, found)
+	require.EqualValues(t, 7, obj.ID)
+}
+
+func TestDB_PebbleIndexConflict(t *testing.T) {
+	t.Parallel()
+
+	db, table := newPebbleTestTable(t, t.TempDir(), idIndex, pebbleKeyIndex)
+	defer func() { require.NoError(t, db.Stop()) }()
+
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1, Key: "same"})
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	defer wtxn.Abort()
+	_, _, err = table.Insert(wtxn, &testObject{ID: 2, Key: "same"})
+	require.ErrorIs(t, err, ErrPebbleIndexConflict)
+
+	rtxn := db.ReadTxn()
+	_, _, found := table.Get(rtxn, idIndex.Query(2))
+	require.False(t, found)
+	obj, _, found := table.Get(rtxn, idIndex.Query(1))
+	require.True(t, found)
+	require.EqualValues(t, 1, obj.ID)
+}
+
+func TestDB_PebbleWriteTxnVisibility(t *testing.T) {
+	t.Parallel()
+
+	db, table := newPebbleTestTable(t, t.TempDir(), pebbleIDIndex, pebbleKeyIndex)
+	defer func() { require.NoError(t, db.Stop()) }()
+
+	wtxn := db.WriteTxn(table)
+	defer wtxn.Abort()
+	_, _, err := table.Insert(wtxn, &testObject{ID: 42, Key: "forty-two"})
+	require.NoError(t, err)
+
+	obj, _, found := table.Get(wtxn, pebbleIDIndex.Query(42))
+	require.True(t, found)
+	require.EqualValues(t, 42, obj.ID)
+
+	items := Collect(table.List(wtxn, pebbleKeyIndex.Query("forty-two")))
+	require.Len(t, items, 1)
+	require.EqualValues(t, 42, items[0].ID)
+
+	items = Collect(table.Prefix(wtxn, pebbleKeyIndex.Query("forty")))
+	require.Len(t, items, 1)
+
+	items = Collect(table.LowerBound(wtxn, pebbleIDIndex.Query(40)))
+	require.Len(t, items, 1)
+
+	items = Collect(table.All(wtxn))
+	require.Len(t, items, 1)
+}
+
+func TestDB_RestoreGuards(t *testing.T) {
+	t.Parallel()
+
+	path := t.TempDir()
+	db, _ := newPebbleTestTable(t, path, idIndex, pebbleKeyIndex)
+	defer func() { require.NoError(t, db.Stop()) }()
+
+	require.NoError(t, db.Restore())
+	require.ErrorIs(t, db.Restore(), ErrRestoreAlreadyCalled)
+
+	db2, table2 := newPebbleTestTable(t, t.TempDir(), idIndex, pebbleKeyIndex)
+	defer func() { require.NoError(t, db2.Stop()) }()
+	wtxn := db2.WriteTxn(table2)
+	_, _, err := table2.Insert(wtxn, &testObject{ID: 1, Key: "used"})
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.ErrorIs(t, db2.Restore(), ErrRestoreAfterUse)
+
 }
 
 func TestDB_CompareAndSwap_CompareAndDelete(t *testing.T) {

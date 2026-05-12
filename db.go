@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/cilium/statedb/internal"
+	"github.com/cockroachdb/pebble"
 )
 
 // DB provides an in-memory transaction database built on top of immutable radix
@@ -97,6 +98,8 @@ type dbState struct {
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
 	writeTxnPool        sync.Pool
+	pebble              *pebbleState
+	restoreCalled       atomic.Bool
 }
 
 type dbRoot = []*tableEntry
@@ -104,12 +107,21 @@ type dbRoot = []*tableEntry
 type Option func(*opts)
 
 type opts struct {
-	metrics Metrics
+	metrics       Metrics
+	pebblePath    string
+	pebbleOptions *pebble.Options
 }
 
 func WithMetrics(m Metrics) Option {
 	return func(o *opts) {
 		o.metrics = m
+	}
+}
+
+func WithPebble(path string, options *pebble.Options) Option {
+	return func(o *opts) {
+		o.pebblePath = path
+		o.pebbleOptions = options
 	}
 }
 
@@ -130,6 +142,7 @@ func New(options ...Option) *DB {
 		dbState: &dbState{
 			metrics:             opts.metrics,
 			gcRateLimitInterval: defaultGCRateLimitInterval,
+			pebble:              newPebbleState(opts.pebblePath, opts.pebbleOptions),
 		},
 	}
 	db.updateWriteTxnPoolLocked(0)
@@ -155,6 +168,12 @@ func (db *DB) updateWriteTxnPoolLocked(numTables int) {
 func (db *DB) registerTable(table TableMeta) error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	if tableHasPebble(table) {
+		if err := db.pebble.ensureOpen(); err != nil {
+			return err
+		}
+	}
 
 	root := slices.Clone(*db.root.Load())
 
@@ -232,6 +251,17 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 		table.acquired(txn)
 	}
 
+	for _, table := range txn.tableEntries {
+		if table.locked && table.hasPebble {
+			pebbleDB := db.pebble.get()
+			if pebbleDB == nil {
+				panic(ErrPebbleNotConfigured)
+			}
+			txn.pebbleBatch = &pebbleBatchHandle{batch: pebbleDB.NewIndexedBatch()}
+			break
+		}
+	}
+
 	// Sort the table names so they always appear ordered in metrics.
 	sort.Strings(txn.tableNames)
 	db.metrics.WriteTxnTotalAcquisition(
@@ -280,6 +310,9 @@ func (db *DB) Start() error {
 func (db *DB) Stop() error {
 	db.cancel()
 	<-db.gcExited
+	if db.pebble != nil {
+		return db.pebble.close()
+	}
 	return nil
 }
 
@@ -318,4 +351,19 @@ func reuseSlice[T any](s []T, length int) []T {
 	}
 	s = s[:length]
 	return s
+}
+
+func tableHasPebble(table TableMeta) bool {
+	if table == nil {
+		return false
+	}
+	if primary := table.getIndexer(""); primary != nil && primary.isPebble {
+		return true
+	}
+	for _, idx := range table.secondary() {
+		if idx.isPebble {
+			return true
+		}
+	}
+	return false
 }

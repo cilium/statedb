@@ -239,7 +239,7 @@ func partLowerBound(unique bool, tree part.Ops[object], key index.Key) tableInde
 }
 
 // txn implements tableIndex.
-func (r *partIndex) txn() (tableIndexTxn, bool) {
+func (r *partIndex) txn(_ tableIndexTxnContext) (tableIndexTxn, bool) {
 	txn := &r.partIndexTxn
 	txn.tx = r.tree.Txn()
 	return txn, true
@@ -344,7 +344,7 @@ func (r *partIndexTxn) objectToKey(obj object) index.Key {
 }
 
 // reindex implements tableIndexTxn.
-func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) {
+func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) error {
 	unique := r.unique
 	var newKeys index.KeySet
 	if new.revision != 0 {
@@ -375,9 +375,10 @@ func (r *partIndexTxn) reindex(idKey index.Key, old object, new object) {
 			},
 		)
 	}
+	return nil
 }
 
-func (r *partIndexTxn) txn() (tableIndexTxn, bool) {
+func (r *partIndexTxn) txn(_ tableIndexTxnContext) (tableIndexTxn, bool) {
 	return r, false
 }
 

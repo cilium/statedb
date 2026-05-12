@@ -14,6 +14,7 @@ import (
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/internal"
+	"github.com/cockroachdb/pebble"
 )
 
 // writeTxnHandle wraps the state. We need a separate heap allocated object wrapping
@@ -37,6 +38,7 @@ type writeTxnState struct {
 	numTxns      int                      // number of index transactions opened
 	smus         internal.SortableMutexes // the (sorted) table locks
 	tableNames   []string
+	pebbleBatch  *pebbleBatchHandle
 
 	revKey [8]byte // reusable array for storing the serialized revision key when deleting
 }
@@ -84,7 +86,7 @@ func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableInde
 		return nil, tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
 	indexEntry := table.indexes[indexPos]
-	itxn, created := indexEntry.txn()
+	itxn, created := indexEntry.txn(txn)
 	if created {
 		table.indexes[indexPos] = itxn
 		txn.numTxns++
@@ -134,7 +136,11 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	// Update the primary index first
 	obj := object{data: newData, revision: revision}
 	idIndexTxn := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
-	idKey := idIndexTxn.objectToKey(obj)
+	idKey, err := objectKeyForWrite(idIndexTxn, obj)
+	if err != nil {
+		table.revision = oldRevision
+		return object{}, false, nil, err
+	}
 
 	var (
 		oldObj    object
@@ -182,6 +188,23 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 		}
 	}
 
+	secondaries := meta.secondary()
+	for i, indexer := range secondaries {
+		indexTxn := txn.mustIndexWriteTxn(meta, indexer.pos)
+		if err := indexTxn.reindex(idKey, oldObj, obj); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				txn.mustIndexWriteTxn(meta, secondaries[j].pos).reindex(idKey, obj, oldObj)
+			}
+			if oldExists {
+				idIndexTxn.insert(idKey, oldObj)
+			} else {
+				idIndexTxn.delete(idKey)
+			}
+			table.revision = oldRevision
+			return oldObj, oldExists, watch, err
+		}
+	}
+
 	// Update revision index
 	revIndexTxn := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
 	if oldExists {
@@ -198,12 +221,6 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 			binary.BigEndian.PutUint64(txn.revKey[:], old.revision)
 			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).delete(txn.revKey[:])
 		}
-	}
-
-	// Then update secondary indexes
-	for _, indexer := range meta.secondary() {
-		indexTxn := txn.mustIndexWriteTxn(meta, indexer.pos)
-		indexTxn.reindex(idKey, oldObj, obj)
 	}
 
 	return oldObj, oldExists, watch, nil
@@ -249,7 +266,11 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	// We assume that "data" has only enough defined fields to
 	// compute the primary key.
 	idIndex := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
-	idKey := idIndex.objectToKey(object{data: data})
+	idKey, err := objectKeyForWrite(idIndex, object{data: data})
+	if err != nil {
+		table.revision = oldRevision
+		return object{}, false, err
+	}
 	obj, existed := idIndex.delete(idKey)
 	if !existed {
 		return object{}, false, nil
@@ -265,14 +286,21 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 		}
 	}
 
+	secondaries := meta.secondary()
+	for i, indexer := range secondaries {
+		if err := txn.mustIndexWriteTxn(meta, indexer.pos).reindex(idKey, obj, object{}); err != nil {
+			for j := i - 1; j >= 0; j-- {
+				txn.mustIndexWriteTxn(meta, secondaries[j].pos).reindex(idKey, object{}, obj)
+			}
+			idIndex.insert(idKey, obj)
+			table.revision = oldRevision
+			return object{}, false, err
+		}
+	}
+
 	// Remove the object from the revision index.
 	binary.BigEndian.PutUint64(txn.revKey[:], obj.revision)
 	txn.mustIndexWriteTxn(meta, RevisionIndexPos).delete(txn.revKey[:])
-
-	// Then update secondary indexes.
-	for _, indexer := range meta.secondary() {
-		txn.mustIndexWriteTxn(meta, indexer.pos).reindex(idKey, obj, object{})
-	}
 
 	// And finally insert the object into the graveyard.
 	if txn.hasDeleteTrackers(meta) {
@@ -294,6 +322,10 @@ func (handle *writeTxnHandle) returnToPool() {
 	txn.oldRoot = nil
 	txn.tableEntries = nil
 	txn.numTxns = 0
+	if txn.pebbleBatch != nil {
+		txn.pebbleBatch.batch.Close()
+		txn.pebbleBatch = nil
+	}
 	clear(txn.smus)
 	txn.smus = txn.smus[:0]
 	clear(txn.tableNames)
@@ -375,20 +407,33 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
 	txnToNotify := make([]tableIndexTxnNotify, 0, txn.numTxns)
+	type deferredIndexCommit struct {
+		tablePos int
+		indexPos int
+		index    tableIndex
+	}
+	deferredCommits := make([]deferredIndexCommit, 0, txn.numTxns)
 	for pos := range txn.tableEntries {
 		table := txn.tableEntries[pos]
 		if !table.locked {
 			continue
 		}
 		for i, idx := range table.indexes {
-			var txn tableIndexTxnNotify
-			table.indexes[i], txn = idx.commit()
-			if txn != nil {
-				txnToNotify = append(txnToNotify, txn)
+			if _, ok := idx.(interface{ commitDeferred() bool }); ok {
+				deferredCommits = append(deferredCommits, deferredIndexCommit{
+					tablePos: pos,
+					indexPos: i,
+					index:    idx,
+				})
+				continue
+			}
+			var idxTxn tableIndexTxnNotify
+			table.indexes[i], idxTxn = idx.commit()
+			if idxTxn != nil {
+				txnToNotify = append(txnToNotify, idxTxn)
 			}
 		}
 
-		// Update metrics
 		name := table.meta.Name()
 		db.metrics.GraveyardObjectCount(name, table.numDeletedObjects())
 		db.metrics.ObjectCount(name, table.numObjects())
@@ -404,6 +449,22 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// load it again and modify the latest version that we now have immobilised by
 	// the root lock.
 	currentRoot := *db.root.Load()
+	if txn.pebbleBatch != nil {
+		if err := txn.pebbleBatch.batch.Commit(pebble.Sync); err != nil {
+			db.mu.Unlock()
+			panic(err)
+		}
+		txn.pebbleBatch.batch.Close()
+		txn.pebbleBatch = nil
+	}
+	for _, deferred := range deferredCommits {
+		var idxTxn tableIndexTxnNotify
+		txn.tableEntries[deferred.tablePos].indexes[deferred.indexPos], idxTxn = deferred.index.commit()
+		if idxTxn != nil {
+			txnToNotify = append(txnToNotify, idxTxn)
+		}
+	}
+
 	root := txn.tableEntries
 	var initChansToClose []chan struct{}
 
@@ -465,4 +526,17 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 func (txn *writeTxnState) WriteJSON(w io.Writer, tables ...string) error {
 	rtxn := readTxn(txn.tableEntries)
 	return rtxn.WriteJSON(w, tables...)
+}
+
+func objectKeyForWrite(idx tableIndexReader, obj object) (index.Key, error) {
+	if validator, ok := idx.(interface {
+		validatedObjectToKey(object) (index.Key, error)
+	}); ok {
+		return validator.validatedObjectToKey(obj)
+	}
+	return idx.objectToKey(obj), nil
+}
+
+func (txn *writeTxnState) getPebbleBatch() *pebbleBatchHandle {
+	return txn.pebbleBatch
 }
