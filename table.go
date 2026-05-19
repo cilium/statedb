@@ -575,7 +575,7 @@ func (t *genTable[Obj]) Changes(txn WriteTxn) (ChangeIterator[Obj], error) {
 // anyChanges returns the anyChangeIterator. Used for implementing the /changes HTTP
 // API where we can't work with concrete object types as they're not known and thus
 // uninstantiatable.
-func (t *genTable[Obj]) anyChanges(txn WriteTxn) (anyChangeIterator, error) {
+func (t *genTable[Obj]) anyChanges(txn WriteTxn) (AnyChangeIterator, error) {
 	iter, err := t.Changes(txn)
 	if err != nil {
 		return nil, err
@@ -591,6 +591,10 @@ func (t *genTable[Obj]) typeName() string {
 	var zero Obj
 	return fmt.Sprintf("%T", zero)
 }
+
+func (t *genTable[Obj]) NumDeletedObjects(txn ReadTxn) int { return t.numDeletedObjects(txn) }
+func (t *genTable[Obj]) TypeName() string                  { return t.typeName() }
+func (t *genTable[Obj]) AcquiredInfo() string              { return t.getAcquiredInfo() }
 
 func (t *genTable[Obj]) tableHeader() []string {
 	return t.tableHeaderFunc()

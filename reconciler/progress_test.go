@@ -20,6 +20,7 @@ import (
 	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
+	statedbhive "github.com/cilium/statedb/hive"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/reconciler"
 	"github.com/stretchr/testify/require"
@@ -123,7 +124,7 @@ func TestWaitUntilReconciled(t *testing.T) {
 		ops := newWaitOps()
 
 		hive := hive.New(
-			statedb.Cell,
+			statedbhive.Cell,
 			job.Cell,
 			cell.Provide(
 				cell.NewSimpleHealth,

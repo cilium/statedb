@@ -234,7 +234,7 @@ func (it *changeIterator[Obj]) Next(txn ReadTxn) (seq iter.Seq2[Change[Obj], Rev
 
 // changesAny is for implementing the /changes HTTP API where the concrete object
 // type is not known.
-func (it *changeIterator[Obj]) nextAny(txn ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{}) {
+func (it *changeIterator[Obj]) NextAny(txn ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{}) {
 	seq, watch := it.Next(txn)
 
 	return func(yield func(Change[any], Revision) bool) {
@@ -259,6 +259,7 @@ func (it *changeIterator[Obj]) Close() {
 	it.dt = nil
 }
 
-type anyChangeIterator interface {
-	nextAny(ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{})
+// AnyChangeIterator is an untyped change iterator returned by [AnyTable.Changes].
+type AnyChangeIterator interface {
+	NextAny(ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{})
 }

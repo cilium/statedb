@@ -1,0 +1,8 @@
+go 1.25
+
+use (
+	.
+	./hive
+	./part
+	./reconciler
+)

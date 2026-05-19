@@ -20,7 +20,6 @@ import (
 	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/cilium/statedb/index"
-	"github.com/cilium/statedb/internal"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -211,9 +210,9 @@ func (s Status) IsPendingOrRefreshing() bool {
 
 func (s Status) String() string {
 	if s.Kind == StatusKindError {
-		return fmt.Sprintf("Error: %s (%s ago)", s.GetError(), internal.PrettySince(s.UpdatedAt))
+		return fmt.Sprintf("Error: %s (%s ago)", s.GetError(), prettySince(s.UpdatedAt))
 	}
-	return fmt.Sprintf("%s (%s ago)", s.Kind, internal.PrettySince(s.UpdatedAt))
+	return fmt.Sprintf("%s (%s ago)", s.Kind, prettySince(s.UpdatedAt))
 }
 
 func (s Status) GetError() string {
@@ -370,7 +369,7 @@ func (s StatusSet) String() string {
 		b.WriteString(strings.Join(done, " "))
 	}
 	b.WriteString(" (")
-	b.WriteString(internal.PrettySince(updatedAt))
+	b.WriteString(prettySince(updatedAt))
 	b.WriteString(" ago)")
 	return b.String()
 }

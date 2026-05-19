@@ -110,7 +110,7 @@ func (t AnyTable) queryIndex(txn ReadTxn, index string, key string) (tableIndexR
 	return itxn, rawKey, err
 }
 
-func (t AnyTable) Changes(txn WriteTxn) (anyChangeIterator, error) {
+func (t AnyTable) Changes(txn WriteTxn) (AnyChangeIterator, error) {
 	return t.Meta.anyChanges(txn)
 }
 

@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/hive/script"
 	"github.com/cilium/hive/script/scripttest"
 	"github.com/cilium/statedb"
+	statedbhive "github.com/cilium/statedb/hive"
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/reconciler"
 	"github.com/stretchr/testify/assert"
@@ -45,7 +46,7 @@ func newEngine(t testing.TB, args []string) *script.Engine {
 	expVarMetrics := reconciler.NewUnpublishedExpVarMetrics()
 
 	hive := hive.New(
-		statedb.Cell,
+		statedbhive.Cell,
 		job.Cell,
 
 		cell.Provide(

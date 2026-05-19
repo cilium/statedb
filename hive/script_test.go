@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-package statedb
+package hive
 
 import (
 	"context"
@@ -10,11 +10,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cilium/hive"
+	ciliumhive "github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/script"
 	"github.com/cilium/hive/script/scripttest"
+	"github.com/cilium/statedb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -22,11 +23,11 @@ import (
 func TestScript(t *testing.T) {
 	t.Parallel()
 	log := hivetest.Logger(t)
-	h := hive.New(
+	h := ciliumhive.New(
 		Cell, // DB
-		cell.Invoke(func(db *DB) {
-			_ = newTestObjectTable(t, db, "test1", tagsIndex, prefixIndex)
-			_ = newTestObjectTable(t, db, "test2", tagsIndex, prefixIndex)
+		cell.Invoke(func(db *statedb.DB) {
+			_ = newTestTable(t, db, "test1", tagsIndex, prefixIndex)
+			_ = newTestTable(t, db, "test2", tagsIndex, prefixIndex)
 		}),
 	)
 	t.Cleanup(func() {

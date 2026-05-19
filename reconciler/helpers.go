@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 )
 
 var closedWatchChannel = func() <-chan struct{} {
@@ -24,6 +25,31 @@ const (
 
 func omittedError(n int) error {
 	return fmt.Errorf("%d further errors omitted", n)
+}
+
+func prettySince(t time.Time) string {
+	return prettyDuration(time.Since(t))
+}
+
+func prettyDuration(d time.Duration) string {
+	ago := float64(d) / float64(time.Microsecond)
+	if ago < 1000.0 {
+		return fmt.Sprintf("%.1fus", ago)
+	}
+	ago /= 1000.0
+	if ago < 1000.0 {
+		return fmt.Sprintf("%.1fms", ago)
+	}
+	ago /= 1000.0
+	if ago < 60.0 {
+		return fmt.Sprintf("%.1fs", ago)
+	}
+	ago /= 60.0
+	if ago < 60.0 {
+		return fmt.Sprintf("%.1fm", ago)
+	}
+	ago /= 60.0
+	return fmt.Sprintf("%.1fh", ago)
 }
 
 func joinErrors(errs []error) error {
