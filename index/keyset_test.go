@@ -35,3 +35,16 @@ func TestKeySet_Multi(t *testing.T) {
 	})
 	require.ElementsMatch(t, vs, [][]byte{[]byte("baz"), []byte("quux")})
 }
+
+func TestKeySet_DuplicateKeys(t *testing.T) {
+	ks := index.NewKeySet([]byte("baz"), []byte("quux"), []byte("baz"))
+	require.EqualValues(t, "baz", ks.First())
+	require.True(t, ks.Exists([]byte("baz")))
+	require.True(t, ks.Exists([]byte("quux")))
+	require.False(t, ks.Exists([]byte("foo")))
+	vs := [][]byte{}
+	ks.Foreach(func(bs index.Key) {
+		vs = append(vs, bs)
+	})
+	require.ElementsMatch(t, vs, [][]byte{[]byte("baz"), []byte("quux"), []byte("baz")})
+}
