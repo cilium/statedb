@@ -383,7 +383,7 @@ func CompareCmd(db *DB) script.Cmd {
 				joined := joinByPositions(columnNames, columnPositions, false)
 				fmt.Fprintf(w, "  %s\n", joined)
 				var actual strings.Builder
-				fmt.Fprintf(&actual, "  %s\n", joined)
+				fmt.Fprintf(&actual, "%s\n", joined)
 
 				objs, watch := tbl.AllWatch(db.ReadTxn())
 				for obj := range objs {
