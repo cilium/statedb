@@ -259,7 +259,7 @@ func (l lpmIndex) commit() (tableIndex, tableIndexTxnNotify) {
 }
 
 // txn implements tableIndex.
-func (l lpmIndex) txn() (tableIndexTxn, bool) {
+func (l lpmIndex) txn(_ tableIndexTxnContext) (tableIndexTxn, bool) {
 	if l.prevTxn != nil {
 		return &lpmIndexTxn{
 			index: l,
@@ -371,7 +371,7 @@ func (l *lpmIndexTxn) prefix(key index.Key) (tableIndexIterator, <-chan struct{}
 }
 
 // reindex implements tableIndexTxn.
-func (l *lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
+func (l *lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) error {
 	var newKeys index.KeySet
 	if new.revision != 0 {
 		newKeys = l.index.objectToKeys(new)
@@ -387,6 +387,7 @@ func (l *lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
 			}
 		})
 	}
+	return nil
 }
 
 // rootWatch implements tableIndexTxn.
@@ -394,7 +395,7 @@ func (l *lpmIndexTxn) rootWatch() <-chan struct{} {
 	return l.index.watch
 }
 
-func (l *lpmIndexTxn) txn() (tableIndexTxn, bool) {
+func (l *lpmIndexTxn) txn(_ tableIndexTxnContext) (tableIndexTxn, bool) {
 	return l, false
 }
 

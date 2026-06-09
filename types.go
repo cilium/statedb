@@ -4,6 +4,7 @@
 package statedb
 
 import (
+	"encoding"
 	"io"
 	"iter"
 
@@ -371,6 +372,8 @@ type anyIndexer struct {
 
 	newTableIndex func() tableIndex
 
+	isPebble bool
+
 	// pos is the position of the index in [tableEntry.indexes]
 	pos int
 }
@@ -421,7 +424,7 @@ type tableIndexReader interface {
 
 type tableIndex interface {
 	tableIndexReader
-	txn() (tableIndexTxn, bool)
+	txn(tableIndexTxnContext) (tableIndexTxn, bool)
 	commit() (idx tableIndex, txn tableIndexTxnNotify)
 }
 
@@ -431,11 +434,15 @@ type tableIndexTxn interface {
 	insert(key index.Key, obj object) (old object, hadOld bool, watch <-chan struct{})
 	modify(key index.Key, obj object, mod func(old, new object) object) (old object, new object, hadOld bool, watch <-chan struct{})
 	delete(key index.Key) (old object, hadOld bool)
-	reindex(primaryKey index.Key, old object, new object)
+	reindex(primaryKey index.Key, old object, new object) error
 }
 
 type tableIndexTxnNotify interface {
 	notify()
+}
+
+type tableIndexTxnContext interface {
+	getPebbleBatch() *pebbleBatchHandle
 }
 
 type tableInitialization struct {
@@ -469,8 +476,20 @@ type tableEntry struct {
 	// as the revision of the last inserted object.
 	revision uint64
 
+	// hasPebble marks that the table contains at least one Pebble-backed index.
+	hasPebble bool
+
 	// locked marks the table locked for writes.
 	locked bool
+}
+
+type binaryObject interface {
+	encoding.BinaryMarshaler
+	encoding.BinaryUnmarshaler
+}
+
+type pebbleIndexer interface {
+	isPebbleIndex()
 }
 
 func (t *tableEntry) numObjects() int {
