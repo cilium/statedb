@@ -1,5 +1,5 @@
 #
-# This file is invoked by 'script_test.go' and tests the StateDB script commands 
+# This file is invoked by 'script_test.go' and tests the StateDB script commands
 # defined in 'script.go'.
 #
 
@@ -139,6 +139,13 @@ db/cmp test1 objs.table
 db/lowerbound --index=id --delete test1 2
 db/cmp test1 obj1.table
 
+# Retrieve a full DB dump
+db/dump
+cmp stdout dump-expected.json
+
+db/dump -o dump-actual.json
+cmp dump-actual.json dump-expected.json
+
 # Tables
 db
 
@@ -199,3 +206,12 @@ ID   Tags
 2    baz, foo
 -- empty.table --
 ID   Tags
+-- dump-expected.json --
+{
+  "test1": [
+    {"ID":1,"Tags":["bar","foo"]}
+  ],
+  "test2": [
+    {"ID":2,"Tags":["baz","foo"]}
+  ]
+}
