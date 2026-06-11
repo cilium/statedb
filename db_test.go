@@ -835,6 +835,27 @@ func TestDB_Revision(t *testing.T) {
 	require.Equal(t, writeRevision, startRevision+1, "revision incremented on Insert")
 	readRevision = table.Revision(db.ReadTxn())
 	require.Equal(t, writeRevision, readRevision, "committed transaction changed revision")
+
+	// Committed no-op deletes do not increment the revision.
+	txn = db.WriteTxn(table)
+	_, hadOld, err := table.Delete(txn, &testObject{ID: 2})
+	require.NoError(t, err)
+	require.False(t, hadOld)
+	writeRevision = table.Revision(txn)
+	txn.Commit()
+	require.Equal(t, readRevision, writeRevision, "missing Delete did not increment revision")
+	readRevision = table.Revision(db.ReadTxn())
+	require.Equal(t, readRevision, readRevision, "committed missing Delete did not change revision")
+
+	// Committed deletes of existing objects increment the revision.
+	txn = db.WriteTxn(table)
+	_, hadOld, err = table.Delete(txn, &testObject{ID: 1})
+	require.NoError(t, err)
+	require.True(t, hadOld)
+	writeRevision = table.Revision(txn)
+	txn.Commit()
+	require.Equal(t, readRevision+1, writeRevision, "revision incremented on Delete")
+	require.Equal(t, writeRevision, table.Revision(db.ReadTxn()), "committed found Delete changed revision")
 }
 
 func TestDB_GetList(t *testing.T) {
