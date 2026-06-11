@@ -172,6 +172,13 @@ db/cmp test1 objs.table
 db/lowerbound --index=id --delete test1 2
 db/cmp test1 obj1.table
 
+# Retrieve a full DB dump
+db/dump
+cmp stdout dump-expected.json
+
+db/dump -o dump-actual.json
+cmp dump-actual.json dump-expected.json
+
 # Tables
 db
 
@@ -236,3 +243,12 @@ ID   Key   Prefix        Tags
 2          10.1.2.3/32   baz, foo
 -- empty.table --
 ID   Key   Prefix   Tags
+-- dump-expected.json --
+{
+  "test1": [
+    {"ID":1,"Tags":["bar","foo"]}
+  ],
+  "test2": [
+    {"ID":2,"Tags":["baz","foo"]}
+  ]
+}
