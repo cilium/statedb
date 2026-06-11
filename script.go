@@ -61,7 +61,7 @@ func DBCmd(db *DB) script.Cmd {
 				"",
 				"The individual tables can be manipulated and inspected with the",
 				"other commands. See 'help -v db/show' etc. for detailed help.",
-				"Here is some examples to get you statred:",
+				"Here is some examples to get you started:",
 				"",
 				"> db/show example",
 				"Name   X",
