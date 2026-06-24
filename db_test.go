@@ -197,17 +197,17 @@ func TestDB_Insert_SamePointer(t *testing.T) {
 	require.NoError(t, err, "Insert failed")
 	txn.Commit()
 
-	defer func() {
-		txn.Abort()
-		if err := recover(); err == nil {
-			t.Fatalf("Inserting the same object again didn't fatal")
-		}
-	}()
-
 	// Try to insert the same again. This will panic.
 	txn = db.WriteTxn(table)
-	_, _, err = table.Insert(txn, obj)
-	require.NoError(t, err, "Insert failed")
+	defer txn.Abort()
+	require.PanicsWithError(
+		t,
+		"Insert() of the same object (*statedb.testObject) back into the table. Is the immutable object being mutated?",
+		func() {
+			_, _, err = table.Insert(txn, obj)
+			require.NoError(t, err, "Insert failed")
+		},
+	)
 }
 
 func TestDB_InsertWatch(t *testing.T) {

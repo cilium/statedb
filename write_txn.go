@@ -156,7 +156,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 		if val.Kind() == reflect.Pointer {
 			oldVal := reflect.ValueOf(oldObj.data)
 			if val.UnsafePointer() == oldVal.UnsafePointer() {
-				panic(fmt.Sprintf(
+				panic(fmt.Errorf(
 					"Insert() of the same object (%T) back into the table. Is the immutable object being mutated?",
 					obj.data))
 			}
