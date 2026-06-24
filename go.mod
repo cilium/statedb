@@ -1,17 +1,17 @@
 module github.com/cilium/statedb
 
-go 1.25
+go 1.25.0
 
 require (
-	github.com/cilium/hive v1.0.0
-	github.com/cilium/stream v0.0.0-20240209152734-a0792b51812d
+	github.com/cilium/hive v1.0.4
+	github.com/cilium/stream v0.0.1
 	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de
-	github.com/spf13/cobra v1.8.0
-	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.8.4
+	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
+	github.com/stretchr/testify v1.11.1
 	go.uber.org/goleak v1.3.0
-	go.yaml.in/yaml/v3 v3.0.3
-	golang.org/x/time v0.5.0
+	go.yaml.in/yaml/v3 v3.0.4
+	golang.org/x/time v0.15.0
 )
 
 require (
