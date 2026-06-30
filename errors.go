@@ -20,6 +20,9 @@ var (
 	// ErrPrimaryIndexNotUnique indicates that the primary index for the table is not marked unique.
 	ErrPrimaryIndexNotUnique = errors.New("primary index not unique")
 
+	// ErrEmptySecondaryIndexName indicates that a secondary index for the table has an empty name.
+	ErrEmptySecondaryIndexName = errors.New("secondary index name is empty")
+
 	// ErrDuplicateIndex indicates that the table has two or more indexers that share the same name.
 	ErrDuplicateIndex = errors.New("index name already in use")
 

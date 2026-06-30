@@ -116,6 +116,9 @@ func NewTableAny[Obj any](
 	indexPos := SecondaryIndexStartPos
 	for _, indexer := range secondaryIndexers {
 		name := indexer.indexName()
+		if name == "" {
+			return nil, tableError(tableName, ErrEmptySecondaryIndexName)
+		}
 		anyIndexer := toAnyIndexer(indexer, indexPos)
 		table.secondaryAnyIndexers = append(table.secondaryAnyIndexers, anyIndexer)
 		table.indexPositions[indexPos] = name

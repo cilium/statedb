@@ -1491,6 +1491,15 @@ func Test_validateTableName(t *testing.T) {
 	}
 }
 
+func Test_validateSecondaryIndexName(t *testing.T) {
+	db := New()
+	emptyNameIndex := tagsIndex
+	emptyNameIndex.Name = ""
+
+	_, err := NewTable(db, "test", idIndex, emptyNameIndex)
+	require.ErrorIs(t, err, ErrEmptySecondaryIndexName)
+}
+
 func Test_getAcquiredInfo(t *testing.T) {
 	t.Parallel()
 	db, table, _ := newTestDB(t)
