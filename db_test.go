@@ -1386,6 +1386,47 @@ func TestDB_EmptyKeys(t *testing.T) {
 
 }
 
+func TestDB_EmptyIndexName(t *testing.T) {
+	t.Parallel()
+
+	// A prefix index whose FromObject yields no prefixes, so that
+	// QueryFromObject returns a zero-value Query{} with an empty index name.
+	emptyPrefixIndex := NetIPPrefixIndex[*testObject]{
+		Name:   "empty-prefix",
+		Unique: true,
+		FromObject: func(obj *testObject) iter.Seq[netip.Prefix] {
+			return func(yield func(netip.Prefix) bool) {}
+		},
+	}
+
+	db, table := newTestDBWithMetrics(t, &NopMetrics{}, emptyPrefixIndex)
+
+	txn := db.WriteTxn(table)
+	_, _, err := table.Insert(txn, &testObject{ID: 1})
+	require.NoError(t, err, "Insert")
+	txn.Commit()
+
+	// QueryFromObject returns an empty-index query when the object yields no
+	// keys. Querying with it must fall back to the primary index instead of
+	// panicking.
+	q := emptyPrefixIndex.QueryFromObject(&testObject{ID: 1})
+	rtxn := db.ReadTxn()
+	require.NotPanics(t, func() {
+		table.Get(rtxn, q)
+		for range table.List(rtxn, q) {
+		}
+		for range table.Prefix(rtxn, q) {
+		}
+		for range table.LowerBound(rtxn, q) {
+		}
+	})
+
+	// An explicitly empty-index query resolves to the primary index.
+	obj, _, ok := table.Get(rtxn, Query[*testObject]{key: index.Uint64(1)})
+	require.True(t, ok, "Get")
+	require.Equal(t, uint64(1), obj.ID)
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
@@ -1489,6 +1530,15 @@ func Test_validateTableName(t *testing.T) {
 		_, err := NewTable(db, name, idIndex)
 		require.Error(t, err, "NewTable(%s)", name)
 	}
+}
+
+func Test_validateSecondaryIndexName(t *testing.T) {
+	db := New()
+	emptyNameIndex := tagsIndex
+	emptyNameIndex.Name = ""
+
+	_, err := NewTable(db, "test", idIndex, emptyNameIndex)
+	require.ErrorIs(t, err, ErrEmptySecondaryIndexName)
 }
 
 func Test_getAcquiredInfo(t *testing.T) {
