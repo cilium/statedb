@@ -60,6 +60,7 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	bs, err := json.Marshal(&queryReq)
 	if err != nil {
 		errChanSend <- err
+		close(errChanSend)
 		return
 	}
 
@@ -67,6 +68,7 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url.String(), bytes.NewBuffer(bs))
 	if err != nil {
 		errChanSend <- err
+		close(errChanSend)
 		return
 	}
 	req.Header.Add("Content-Type", "application/json")
@@ -75,9 +77,15 @@ func (t *RemoteTable[Obj]) query(ctx context.Context, lowerBound bool, q Query[O
 	resp, err := t.client.Do(req)
 	if err != nil {
 		errChanSend <- err
+		close(errChanSend)
 		return
 	}
-	return remoteGetSeq[Obj](json.NewDecoder(resp.Body), errChanSend), errChan
+	if resp.StatusCode != http.StatusOK {
+		errChanSend <- decodeHTTPError(resp)
+		close(errChanSend)
+		return
+	}
+	return remoteGetSeq[Obj](resp.Body, json.NewDecoder(resp.Body), errChanSend), errChan
 }
 
 func (t *RemoteTable[Obj]) Get(ctx context.Context, q Query[Obj]) (iter.Seq2[Obj, Revision], <-chan error) {
@@ -95,16 +103,17 @@ type responseObject[Obj any] struct {
 	Err string `json:"err,omitempty"`
 }
 
-func remoteGetSeq[Obj any](dec *json.Decoder, errChan chan error) iter.Seq2[Obj, Revision] {
+func remoteGetSeq[Obj any](body io.ReadCloser, dec *json.Decoder, errChan chan error) iter.Seq2[Obj, Revision] {
 	return func(yield func(Obj, Revision) bool) {
+		defer body.Close()
+		defer close(errChan)
 		for {
 			var resp responseObject[Obj]
 			err := dec.Decode(&resp)
 			errString := ""
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					close(errChan)
-					break
+					return
 				}
 				errString = "Decode error: " + err.Error()
 			} else {
@@ -112,10 +121,10 @@ func remoteGetSeq[Obj any](dec *json.Decoder, errChan chan error) iter.Seq2[Obj,
 			}
 			if errString != "" {
 				errChan <- errors.New(errString)
-				break
+				return
 			}
 			if !yield(resp.Obj, resp.Rev) {
-				break
+				return
 			}
 		}
 	}
@@ -143,11 +152,17 @@ func (t *RemoteTable[Obj]) Changes(ctx context.Context) (seq iter.Seq2[Change[Ob
 		close(errChanSend)
 		return
 	}
-	return remoteChangeSeq[Obj](json.NewDecoder(resp.Body), errChanSend), errChan
+	if resp.StatusCode != http.StatusOK {
+		errChanSend <- decodeHTTPError(resp)
+		close(errChanSend)
+		return emptySeq2[Change[Obj], Revision](), errChan
+	}
+	return remoteChangeSeq[Obj](resp.Body, json.NewDecoder(resp.Body), errChanSend), errChan
 }
 
-func remoteChangeSeq[Obj any](dec *json.Decoder, errChan chan error) iter.Seq2[Change[Obj], Revision] {
+func remoteChangeSeq[Obj any](body io.ReadCloser, dec *json.Decoder, errChan chan error) iter.Seq2[Change[Obj], Revision] {
 	return func(yield func(Change[Obj], Revision) bool) {
+		defer body.Close()
 		defer close(errChan)
 		for {
 			var change Change[Obj]
@@ -169,4 +184,19 @@ func remoteChangeSeq[Obj any](dec *json.Decoder, errChan chan error) iter.Seq2[C
 			}
 		}
 	}
+}
+
+func emptySeq2[A, B any]() iter.Seq2[A, B] {
+	return func(func(A, B) bool) {}
+}
+
+func decodeHTTPError(resp *http.Response) error {
+	defer resp.Body.Close()
+
+	var queryErr QueryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&queryErr); err == nil && queryErr.Err != "" {
+		return fmt.Errorf("HTTP %s: %s", resp.Status, queryErr.Err)
+	}
+
+	return fmt.Errorf("HTTP %s", resp.Status)
 }

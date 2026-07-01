@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -194,4 +196,77 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 
 	err = <-errs
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func Test_http_RemoteTable_Changes_missing_table_returns_error(t *testing.T) {
+	_, _, ts := httpFixture(t)
+
+	base, err := url.Parse(ts.URL)
+	require.NoError(t, err, "ParseURL")
+
+	remoteTable := NewRemoteTable[*testObject](base, "missing")
+
+	changes, errs := remoteTable.Changes(context.Background())
+	var got []Change[*testObject]
+	for change := range changes {
+		got = append(got, change)
+	}
+
+	require.Empty(t, got)
+	err = <-errs
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `Table "missing" not found`)
+}
+
+func Test_http_RemoteTable_Get_closes_body_when_stopped_early(t *testing.T) {
+	base, err := url.Parse("http://example.com")
+	require.NoError(t, err, "ParseURL")
+
+	remoteTable := NewRemoteTable[*testObject](base, "test")
+	body := &trackingReadCloser{
+		ReadCloser: io.NopCloser(strings.NewReader(
+			`{"rev":1,"obj":{"ID":1}}` + "\n" +
+				`{"rev":2,"obj":{"ID":2}}` + "\n",
+		)),
+	}
+	remoteTable.client.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       body,
+			Header:     make(http.Header),
+		}, nil
+	})
+
+	seq, errs := remoteTable.Get(context.Background(), idIndex.Query(1))
+	seq(func(obj *testObject, rev Revision) bool {
+		require.EqualValues(t, 1, obj.ID)
+		require.EqualValues(t, 1, rev)
+		return false
+	})
+
+	require.True(t, body.closed.Load(), "response body should be closed when iteration stops early")
+	select {
+	case err, ok := <-errs:
+		require.False(t, ok)
+		require.Nil(t, err)
+	default:
+		t.Fatal("error channel should be closed when iteration stops early")
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+type trackingReadCloser struct {
+	io.ReadCloser
+	closed atomic.Bool
+}
+
+func (trc *trackingReadCloser) Close() error {
+	trc.closed.Store(true)
+	return trc.ReadCloser.Close()
 }
