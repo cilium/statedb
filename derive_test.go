@@ -86,6 +86,7 @@ func TestDerive(t *testing.T) {
 		db       *DB
 		inTable  RWTable[*testObject]
 		outTable RWTable[derived]
+		markInit func(WriteTxn)
 	)
 
 	transform := func(obj *testObject, deleted bool) (derived, DeriveResult) {
@@ -116,6 +117,11 @@ func TestDerive(t *testing.T) {
 					db = db_
 					inTable = MustNewTable(db, "test", idIndex)
 					outTable = MustNewTable(db, "derived", derivedIdIndex)
+
+					wtx := db.WriteTxn(inTable)
+					markInit = inTable.RegisterInitializer(wtx, "init")
+					wtx.Commit()
+
 					return inTable, outTable, nil
 				},
 				job.Registry.NewGroup,
@@ -155,6 +161,22 @@ func TestDerive(t *testing.T) {
 		10*time.Millisecond,
 		"expected 1 & 2 to be derived",
 	)
+
+	// The In table is not yet initialized; the Out one should likewise not.
+	init, _ := outTable.Initialized(db.ReadTxn())
+	require.False(t, init, "Out table should not be initialized before In one is")
+
+	// Initialize the In table, and assert that the Out one is also marked as initialized.
+	wtxn = db.WriteTxn(inTable)
+	markInit(wtxn)
+	wtxn.Commit()
+
+	_, initch := outTable.Initialized(db.ReadTxn())
+	select {
+	case <-initch:
+	case <-time.After(1 * time.Second):
+		require.FailNow(t, "Out table should be initialized once the In one is")
+	}
 
 	// Delete 2 (testing DeriveUpdate)
 	wtxn = db.WriteTxn(inTable)
