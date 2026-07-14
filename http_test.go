@@ -4,8 +4,11 @@
 package statedb
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -114,6 +117,86 @@ func Test_http_runQuery(t *testing.T) {
 	}
 }
 
+func Test_http_query(t *testing.T) {
+	_, table, ts := httpFixture(t)
+
+	tests := []struct {
+		name       string
+		index      string
+		key        index.Key
+		lowerBound bool
+		status     int
+		objects    int
+		err        string
+	}{
+		{
+			name:    "primary index",
+			index:   idIndex.Name,
+			key:     index.Uint64(1),
+			status:  http.StatusOK,
+			objects: 1,
+		},
+		{
+			name:    "empty index uses primary index",
+			key:     index.Uint64(1),
+			status:  http.StatusOK,
+			objects: 1,
+		},
+		{
+			name:       "revision index",
+			index:      RevisionIndex,
+			key:        index.Uint64(0),
+			lowerBound: true,
+			status:     http.StatusOK,
+			objects:    4,
+		},
+		{
+			name:   "unknown index",
+			index:  "unknown",
+			status: http.StatusBadRequest,
+			err:    `Index "unknown" not found`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			queryReq := QueryRequest{
+				Key:        base64.StdEncoding.EncodeToString(tt.key),
+				Table:      table.Name(),
+				Index:      tt.index,
+				LowerBound: tt.lowerBound,
+			}
+			body, err := json.Marshal(queryReq)
+			require.NoError(t, err)
+
+			req, err := http.NewRequest(http.MethodGet, ts.URL+"/query", bytes.NewReader(body))
+			require.NoError(t, err)
+			resp, err := http.DefaultClient.Do(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, tt.status, resp.StatusCode)
+
+			var responses []QueryResponse
+			dec := json.NewDecoder(resp.Body)
+			for {
+				var response QueryResponse
+				err := dec.Decode(&response)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				require.NoError(t, err)
+				responses = append(responses, response)
+			}
+
+			if tt.err != "" {
+				require.Equal(t, []QueryResponse{{Err: tt.err}}, responses)
+			} else {
+				require.Len(t, responses, tt.objects)
+			}
+		})
+	}
+}
+
 func Test_http_RemoteTable_Get_LowerBound(t *testing.T) {
 	ctx := context.TODO()
 	_, table, ts := httpFixture(t)
@@ -139,6 +222,11 @@ func Test_http_RemoteTable_Get_LowerBound(t *testing.T) {
 		assert.EqualValues(t, 3, items[2].ID)
 		assert.EqualValues(t, 4, items[3].ID)
 	}
+
+	iter, errs = remoteTable.LowerBound(ctx, ByRevision[*testObject](0))
+	items = Collect(iter)
+	assert.NoError(t, <-errs, "LowerBound(ByRevision(0))")
+	assert.Len(t, items, 4)
 }
 
 func Test_http_RemoteTable_Changes(t *testing.T) {
