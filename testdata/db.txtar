@@ -20,10 +20,18 @@ db/show test2
 # Assert empty
 db/empty test1 test2
 
+# Failed insert does not commit preceding files
+! db/insert test1 obj1.yaml missing.yaml
+db/empty test1
+
 # Insert
 db/insert test1 obj1.yaml
 db/insert test1 obj2.yaml
 db/insert test2 obj2.yaml
+
+# Failed delete does not commit preceding files
+! db/delete test1 obj1.yaml missing.yaml
+db/cmp --timeout=10ms test1 objs.table
 
 # Assert not empty
 ! db/empty test1 test2
