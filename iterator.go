@@ -261,4 +261,5 @@ func (it *changeIterator[Obj]) Close() {
 
 type anyChangeIterator interface {
 	nextAny(ReadTxn) (iter.Seq2[Change[any], Revision], <-chan struct{})
+	Close()
 }

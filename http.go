@@ -170,6 +170,7 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+	defer changeIter.Close()
 
 	w.WriteHeader(http.StatusOK)
 
