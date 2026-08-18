@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -284,6 +285,10 @@ func Test_http_RemoteTable_Changes(t *testing.T) {
 
 	err = <-errs
 	require.ErrorIs(t, err, context.Canceled)
+
+	require.Eventually(t, func() bool {
+		return db.ReadTxn().root()[table.tablePos()].deleteTrackers.Len() == 0
+	}, time.Second, 10*time.Millisecond, "HTTP change iterator should be closed after disconnect")
 }
 
 func Test_http_RemoteTable_Changes_missing_table_returns_error(t *testing.T) {
