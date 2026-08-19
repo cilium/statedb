@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"iter"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -83,6 +84,71 @@ func (m *multiMockOps) Update(ctx context.Context, txn statedb.ReadTxn, rev stat
 }
 
 var _ reconciler.Operations[*multiStatusObject] = &multiMockOps{}
+
+type multiConflictBarrier struct {
+	arrived atomic.Int64
+	once    sync.Once
+	ready   chan struct{}
+}
+
+func newMultiConflictBarrier() *multiConflictBarrier {
+	return &multiConflictBarrier{ready: make(chan struct{})}
+}
+
+func (b *multiConflictBarrier) wait(ctx context.Context) error {
+	if b.arrived.Add(1) >= 2 {
+		b.once.Do(func() { close(b.ready) })
+	}
+	select {
+	case <-b.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type multiConflictOps struct {
+	barrier     *multiConflictBarrier
+	db          *statedb.DB
+	table       statedb.RWTable[*multiStatusObject]
+	waitForDone string
+	result      error
+	numUpdates  atomic.Int64
+}
+
+func (m *multiConflictOps) Delete(context.Context, statedb.ReadTxn, statedb.Revision, *multiStatusObject) error {
+	return nil
+}
+
+func (m *multiConflictOps) Prune(context.Context, statedb.ReadTxn, iter.Seq2[*multiStatusObject, statedb.Revision]) error {
+	return nil
+}
+
+func (m *multiConflictOps) Update(ctx context.Context, _ statedb.ReadTxn, _ statedb.Revision, _ *multiStatusObject) error {
+	m.numUpdates.Add(1)
+	if err := m.barrier.wait(ctx); err != nil {
+		return err
+	}
+
+	// Make this operation commit second, after both reconcilers have started
+	// processing the same object revision.
+	if m.waitForDone != "" {
+		for {
+			obj, _, watch, found := m.table.GetWatch(m.db.ReadTxn(), multiStatusIndex.Query(1))
+			if found && obj.Statuses.Get(m.waitForDone).Kind == reconciler.StatusKindDone {
+				break
+			}
+			select {
+			case <-watch:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	return m.result
+}
+
+var _ reconciler.Operations[*multiStatusObject] = &multiConflictOps{}
 
 // TestMultipleReconcilers tests use of multiple reconcilers against
 // a single object.
@@ -207,6 +273,103 @@ func TestMultipleReconcilers(t *testing.T) {
 	}
 
 	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
+}
+
+func TestMultipleReconcilersRetryAfterStatusConflict(t *testing.T) {
+	var table statedb.RWTable[*multiStatusObject]
+	var db *statedb.DB
+	var health *cell.SimpleHealth
+	metrics := reconciler.NewUnpublishedExpVarMetrics()
+	barrier := newMultiConflictBarrier()
+	goodOps := &multiConflictOps{barrier: barrier}
+	badOps := &multiConflictOps{
+		barrier:     barrier,
+		waitForDone: "good",
+		result:      errors.New("fail"),
+	}
+
+	h := hive.New(
+		statedb.Cell,
+		job.Cell,
+		cell.Provide(
+			cell.NewSimpleHealth,
+			func() reconciler.Metrics { return metrics },
+			func(r job.Registry, h cell.Health) job.Group { return r.NewGroup(h) },
+		),
+		cell.Invoke(func(db_ *statedb.DB, health_ *cell.SimpleHealth) (err error) {
+			db, health = db_, health_
+			table, err = statedb.NewTable(db, "objects", multiStatusIndex)
+			goodOps.db, goodOps.table = db, table
+			badOps.db, badOps.table = db, table
+			return err
+		}),
+		cell.Module("test", "Reconcilers with a status conflict",
+			cell.Invoke(func(params reconciler.Params) error {
+				register := func(name string, ops reconciler.Operations[*multiStatusObject]) error {
+					_, err := reconciler.Register(
+						params,
+						table,
+						(*multiStatusObject).Clone,
+						func(obj *multiStatusObject, status reconciler.Status) *multiStatusObject {
+							obj.Statuses = obj.Statuses.Set(name, status)
+							return obj
+						},
+						func(obj *multiStatusObject) reconciler.Status {
+							return obj.Statuses.Get(name)
+						},
+						ops,
+						nil,
+						reconciler.WithName(name),
+						reconciler.WithRetry(time.Hour, time.Hour),
+						reconciler.WithoutPruning(),
+					)
+					return err
+				}
+				if err := register("good", goodOps); err != nil {
+					return err
+				}
+				return register("bad", badOps)
+			}),
+		),
+	)
+
+	log := hivetest.Logger(t, hivetest.LogLevel(slog.LevelError))
+	require.NoError(t, h.Start(log, t.Context()), "Start")
+	t.Cleanup(func() {
+		require.NoError(t, h.Stop(log, context.Background()), "Stop")
+	})
+
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &multiStatusObject{
+		ID:       1,
+		Statuses: reconciler.NewStatusSet(),
+	})
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	require.Eventually(t, func() bool {
+		obj, _, found := table.Get(db.ReadTxn(), multiStatusIndex.Query(1))
+		return found &&
+			obj.Statuses.Get("good").Kind == reconciler.StatusKindDone &&
+			obj.Statuses.Get("bad").Kind == reconciler.StatusKindError
+	}, 5*time.Second, time.Millisecond)
+
+	// Wait for the failing reconciliation round to publish its metrics.
+	require.Eventually(t, func() bool {
+		value := metrics.ReconciliationTotalErrorsVar.Get("test/bad")
+		return value != nil && value.String() == "1"
+	}, 5*time.Second, time.Millisecond)
+
+	assert.Equal(t, int64(1), badOps.numUpdates.Load())
+	assert.Equal(t, "1", metrics.ReconciliationCurrentErrorsVar.Get("test/bad").String())
+
+	badHealth := health.GetChild("job-reconcile-bad")
+	require.NotNil(t, badHealth)
+	require.Eventually(t, func() bool {
+		badHealth.Lock()
+		defer badHealth.Unlock()
+		return badHealth.Level == cell.StatusDegraded
+	}, 5*time.Second, time.Millisecond)
 }
 
 func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
