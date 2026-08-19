@@ -26,8 +26,19 @@ func TestWatchSet(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Empty(t, chs)
 
-	// Few channels, cancelled context.
+	// One closed channel with non-zero settle time
 	ch1 := make(chan struct{})
+	close(ch1)
+	ws.Add(ch1)
+	t0 := time.Now()
+	duration := 50 * time.Millisecond
+	chs, err = ws.Wait(context.Background(), duration)
+	require.NoError(t, err)
+	require.ElementsMatch(t, chs, []<-chan struct{}{ch1})
+	require.Greater(t, time.Since(t0), duration, "expected to wait to settle")
+
+	// Few channels, cancelled context.
+	ch1 = make(chan struct{})
 	ch2 := make(chan struct{})
 	ch3 := make(chan struct{})
 	ws.Add(ch1, ch2, ch3)
@@ -38,8 +49,8 @@ func TestWatchSet(t *testing.T) {
 	require.Empty(t, chs)
 
 	// Few channels, timed out context.
-	duration := 10 * time.Millisecond
-	t0 := time.Now()
+	duration = 10 * time.Millisecond
+	t0 = time.Now()
 	ctx, cancel = context.WithTimeout(context.Background(), duration)
 
 	// Wait with a settle time of 1ns. Since settle time only comes to play
@@ -150,6 +161,38 @@ func TestWatchSetInQueries(t *testing.T) {
 
 	ws2.Clear()
 	require.False(t, ws2.Has(closed[0]))
+}
+
+func TestWatchSetCancellationDuringSettle(t *testing.T) {
+	ws := NewWatchSet()
+
+	// Add a closed watch channel
+	ch1 := make(chan struct{})
+	close(ch1)
+	ws.Add(ch1)
+
+	// Use a context that times out in less time than settle time.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	// Wait should now go into settle time wait. The context would cancel
+	// before the settle time expires.
+	closed, err := ws.Wait(ctx, time.Second)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ElementsMatch(t, []<-chan struct{}{ch1}, closed)
+	require.False(t, ws.Has(ch1), "closed channel should be removed")
+
+	// Test again with more than one channel
+	ch2 := make(chan struct{})
+	ws.Add(ch1, ch2)
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	closed, err = ws.Wait(ctx, time.Second)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ElementsMatch(t, []<-chan struct{}{ch1}, closed)
+	require.False(t, ws.Has(ch1), "closed channel should be removed")
+	require.True(t, ws.Has(ch2), "open channel should not be removed")
 }
 
 func benchmarkWatchSet(b *testing.B, numChans int) {
