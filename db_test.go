@@ -1491,6 +1491,37 @@ func Test_validateTableName(t *testing.T) {
 	}
 }
 
+func Test_validateIndexName(t *testing.T) {
+	t.Parallel()
+
+	db := New()
+
+	emptyNamePrimaryIndex := Index[*testObject, uint64]{
+		Name: "",
+		FromObject: func(t *testObject) index.KeySet {
+			return index.NewKeySet(index.Uint64(t.ID))
+		},
+		FromKey: index.Uint64,
+		Unique:  true,
+	}
+
+	_, err := NewTable(db, "test", idIndex, emptyNamePrimaryIndex)
+	require.ErrorIs(t, err, ErrEmptyIndexName)
+
+	emptyNameSecondaryIndex := Index[*testObject, string]{
+		Name: "",
+		FromObject: func(t *testObject) index.KeySet {
+			return index.Set(t.Tags)
+		},
+		FromKey:    index.String,
+		FromString: index.FromString,
+		Unique:     false,
+	}
+
+	_, err = NewTable(db, "test", idIndex, idIndex, emptyNameSecondaryIndex)
+	require.ErrorIs(t, err, ErrEmptyIndexName)
+}
+
 func Test_getAcquiredInfo(t *testing.T) {
 	t.Parallel()
 	db, table, _ := newTestDB(t)

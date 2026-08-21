@@ -80,6 +80,16 @@ func NewTableAny[Obj any](
 		return nil, err
 	}
 
+	// Index name must be non-empty
+	if primaryIndexer.indexName() == "" {
+		return nil, tableError(tableName, ErrEmptyIndexName)
+	}
+
+	// Primary index must always be unique
+	if !primaryIndexer.isUnique() {
+		return nil, tableError(tableName, ErrPrimaryIndexNotUnique)
+	}
+
 	toAnyIndexer := func(idx Indexer[Obj], pos int) anyIndexer {
 		return anyIndexer{
 			name:          idx.indexName(),
@@ -111,15 +121,14 @@ func NewTableAny[Obj any](
 	indexPos := SecondaryIndexStartPos
 	for _, indexer := range secondaryIndexers {
 		name := indexer.indexName()
+		// Index name must be non-empty
+		if name == "" {
+			return nil, tableError(tableName, ErrEmptyIndexName)
+		}
 		anyIndexer := toAnyIndexer(indexer, indexPos)
 		table.secondaryAnyIndexers = append(table.secondaryAnyIndexers, anyIndexer)
 		table.indexPositions[indexPos] = name
 		indexPos++
-	}
-
-	// Primary index must always be unique
-	if !primaryIndexer.isUnique() {
-		return nil, tableError(tableName, ErrPrimaryIndexNotUnique)
 	}
 
 	// Validate that indexes have unique ids.
