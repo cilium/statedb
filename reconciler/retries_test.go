@@ -124,6 +124,18 @@ func TestRetries(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestRetriesClearEmptyDoesNotExtractKey(t *testing.T) {
+	keyCalls := 0
+	rq := newRetries(time.Millisecond, 100*time.Millisecond, func(any) index.Key {
+		keyCalls++
+		return index.Uint64(1)
+	})
+
+	rq.Clear(uint64(1))
+
+	assert.Zero(t, keyCalls)
+}
+
 func TestExponentialBackoff(t *testing.T) {
 	backoff := exponentialBackoff{
 		min: time.Millisecond,
