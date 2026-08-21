@@ -16,7 +16,7 @@ import (
 type Txn[T any] struct {
 	root      *header[T]
 	oldRoot   *header[T]
-	rootWatch chan struct{}
+	rootWatch *watchState
 	prevTxn   *atomic.Pointer[Txn[T]]
 
 	dirty bool
@@ -35,7 +35,7 @@ type Txn[T any] struct {
 
 	// watches contains the channels of cloned nodes that should be closed
 	// when transaction is committed.
-	watches map[chan struct{}]struct{}
+	watches map[*watchState]struct{}
 
 	// deleteParentsCache keeps the last allocated slice to avoid
 	// reallocating it on every deletion.
@@ -72,7 +72,11 @@ func (txn *Txn[T]) Clone() Tree[T] {
 // Insert or update the tree with the given key and value.
 // Returns the old value if it exists.
 func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
-	old, hadOld, _ = txn.InsertWatch(key, value)
+	old, _, hadOld, _, txn.root = txn.insert(txn.root, key, value)
+	validateTree(txn.root, nil, txn.watches, txn.txnID)
+	if !hadOld {
+		txn.size++
+	}
 	return
 }
 
@@ -80,14 +84,16 @@ func (txn *Txn[T]) Insert(key []byte, value T) (old T, hadOld bool) {
 // Returns the old value if it exists and a watch channel that closes when the
 // key changes again.
 func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <-chan struct{}) {
-	old, _, hadOld, watch, txn.root = txn.insert(txn.root, key, value)
+	var state *watchState
+	old, _, hadOld, state, txn.root = txn.insert(txn.root, key, value)
 	validateTree(txn.root, nil, txn.watches, txn.txnID)
 	if !hadOld {
 		txn.size++
 	}
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.rootWatch
+		state = txn.rootWatch
 	}
+	watch = state.channel()
 	return
 }
 
@@ -95,7 +101,11 @@ func (txn *Txn[T]) InsertWatch(key []byte, value T) (old T, hadOld bool, watch <
 // caller to not mutate the value in-place and to return a clone.
 // Returns the old value (if it exists) and the new possibly merged value.
 func (txn *Txn[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, newValue T, hadOld bool) {
-	old, newValue, hadOld, _ = txn.ModifyWatch(key, value, mod)
+	old, newValue, hadOld, _, txn.root = txn.modify(txn.root, key, value, mod)
+	validateTree(txn.root, nil, txn.watches, txn.txnID)
+	if !hadOld {
+		txn.size++
+	}
 	return
 }
 
@@ -105,14 +115,16 @@ func (txn *Txn[T]) Modify(key []byte, value T, mod func(T, T) T) (old T, newValu
 // Returns the old value (if it exists) and the new possibly merged value,
 // and a watch channel that closes when the key changes again.
 func (txn *Txn[T]) ModifyWatch(key []byte, value T, mod func(T, T) T) (old T, newValue T, hadOld bool, watch <-chan struct{}) {
-	old, newValue, hadOld, watch, txn.root = txn.modify(txn.root, key, value, mod)
+	var state *watchState
+	old, newValue, hadOld, state, txn.root = txn.modify(txn.root, key, value, mod)
 	validateTree(txn.root, nil, txn.watches, txn.txnID)
 	if !hadOld {
 		txn.size++
 	}
 	if txn.opts.rootOnlyWatch() {
-		watch = txn.rootWatch
+		state = txn.rootWatch
 	}
+	watch = state.channel()
 	return
 }
 
@@ -131,25 +143,38 @@ func (txn *Txn[T]) Delete(key []byte) (old T, hadOld bool) {
 // Since this is the channel associated with the root, this closes
 // when there are any changes to the tree.
 func (txn *Txn[T]) RootWatch() <-chan struct{} {
-	return txn.rootWatch
+	return txn.rootWatch.channel()
 }
 
 // Get fetches the value associated with the given key.
-// Returns the value, a watch channel (which is closed on
-// modification to the key) and boolean which is true if
-// value was found.
-func (txn *Txn[T]) Get(key []byte) (T, <-chan struct{}, bool) {
-	value, watch, ok := search(txn.root, txn.rootWatch, key)
-	return value, watch, ok
+func (txn *Txn[T]) Get(key []byte) (T, bool) {
+	value, _, ok := search(txn.root, txn.rootWatch, key)
+	return value, ok
 }
 
-// Prefix returns an iterator for all objects that starts with the
-// given prefix, and a channel that closes when any objects matching
-// the given prefix are upserted or deleted.
-func (txn *Txn[T]) Prefix(key []byte) (Iterator[T], <-chan struct{}) {
+// GetWatch fetches the value associated with the given key and returns a watch
+// channel that closes when the key is modified.
+func (txn *Txn[T]) GetWatch(key []byte) (T, <-chan struct{}, bool) {
+	value, watch, ok := search(txn.root, txn.rootWatch, key)
+	return value, watch.channel(), ok
+}
+
+// Prefix returns an iterator for all objects that start with the given prefix.
+func (txn *Txn[T]) Prefix(key []byte) Iterator[T] {
 	// Bump txnID in order to freeze the current tree.
 	txn.txnID++
-	return prefixSearch(txn.root, txn.rootWatch, key)
+	iter, _ := prefixSearch(txn.root, txn.rootWatch, key)
+	return iter
+}
+
+// PrefixWatch returns an iterator for all objects that start with the given
+// prefix and a channel that closes when any matching object is upserted or
+// deleted.
+func (txn *Txn[T]) PrefixWatch(key []byte) (Iterator[T], <-chan struct{}) {
+	// Bump txnID in order to freeze the current tree.
+	txn.txnID++
+	iter, watch := prefixSearch(txn.root, txn.rootWatch, key)
+	return iter, watch.channel()
 }
 
 // LowerBound returns an iterator for all objects that have a
@@ -181,7 +206,7 @@ func (txn *Txn[T]) CommitAndNotify() Tree[T] {
 func (txn *Txn[T]) Commit() Tree[T] {
 	newRootWatch := txn.rootWatch
 	if txn.dirty {
-		newRootWatch = make(chan struct{})
+		newRootWatch = newWatchState()
 		validateTree(txn.oldRoot, nil, nil, txn.txnID)
 		validateTree(txn.root, nil, txn.watches, txn.txnID)
 	}
@@ -208,7 +233,7 @@ const watchesReuseThreshold = 64
 // Tree.Txn() is used again.
 func (txn *Txn[T]) Notify() {
 	for ch := range txn.watches {
-		close(ch)
+		ch.close()
 	}
 	if !txn.dirty && len(txn.watches) > 0 {
 		panic("BUG: watch channels marked but txn not dirty")
@@ -217,10 +242,10 @@ func (txn *Txn[T]) Notify() {
 	if len(txn.watches) <= watchesReuseThreshold {
 		clear(txn.watches)
 	} else {
-		txn.watches = make(map[chan struct{}]struct{})
+		txn.watches = make(map[*watchState]struct{})
 	}
 	if txn.dirty && txn.rootWatch != nil {
-		close(txn.rootWatch)
+		txn.rootWatch.close()
 		txn.rootWatch = nil
 	}
 	if !txn.opts.rootOnlyWatch() {
@@ -252,11 +277,11 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 	return n
 }
 
-func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, newValue T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
+func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, newValue T, hadOld bool, watch *watchState, newRoot *header[T]) {
 	return txn.modify(root, key, value, nil)
 }
 
-func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T) T) (oldValue T, newValueOut T, hadOld bool, watch <-chan struct{}, newRoot *header[T]) {
+func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T) T) (oldValue T, newValueOut T, hadOld bool, watch *watchState, newRoot *header[T]) {
 	txn.dirty = true
 	fullKey := key
 	newValueOut = newValue
@@ -368,7 +393,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	newNode.setPrefix(common)
 	newNode.setKind(nodeKind4)
 	if !txn.opts.rootOnlyWatch() {
-		newNode.watch = make(chan struct{})
+		newNode.watch = newWatchState()
 	}
 
 	switch {
@@ -591,25 +616,25 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 	case parent.kind() == nodeKind256 && size <= 49:
 		demoted := (&node48[T]{header: *parent}).self()
 		if parent.watch != nil {
-			demoted.watch = make(chan struct{})
+			demoted.watch = newWatchState()
 		}
 		demoted.setKind(nodeKind48)
 		demoted.setSize(size - 1)
 		demoted.setTxnID(txn.txnID)
-			n48 := demoted.node48()
-			n48.leaf = parent.getLeaf()
-			children := n48.children[:0]
-			for k, n := range parent.node256().children[:] {
-				if k != index && n != nil {
-					n48.index[k] = uint8(len(children) + 1)
-					children = append(children, n)
-				}
+		n48 := demoted.node48()
+		n48.leaf = parent.getLeaf()
+		children := n48.children[:0]
+		for k, n := range parent.node256().children[:] {
+			if k != index && n != nil {
+				n48.index[k] = uint8(len(children) + 1)
+				children = append(children, n)
 			}
+		}
 		newParent = demoted
 	case parent.kind() == nodeKind48 && size <= 17:
 		demoted := (&node16[T]{header: *parent}).self()
 		if parent.watch != nil {
-			demoted.watch = make(chan struct{})
+			demoted.watch = newWatchState()
 		}
 		demoted.setKind(nodeKind16)
 		demoted.setSize(size - 1)
@@ -628,7 +653,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 	case parent.kind() == nodeKind16 && size <= 5:
 		demoted := (&node4[T]{header: *parent}).self()
 		if parent.watch != nil {
-			demoted.watch = make(chan struct{})
+			demoted.watch = newWatchState()
 		}
 		demoted.setKind(nodeKind4)
 		demoted.setSize(size - 1)
@@ -660,7 +685,7 @@ var runValidation = os.Getenv("STATEDB_VALIDATE") != ""
 
 // validateTree checks that the resulting tree is well-formed and panics
 // if it is not.
-func validateTree[T any](node *header[T], parents []*header[T], watches map[chan struct{}]struct{}, maxTxnID uint64) {
+func validateTree[T any](node *header[T], parents []*header[T], watches map[*watchState]struct{}, maxTxnID uint64) {
 	if !runValidation {
 		return
 	}
@@ -726,10 +751,8 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 	// Nodes that have a watch channel that is to be closed must
 	// also have all their parent's watch channels to be closed.
 	if _, found := watches[node.watch]; found {
-		select {
-		case <-node.watch:
+		if node.watch.isClosed() {
 			panic("node's watch channel marked for closing but is already closed!")
-		default:
 		}
 		for i, p := range parents {
 			_, found := watches[p.watch]
@@ -743,17 +766,13 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[chan
 
 	// If a node's watch channel is closed then all the parents must be
 	// closed as well.
-	select {
-	case <-node.watch:
+	if node.watch.isClosed() {
 		for _, p := range parents {
-			select {
-			case <-p.watch:
-			default:
+			if !p.watch.isClosed() {
 				p.printTree(0)
 				panic(fmt.Sprintf("parent watch channel (%p) not marked for closing (child %p)", p.watch, node.watch))
 			}
 		}
-	default:
 	}
 
 	parents = append(parents, node)
@@ -801,8 +820,8 @@ func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
 		}
 	}
 
-	var collectWatches func(depth int, watches map[<-chan struct{}]func() string, node *header[T])
-	collectWatches = func(depth int, watches map[<-chan struct{}]func() string, node *header[T]) {
+	var collectWatches func(depth int, watches map[*watchState]func() string, node *header[T])
+	collectWatches = func(depth int, watches map[*watchState]func() string, node *header[T]) {
 		if node == nil {
 			return
 		}
@@ -820,9 +839,9 @@ func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
 		}
 	}
 
-	oldWatches := map[<-chan struct{}]func() string{}
+	oldWatches := map[*watchState]func() string{}
 	collectWatches(0, oldWatches, oldRoot)
-	newWatches := map[<-chan struct{}]func() string{}
+	newWatches := map[*watchState]func() string{}
 	collectWatches(0, newWatches, newRoot)
 
 	// Check that any nodes that kept the old watch channel have exactly
@@ -845,9 +864,7 @@ func validateRemovedWatches[T any](oldRoot *header[T], newRoot *header[T]) {
 	}
 
 	for watch, desc := range oldWatches {
-		select {
-		case <-watch:
-		default:
+		if !watch.isClosed() {
 			oldRoot.printTree(0)
 			fmt.Println("---")
 			newRoot.printTree(0)

@@ -131,9 +131,9 @@ type QueryResponse struct {
 func runQuery(reader tableIndexReader, lowerbound bool, queryKey index.Key, onObject func(object) error) {
 	var iter tableIndexIterator
 	if lowerbound {
-		iter, _ = reader.lowerBound(queryKey)
+		iter = reader.lowerBoundNoWatch(queryKey)
 	} else {
-		iter, _ = reader.list(queryKey)
+		iter = reader.listNoWatch(queryKey)
 	}
 	for _, obj := range iter.All {
 		if err := onObject(obj); err != nil {
