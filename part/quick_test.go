@@ -30,13 +30,13 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 		watchChannels := []<-chan struct{}{}
 		// Add all possible watch channels for prefixes of the key
 		for i := range len(key) {
-			_, watch := tree.Prefix([]byte(key)[:i])
+			_, watch := tree.PrefixWatch([]byte(key)[:i])
 			watchChannels = append(watchChannels, watch)
 		}
 		// Check that root watch channel always closes on modifications.
-		watchChannels = append(watchChannels, tree.rootWatch)
+		watchChannels = append(watchChannels, tree.rootWatch.channel())
 
-		_, watchBefore, _ := tree.Get([]byte(key))
+		_, watchBefore, _ := tree.GetWatch([]byte(key))
 		if watchBefore == nil {
 			return "nil watch from Get()"
 		}
@@ -48,7 +48,7 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 			return "nil watch from InsertWatch()"
 		}
 
-		val, watchAfter, found := txn.Get([]byte(key))
+		val, watchAfter, found := txn.GetWatch([]byte(key))
 		if !found {
 			return fmt.Sprintf("inserted value not found for %q", key)
 		}
@@ -73,14 +73,14 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 	}
 
 	get := func(key, value string) any {
-		val, watch, found := tree.Get([]byte(key))
+		val, watch, found := tree.GetWatch([]byte(key))
 		if watch == nil {
 			panic("nil watch from Get()")
 		}
 
 		for i := range len(key) {
 			prefix := []byte(key)[:i]
-			iter, watch := tree.Prefix(prefix)
+			iter, watch := tree.PrefixWatch(prefix)
 			if watch == nil {
 				panic("nil watch from Prefix()")
 			}
@@ -101,7 +101,7 @@ func TestQuick_InsertGetPrefix(t *testing.T) {
 			return val
 		}
 
-		iter, watch := tree.Prefix([]byte(key))
+		iter, watch := tree.PrefixWatch([]byte(key))
 		_, v, _ := iter.Next()
 		return v
 	}
@@ -123,12 +123,12 @@ func TestQuick_IteratorReuse(t *testing.T) {
 
 	iterate := func(key, value string, cloneFirst bool) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
-		v, _, ok := tree.Get([]byte(key))
+		v, ok := tree.Get([]byte(key))
 		if !ok || value != v {
 			return false
 		}
 
-		prefixIter, _ := tree.Prefix([]byte(key))
+		prefixIter := tree.Prefix([]byte(key))
 		iterators := []Iterator[string]{
 			tree.LowerBound([]byte(key)),
 			prefixIter,
@@ -165,7 +165,7 @@ func TestQuick_Delete(t *testing.T) {
 	do := func(key, value string, delete bool) bool {
 		_, _, tree = tree.Insert([]byte(key), value)
 		treeAfterInsert := tree
-		v, watch, ok := tree.Get([]byte(key))
+		v, watch, ok := tree.GetWatch([]byte(key))
 		if !ok || v != value {
 			t.Logf("value not in tree after insert")
 			return false
@@ -174,13 +174,13 @@ func TestQuick_Delete(t *testing.T) {
 		// delete some of the time to construct different variations of trees.
 		if delete {
 			_, _, tree = tree.Delete([]byte(key))
-			_, _, ok := tree.Get([]byte(key))
+			_, ok := tree.Get([]byte(key))
 			if ok {
 				t.Logf("value exists after delete")
 				return false
 			}
 
-			_, _, ok = treeAfterInsert.Get([]byte(key))
+			_, ok = treeAfterInsert.Get([]byte(key))
 			if !ok {
 				t.Logf("value deleted from original")
 			}
@@ -207,7 +207,7 @@ func TestQuick_ClosedWatch(t *testing.T) {
 		_, _, tree = tree.Insert([]byte(key), value)
 		treeAfterInsert := tree
 
-		val, watch, ok := tree.Get([]byte(key))
+		val, watch, ok := tree.GetWatch([]byte(key))
 		if !ok {
 			return false
 		}
@@ -231,13 +231,13 @@ func TestQuick_ClosedWatch(t *testing.T) {
 		}
 
 		// Original tree unaffected.
-		val, _, ok = treeAfterInsert.Get([]byte(key))
+		val, ok = treeAfterInsert.Get([]byte(key))
 		if !ok || val != value {
 			t.Logf("original changed!")
 			return false
 		}
 
-		val, _, ok = tree.Get([]byte(key))
+		val, ok = tree.Get([]byte(key))
 		if !ok || val != "x" {
 			t.Logf("new tree does not have x!")
 			return false

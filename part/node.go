@@ -25,8 +25,8 @@ const (
 type header[T any] struct {
 	flags     uint16 // kind(4b) | unused(3b) | size(9b)
 	prefixLen uint16
-	prefixP   *byte         // the compressed prefix, [0] is the key
-	watch     chan struct{} // watch channel that is closed when this node mutates
+	prefixP   *byte       // the compressed prefix, [0] is the key
+	watch     *watchState // watch that is closed when this node mutates
 }
 
 func (n *header[T]) key() byte {
@@ -204,7 +204,7 @@ func (n *header[T]) clone(watch bool) *header[T] {
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
 	}
 	if watch {
-		nCopy.watch = make(chan struct{})
+		nCopy.watch = newWatchState()
 	} else {
 		nCopy.watch = nil
 	}
@@ -221,7 +221,7 @@ func (n *header[T]) promote(txnID uint64) *header[T] {
 		node4.txnID = txnID
 		node4.setKind(nodeKind4)
 		if n.watch != nil {
-			node4.watch = make(chan struct{})
+			node4.watch = newWatchState()
 		}
 		return node4.self()
 	case nodeKind4:
@@ -234,7 +234,7 @@ func (n *header[T]) promote(txnID uint64) *header[T] {
 		copy(node16.children[:], node4.children[:size])
 		copy(node16.keys[:], node4.keys[:size])
 		if n.watch != nil {
-			node16.watch = make(chan struct{})
+			node16.watch = newWatchState()
 		}
 		return node16.self()
 	case nodeKind16:
@@ -248,7 +248,7 @@ func (n *header[T]) promote(txnID uint64) *header[T] {
 			node48.index[k] = uint8(i + 1)
 		}
 		if n.watch != nil {
-			node48.watch = make(chan struct{})
+			node48.watch = newWatchState()
 		}
 		return node48.self()
 	case nodeKind48:
@@ -264,22 +264,13 @@ func (n *header[T]) promote(txnID uint64) *header[T] {
 			node256.children[child.prefix()[0]] = child
 		}
 		if n.watch != nil {
-			node256.watch = make(chan struct{})
+			node256.watch = newWatchState()
 		}
 		return node256.self()
 	case nodeKind256:
 		panic("BUG: should not need to promote node256")
 	default:
 		panic(fmt.Sprintf("unknown node kind: %x", n.kind()))
-	}
-}
-
-func isClosedChan(ch <-chan struct{}) bool {
-	select {
-	case <-ch:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -309,9 +300,9 @@ func (n *header[T]) printTree(level int) {
 		panic("unknown node kind")
 	}
 	if leaf := n.getLeaf(); leaf != nil {
-		fmt.Printf(" %x -> %v (L:%p W:%p %v)", leaf.fullKey(), leaf.value, leaf, leaf.watch, isClosedChan(leaf.watch))
+		fmt.Printf(" %x -> %v (L:%p W:%p %v)", leaf.fullKey(), leaf.value, leaf, leaf.watch, leaf.watch.isClosed())
 	}
-	fmt.Printf(" (N:%p, W:%p %v)\n", n, n.watch, isClosedChan(n.watch))
+	fmt.Printf(" (N:%p, W:%p %v)\n", n, n.watch, n.watch.isClosed())
 
 	for _, child := range children {
 		if child != nil {
@@ -538,7 +529,7 @@ func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
 	leaf.setPrefix(prefix)
 	leaf.setKind(nodeKindLeaf)
 	if !o.rootOnlyWatch() {
-		leaf.watch = make(chan struct{})
+		leaf.watch = newWatchState()
 	}
 
 	return leaf
@@ -575,7 +566,7 @@ type node256[T any] struct {
 	children [256]*header[T]
 }
 
-func search[T any](root *header[T], rootWatch <-chan struct{}, key []byte) (value T, watch <-chan struct{}, ok bool) {
+func search[T any](root *header[T], rootWatch *watchState, key []byte) (value T, watch *watchState, ok bool) {
 	this := root
 	watch = rootWatch
 	if root == nil {
