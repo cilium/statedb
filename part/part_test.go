@@ -53,15 +53,15 @@ func Test_insertion_and_watches(t *testing.T) {
 		tree = txn.CommitAndNotify()
 		assertOpen(t, watch_ab)
 
-		_, w, f := tree.Get([]byte("ab"))
+		_, w, f := tree.GetWatch([]byte("ab"))
 		assert.True(t, f)
 		assertOpen(t, w)
-		_, w2 := tree.Prefix([]byte("a"))
+		_, w2 := tree.PrefixWatch([]byte("a"))
 		assertOpen(t, w2)
-		_, w3, f2 := tree.Get([]byte("abc"))
+		_, w3, f2 := tree.GetWatch([]byte("abc"))
 		assert.True(t, f2)
 		assertOpen(t, w3)
-		_, w4 := tree.Prefix([]byte("abc"))
+		_, w4 := tree.PrefixWatch([]byte("abc"))
 		assertOpen(t, w4)
 
 		_, _, tree = tree.Insert([]byte("ab"), 42)
@@ -88,10 +88,10 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		_, _, tree = tree.Insert([]byte("a"), 1)
 
-		_, w, f := tree.Get([]byte("a"))
+		_, w, f := tree.GetWatch([]byte("a"))
 		assert.True(t, f)
 		assertOpen(t, w)
-		_, w2 := tree.Prefix([]byte("a"))
+		_, w2 := tree.PrefixWatch([]byte("a"))
 		assertOpen(t, w2)
 
 		_, _, tree = tree.Insert([]byte("b"), 2)
@@ -105,10 +105,10 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		_, _, tree = tree.Insert([]byte("a"), 1)
 
-		_, w, f := tree.Get([]byte("a"))
+		_, w, f := tree.GetWatch([]byte("a"))
 		assert.True(t, f)
 		assertOpen(t, w)
-		_, w2 := tree.Prefix([]byte("a"))
+		_, w2 := tree.PrefixWatch([]byte("a"))
 		assertOpen(t, w2)
 
 		txn := tree.Txn()
@@ -137,11 +137,11 @@ func Test_insertion_and_watches(t *testing.T) {
 		txn.Insert([]byte("ab"), 3)
 		tree = txn.CommitAndNotify()
 
-		_, w, f := tree.Get([]byte("ab"))
+		_, w, f := tree.GetWatch([]byte("ab"))
 		assert.True(t, f)
 		assertOpen(t, w)
 
-		_, w2 := tree.Prefix([]byte("ab"))
+		_, w2 := tree.PrefixWatch([]byte("ab"))
 		assertOpen(t, w2)
 
 		// This should move the L(ab) laterally and insert a N4(ab) with a L(abc, 4)
@@ -161,9 +161,9 @@ func Test_insertion_and_watches(t *testing.T) {
 
 		_, _, tree = tree.Insert([]byte("a"), 1)
 
-		_, w, found := tree.Get([]byte("a"))
+		_, w, found := tree.GetWatch([]byte("a"))
 		assert.True(t, found)
-		_, w2, found := tree.Get([]byte("aa"))
+		_, w2, found := tree.GetWatch([]byte("aa"))
 		assert.False(t, found)
 
 		assert.NotEqual(t, w, w2, "did not expect Get(aa) to return watch channel of Get(a)")
@@ -196,7 +196,7 @@ func Test_watchClosingRandom(t *testing.T) {
 
 	watches := []<-chan struct{}{}
 	for _, key := range keys {
-		_, watch, found := tree.Get(key)
+		_, watch, found := tree.GetWatch(key)
 		require.True(t, found)
 		watches = append(watches, watch)
 	}
@@ -258,13 +258,13 @@ func Test_search(t *testing.T) {
 	_, _, tree = tree.Insert([]byte("c"), []byte("c"))
 	_, _, tree = tree.Insert([]byte("ca"), []byte("ca"))
 
-	v, _, ok := tree.Get([]byte("nope"))
+	v, ok := tree.Get([]byte("nope"))
 	if ok {
 		t.Fatalf("found unexpected value: %v", v)
 	}
 
 	for _, key := range []string{"a", "ba", "bb"} {
-		v, _, ok = tree.Get([]byte(key))
+		v, ok = tree.Get([]byte(key))
 		if !ok || string(v) != key {
 			t.Fatalf("%q not found (%v) or mismatch %q", key, ok, v)
 		}
@@ -288,7 +288,7 @@ func Test_simple_delete(t *testing.T) {
 
 	tree := New[uint64]()
 
-	_, _, found := tree.Get(uint64Key(1))
+	_, found := tree.Get(uint64Key(1))
 	require.False(t, found)
 
 	txn := tree.Txn()
@@ -296,7 +296,7 @@ func Test_simple_delete(t *testing.T) {
 	_, hadOld := txn.Insert(uint64Key(1), 1)
 	require.False(t, hadOld)
 
-	_, watch, found := txn.Get(uint64Key(1))
+	_, watch, found := txn.GetWatch(uint64Key(1))
 	require.True(t, found)
 
 	select {
@@ -310,7 +310,7 @@ func Test_simple_delete(t *testing.T) {
 	_, hadOld = txn.Delete(uint64Key(1))
 	require.False(t, hadOld)
 
-	_, _, found = txn.Get(uint64Key(1))
+	_, found = txn.Get(uint64Key(1))
 	require.False(t, found)
 
 	tree = txn.CommitAndNotify()
@@ -339,7 +339,7 @@ func Test_simple_delete(t *testing.T) {
 	_, hadOld = txn.Delete(uint64Key(5))
 	require.True(t, hadOld)
 
-	_, _, ok := txn.Get(uint64Key(5))
+	_, ok := txn.Get(uint64Key(5))
 	require.False(t, ok)
 }
 
@@ -378,7 +378,7 @@ func Test_delete_compress_regression(t *testing.T) {
 
 	// Retrieve an unknown key that returns the watch channel
 	// for the internal node 'foo-'
-	_, watch, _ := tree.Get([]byte("foo-2/ccc"))
+	_, watch, _ := tree.GetWatch([]byte("foo-2/ccc"))
 
 	txn := tree.Txn()
 	// Remove the keys under foo-1. This will extend the prefix of the
@@ -428,7 +428,7 @@ func Test_delete(t *testing.T) {
 		for _, i := range keys {
 			_, hadOld = txn.Insert(uint64Key(i), i)
 			assert.False(t, hadOld)
-			v, _, ok := txn.Get(uint64Key(i))
+			v, ok := txn.Get(uint64Key(i))
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
 		}
@@ -442,20 +442,20 @@ func Test_delete(t *testing.T) {
 
 		txn = tree.Txn()
 		for _, i := range keys {
-			v, _, ok := txn.Get(uint64Key(i))
+			v, ok := txn.Get(uint64Key(i))
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
 			v, hadOld = txn.Delete(uint64Key(i))
 			assert.True(t, hadOld)
 			assert.EqualValues(t, v, i)
-			_, _, ok = txn.Get(uint64Key(i))
+			_, ok = txn.Get(uint64Key(i))
 			assert.False(t, ok)
 		}
 		tree = txn.CommitAndNotify()
 
 		assert.Equal(t, 0, tree.Len())
 		for _, i := range keys {
-			_, _, ok := tree.Get(uint64Key(i))
+			_, ok := tree.Get(uint64Key(i))
 			assert.False(t, ok)
 		}
 
@@ -471,7 +471,7 @@ func Test_delete(t *testing.T) {
 		for _, i := range keys {
 			_, hadOld = txn.Insert(uint64Key(i), i)
 			assert.False(t, hadOld)
-			v, watch, ok := txn.Get(uint64Key(i))
+			v, watch, ok := txn.GetWatch(uint64Key(i))
 			watches[i] = watch
 			assert.True(t, ok)
 			assert.EqualValues(t, v, i)
@@ -484,7 +484,7 @@ func Test_delete(t *testing.T) {
 			// Lookup with a Txn
 			txn = tree.Txn()
 			for _, i := range keys {
-				v, _, ok := txn.Get(uint64Key(i))
+				v, ok := txn.Get(uint64Key(i))
 				assert.True(t, ok)
 				assert.EqualValues(t, v, i)
 			}
@@ -537,7 +537,7 @@ func Test_delete(t *testing.T) {
 
 			// Test that prefix iteration is ordered and correct
 			prev = 0
-			iter, _ = tree.Prefix([]byte{})
+			iter = tree.Prefix([]byte{})
 			for {
 				_, v, ok := iter.Next()
 				if !ok {
@@ -561,7 +561,7 @@ func Test_delete(t *testing.T) {
 			_, hadOld = txn.Delete(k)
 			assert.True(t, hadOld)
 
-			_, _, ok := txn.Get(k)
+			_, ok := txn.Get(k)
 			assert.False(t, ok)
 		}
 
@@ -580,7 +580,7 @@ func Test_delete(t *testing.T) {
 
 		// Check that everything is gone after commit.
 		for _, i := range keys {
-			_, _, ok := tree.Get(uint64Key(i))
+			_, ok := tree.Get(uint64Key(i))
 			assert.False(t, ok)
 		}
 
@@ -596,7 +596,7 @@ func Test_watch(t *testing.T) {
 	// Insert 'a', get it and check watch channel is not closed.
 	_, _, tree = tree.Insert([]byte("a"), []byte("a"))
 
-	_, watchA, ok := tree.Get([]byte("a"))
+	_, watchA, ok := tree.GetWatch([]byte("a"))
 	if !ok {
 		t.Fatal("expected to find 'a'")
 	}
@@ -608,7 +608,7 @@ func Test_watch(t *testing.T) {
 
 	// Get 'b' that should not exist and the watch channel should
 	// not be closed.
-	_, watchB, ok := tree.Get([]byte("b"))
+	_, watchB, ok := tree.GetWatch([]byte("b"))
 	assert.False(t, ok, "Get(b)")
 
 	select {
@@ -626,7 +626,7 @@ func Test_watch(t *testing.T) {
 		t.Fatal("expected watch channel to close")
 	}
 
-	v, _, ok := tree.Get([]byte("a"))
+	v, ok := tree.Get([]byte("a"))
 	if !ok {
 		t.Fatal("expected to find 'a'")
 	}
@@ -651,7 +651,7 @@ func Test_insert(t *testing.T) {
 	}
 	for i := range 1000 {
 		key := binary.NativeEndian.AppendUint32(nil, uint32(i))
-		_, _, ok := tree.Get(key)
+		_, ok := tree.Get(key)
 		if !ok {
 			t.Fatalf("%d not found", i)
 		}
@@ -666,7 +666,7 @@ func Test_modify(t *testing.T) {
 	// Modify without the value existing inserts it.
 	_, _, tree = tree.Modify(key, 1, func(x, _ int) int { return 123 })
 
-	v, _, ok := tree.Get(key)
+	v, ok := tree.Get(key)
 	require.True(t, ok)
 	require.Equal(t, 1, v)
 
@@ -678,7 +678,7 @@ func Test_modify(t *testing.T) {
 	}
 	tree = txn.CommitAndNotify()
 
-	v, _, ok = tree.Get(key)
+	v, ok = tree.Get(key)
 	require.True(t, ok)
 	require.Equal(t, 1001, v)
 }
@@ -693,11 +693,11 @@ func Test_replaceRoot(t *testing.T) {
 	_, _, tree = tree.Insert(keyB, 3)
 	_, _, tree = tree.Delete(keyA)
 	_, _, tree = tree.Insert(keyA, 2)
-	val, _, ok := tree.Get(keyA)
+	val, ok := tree.Get(keyA)
 	if !ok || val != 2 {
 		t.Fatalf("%v not found", keyA)
 	}
-	val, _, ok = tree.Get(keyB)
+	val, ok = tree.Get(keyB)
 	if !ok || val != 3 {
 		t.Fatalf("%v not found", keyB)
 	}
@@ -710,7 +710,7 @@ func Test_deleteRoot(t *testing.T) {
 	keyA := []byte{'a'}
 	_, _, tree = tree.Insert(keyA, 1)
 	_, _, tree = tree.Delete(keyA)
-	_, _, ok := tree.Get(keyA)
+	_, ok := tree.Get(keyA)
 	if ok {
 		t.Fatal("Root exists")
 	}
@@ -727,15 +727,15 @@ func Test_deleteIntermediate(t *testing.T) {
 	_, _, tree = tree.Insert(keyAB, 2)
 	_, _, tree = tree.Insert(keyABC, 3)
 	_, _, tree = tree.Delete(keyAB)
-	_, _, ok := tree.Get(keyA)
+	_, ok := tree.Get(keyA)
 	if !ok {
 		t.Fatal("A doesn't exist")
 	}
-	_, _, ok = tree.Get(keyAB)
+	_, ok = tree.Get(keyAB)
 	if ok {
 		t.Fatal("AB exists")
 	}
-	_, _, ok = tree.Get(keyABC)
+	_, ok = tree.Get(keyABC)
 	if !ok {
 		t.Fatal("ABC doesn't exist")
 	}
@@ -750,11 +750,11 @@ func Test_deleteNonExistantIntermediate(t *testing.T) {
 	_, _, tree = tree.Insert(keyAB, 1)
 	_, _, tree = tree.Insert(keyAC, 2)
 	_, _, tree = tree.Delete([]byte{'a'})
-	_, _, ok := tree.Get(keyAB)
+	_, ok := tree.Get(keyAB)
 	if !ok {
 		t.Fatal("AB doesn't exist")
 	}
-	_, _, ok = tree.Get(keyAC)
+	_, ok = tree.Get(keyAC)
 	if !ok {
 		t.Fatal("AC doesn't exist")
 	}
@@ -767,7 +767,7 @@ func Test_deleteNonExistantCommonPrefix(t *testing.T) {
 	keyAB := []byte{'a', 'b', 'c'}
 	_, _, tree = tree.Insert(keyAB, 1)
 	_, _, tree = tree.Delete([]byte{'a', 'b', 'e'})
-	_, _, ok := tree.Get(keyAB)
+	_, ok := tree.Get(keyAB)
 	if !ok {
 		t.Fatal("AB doesn't exist")
 	}
@@ -800,7 +800,7 @@ func Test_prefix(t *testing.T) {
 	ins("abcd")
 	ins("bc")
 
-	iter, _ := tree.Prefix([]byte("ab"))
+	iter := tree.Prefix([]byte("ab"))
 	k, v, ok := iter.Next()
 	assert.True(t, ok)
 	assert.Equal(t, []byte("ab"), k)
@@ -827,7 +827,7 @@ func Test_deleteEmptyKey(t *testing.T) {
 
 	_, _, tree = tree.Insert([]byte{}, "x")
 
-	v, watch, ok := tree.Get([]byte{})
+	v, watch, ok := tree.GetWatch([]byte{})
 	assert.True(t, ok)
 	assert.Equal(t, "x", v)
 	select {
@@ -838,7 +838,7 @@ func Test_deleteEmptyKey(t *testing.T) {
 
 	_, _, tree = tree.Delete([]byte{})
 
-	_, _, ok = tree.Get([]byte{})
+	_, ok = tree.Get([]byte{})
 	assert.False(t, ok)
 
 	select {
@@ -883,7 +883,7 @@ func Test_txn(t *testing.T) {
 
 	// Original tree should be untouched.
 	for i := 1; i <= 3; i++ {
-		_, _, ok := tree.Get(uint64Key(uint64(i)))
+		_, ok := tree.Get(uint64Key(uint64(i)))
 		assert.True(t, ok, "Get(%d)", i)
 	}
 
@@ -1071,11 +1071,11 @@ func Test_prefix_regression(t *testing.T) {
 	_, _, tree = tree.Insert([]byte("foobar"), "foobar")
 	_, _, tree = tree.Insert([]byte("foo"), "foo")
 
-	s, _, found := tree.Get([]byte("foobar"))
+	s, found := tree.Get([]byte("foobar"))
 	require.True(t, found)
 	require.Equal(t, s, "foobar")
 
-	s, _, found = tree.Get([]byte("foo"))
+	s, found = tree.Get([]byte("foo"))
 	require.True(t, found)
 	require.Equal(t, s, "foo")
 }
@@ -1099,7 +1099,7 @@ func Test_iterate(t *testing.T) {
 		watches := []<-chan struct{}{}
 		for _, i := range keys {
 			_, _, tree = tree.Insert(hexKey(uint64(i)), uint64(i))
-			v, watch, ok := tree.Get(hexKey(uint64(i)))
+			v, watch, ok := tree.GetWatch(hexKey(uint64(i)))
 			require.True(t, ok, "Get %x", hexKey(uint64(i)))
 			require.Equal(t, v, uint64(i), "values equal")
 			require.NotNil(t, watch, "watch not nil")
@@ -1167,7 +1167,7 @@ func Test_iterate(t *testing.T) {
 
 			// All the rest of the keys can still be found
 			for _, j := range keys[i+1:] {
-				n, _, found := txn.Get(hexKey(j))
+				n, found := txn.Get(hexKey(j))
 				if !assert.True(t, found) || !assert.Equal(t, n, j) {
 					fmt.Println("--- new tree")
 					txn.PrintTree()
@@ -1196,7 +1196,7 @@ func Test_closed_chan_regression(t *testing.T) {
 	// No reachable channel should be closed
 	for _, c := range tree.root.children() {
 		select {
-		case <-c.watch:
+		case <-c.watch.channel():
 			t.Logf("%x %p closed already", c.prefix(), &c.watch)
 			t.FailNow()
 		default:
@@ -1258,7 +1258,7 @@ func TestEmptyKey(t *testing.T) {
 	_, _, tree = tree.Insert([]byte(""), 1)
 	require.Equal(t, 1, tree.Len())
 
-	v, _, found := tree.Get([]byte(""))
+	v, found := tree.Get([]byte(""))
 	require.True(t, found)
 	require.Equal(t, 1, v)
 
@@ -1364,7 +1364,7 @@ func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 		txn := tree.Txn()
 		for _, key := range keys {
 			if doGetInsert {
-				v, _, _ := txn.Get(key)
+				v, _ := txn.Get(key)
 				txn.Insert(key, v)
 			} else {
 				txn.Modify(key, 123, func(x, _ int) int { return x })
@@ -1494,12 +1494,31 @@ func Benchmark_Get(b *testing.B) {
 	for b.Loop() {
 		for j := range uint64(numObjectsToInsert) {
 			binary.BigEndian.PutUint64(key[:], j)
-			v, _, ok := tree.Get(key[:])
+			v, ok := tree.Get(key[:])
 			if v != j {
 				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
 			}
 		}
 
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_GetWatch(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := range uint64(numObjectsToInsert) {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+
+	var key [8]byte // to avoid the allocation
+	for b.Loop() {
+		for j := range uint64(numObjectsToInsert) {
+			binary.BigEndian.PutUint64(key[:], j)
+			v, _, ok := tree.GetWatch(key[:])
+			if v != j {
+				b.Fatalf("impossible: %d != %d || %v", v, j, ok)
+			}
+		}
 	}
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }

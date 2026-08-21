@@ -79,7 +79,7 @@ func (s Set[T]) Has(v T) bool {
 	if !s.hasTree {
 		return false
 	}
-	_, _, found := s.tree.Get(s.toBytes(v))
+	_, found := s.tree.Get(s.toBytes(v))
 	return found
 }
 
