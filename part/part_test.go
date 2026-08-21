@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"slices"
 	"testing"
 	"time"
 
@@ -223,6 +224,68 @@ func Test_watchClosingRandom(t *testing.T) {
 	assertClosed(t, rootWatch)
 	for _, watch := range watches {
 		assertClosed(t, watch)
+	}
+}
+
+func TestTxnWatchCollection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		keys       []string
+		operations func(*Txn[int])
+	}{
+		{
+			name: "root leaf deletion",
+			keys: []string{"a"},
+			operations: func(txn *Txn[int]) {
+				txn.Delete([]byte("a"))
+			},
+		},
+		{
+			name: "child leaf deletion",
+			keys: []string{"a", "b"},
+			operations: func(txn *Txn[int]) {
+				txn.Delete([]byte("a"))
+			},
+		},
+		{
+			name: "internal leaf deletion",
+			keys: []string{"a", "ab", "ac"},
+			operations: func(txn *Txn[int]) {
+				txn.Delete([]byte("a"))
+			},
+		},
+		{
+			name: "repeated replacement and deletion",
+			keys: []string{"a"},
+			operations: func(txn *Txn[int]) {
+				txn.Insert([]byte("a"), 2)
+				txn.Insert([]byte("a"), 3)
+				txn.Delete([]byte("a"))
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			tree := New[int]()
+			txn := tree.Txn()
+			for i, key := range test.keys {
+				txn.Insert([]byte(key), i)
+			}
+			tree = txn.CommitAndNotify()
+
+			txn = tree.Txn()
+			test.operations(txn)
+
+			watches := slices.Clone(txn.watches)
+			require.NotEmpty(t, watches)
+			txn.CommitAndNotify()
+			for _, watch := range watches {
+				require.True(t, watch.isClosed())
+			}
+		})
 	}
 }
 

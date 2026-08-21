@@ -46,9 +46,7 @@ type Option func(*options)
 var RootOnlyWatch = (*options).setRootOnlyWatch
 
 func newTxn[T any](o options) *Txn[T] {
-	txn := &Txn[T]{
-		watches: make(map[*watchState]struct{}),
-	}
+	txn := &Txn[T]{}
 	txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
 	txn.opts = o
 	return txn
@@ -64,6 +62,7 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	if prevTxn := t.prevTxn.Swap(nil); prevTxn != nil {
 		txn = prevTxn
 		clear(txn.watches)
+		txn.watches = txn.watches[:0]
 		txn.dirty = false
 	} else {
 		txn = newTxn[T](t.opts)

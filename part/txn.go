@@ -35,7 +35,7 @@ type Txn[T any] struct {
 
 	// watches contains the channels of cloned nodes that should be closed
 	// when transaction is committed.
-	watches map[*watchState]struct{}
+	watches []*watchState
 
 	// deleteParentsCache keeps the last allocated slice to avoid
 	// reallocating it on every deletion.
@@ -224,25 +224,28 @@ func (txn *Txn[T]) Commit() Tree[T] {
 	return t
 }
 
-// watchesReuseThreshold is the threshold at which the [txn.watches] hash
-// map is reused for next transaction.
-const watchesReuseThreshold = 64
+// watchesReuseThreshold is the largest [txn.watches] backing array retained
+// for the next transaction. At the threshold this retains roughly 8KB.
+const watchesReuseThreshold = 1024
 
 // Notify closes the watch channels of nodes that were
 // mutated as part of this transaction. Must be called before
 // Tree.Txn() is used again.
 func (txn *Txn[T]) Notify() {
-	for ch := range txn.watches {
-		ch.close()
+	for _, watch := range txn.watches {
+		watch.close()
 	}
 	if !txn.dirty && len(txn.watches) > 0 {
 		panic("BUG: watch channels marked but txn not dirty")
 	}
-	// Clear or reallocate the watches hash map for the next transaction.
-	if len(txn.watches) <= watchesReuseThreshold {
-		clear(txn.watches)
+	// Clear the channels to allow them to be collected. Avoid retaining an
+	// unusually large backing array on the transaction.
+	numWatches := len(txn.watches)
+	clear(txn.watches)
+	if numWatches <= watchesReuseThreshold {
+		txn.watches = txn.watches[:0]
 	} else {
-		txn.watches = make(map[*watchState]struct{})
+		txn.watches = nil
 	}
 	if txn.dirty && txn.rootWatch != nil {
 		txn.rootWatch.close()
@@ -257,7 +260,7 @@ func (txn *Txn[T]) Notify() {
 func (txn *Txn[T]) PrintTree() {
 	txn.root.printTree(0)
 	fmt.Printf("watches: ")
-	for watch := range txn.watches {
+	for _, watch := range txn.watches {
 		fmt.Printf("%p ", watch)
 	}
 	fmt.Println()
@@ -269,12 +272,17 @@ func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
 		// be mutated in-place.
 		return n
 	}
-	if n.watch != nil {
-		txn.watches[n.watch] = struct{}{}
-	}
+	txn.addWatch(n.watch)
 	n = n.clone(!txn.opts.rootOnlyWatch())
 	n.setTxnID(txn.txnID)
 	return n
+}
+
+func (txn *Txn[T]) addWatch(watch *watchState) {
+	if watch == nil {
+		return
+	}
+	txn.watches = append(txn.watches, watch)
 }
 
 func (txn *Txn[T]) insert(root *header[T], key []byte, value T) (oldValue T, newValue T, hadOld bool, watch *watchState, newRoot *header[T]) {
@@ -315,9 +323,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 			// We've found a free slot where to insert the key.
 			if this.size()+1 > this.cap() {
 				// Node too small, promote it to the next size.
-				if this.watch != nil {
-					txn.watches[this.watch] = struct{}{}
-				}
+				txn.addWatch(this.watch)
 				this = this.promote(txn.txnID)
 			} else {
 				// Node is big enough, clone it so we can mutate it
@@ -486,22 +492,18 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	hadOld = true
 
 	// Mark the watch channel of the target for closing.
-	if leaf.watch != nil {
-		txn.watches[leaf.watch] = struct{}{}
+	if !target.isLeaf() {
+		txn.addWatch(leaf.watch)
 	}
 
 	if target == root {
 		switch {
 		case root.isLeaf() || root.size() == 0:
-			if root.watch != nil {
-				txn.watches[root.watch] = struct{}{}
-			}
+			txn.addWatch(root.watch)
 			// Root is a leaf or node without children
 			newRoot = nil
 		case root.size() == 1:
-			if root.watch != nil {
-				txn.watches[root.watch] = struct{}{}
-			}
+			txn.addWatch(root.watch)
 			// Root is a non-leaf node with single child. We can replace
 			// the root with the child.
 			child := root.children()[0]
@@ -526,9 +528,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	if this.node.size() == 1 {
 		// The target node is not a leaf node and has only a single
 		// child. Shift the child up.
-		if this.node.watch != nil {
-			txn.watches[this.node.watch] = struct{}{}
-		}
+		txn.addWatch(this.node.watch)
 		child := this.node.children()[0]
 		childClone := child.clone(false)
 		childClone.watch = child.watch
@@ -545,9 +545,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	} else {
 		// The target node is a leaf node or a non-leaf node without any
 		// children. We can just drop it from the parent.
-		if this.node.watch != nil {
-			txn.watches[this.node.watch] = struct{}{}
-		}
+		txn.addWatch(this.node.watch)
 		parent.node = txn.removeChild(parent.node, this.index)
 	}
 
@@ -600,9 +598,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 			remainingIndex = 1
 		}
 
-		if parent.watch != nil {
-			txn.watches[parent.watch] = struct{}{}
-		}
+		txn.addWatch(parent.watch)
 
 		child := parent.node4().children[remainingIndex]
 		// Clone for prefix adjustment, but leave watch alone.
@@ -675,9 +671,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 		newParent.remove(index)
 		return newParent
 	}
-	if parent.watch != nil {
-		txn.watches[parent.watch] = struct{}{}
-	}
+	txn.addWatch(parent.watch)
 	return newParent
 }
 
@@ -685,7 +679,7 @@ var runValidation = os.Getenv("STATEDB_VALIDATE") != ""
 
 // validateTree checks that the resulting tree is well-formed and panics
 // if it is not.
-func validateTree[T any](node *header[T], parents []*header[T], watches map[*watchState]struct{}, maxTxnID uint64) {
+func validateTree[T any](node *header[T], parents []*header[T], watches []*watchState, maxTxnID uint64) {
 	if !runValidation {
 		return
 	}
@@ -715,8 +709,8 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[*wat
 		// If a leaf's watch channel is to be closed then parent's should be
 		// marked closed too. The case where node is a leaf is handled below.
 		if !node.isLeaf() {
-			if _, found := watches[leaf.watch]; found {
-				_, found := watches[node.watch]
+			if found := slices.Contains(watches, leaf.watch); found {
+				found := slices.Contains(watches, node.watch)
 				assert(found, "node's watch channel not marked for closing when leaf is")
 			}
 		}
@@ -750,12 +744,12 @@ func validateTree[T any](node *header[T], parents []*header[T], watches map[*wat
 
 	// Nodes that have a watch channel that is to be closed must
 	// also have all their parent's watch channels to be closed.
-	if _, found := watches[node.watch]; found {
+	if found := slices.Contains(watches, node.watch); found {
 		if node.watch.isClosed() {
 			panic("node's watch channel marked for closing but is already closed!")
 		}
 		for i, p := range parents {
-			_, found := watches[p.watch]
+			found := slices.Contains(watches, p.watch)
 			if !found {
 				p.printTree(0)
 				panic(fmt.Sprintf("parent %p (%d) watch channel (%p) not marked for closing (child %p, watch %p)", p, i, p.watch, node, node.watch))
