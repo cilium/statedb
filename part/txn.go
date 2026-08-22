@@ -609,25 +609,45 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
 		return childClone
 
-	case parent.kind() == nodeKind256 && size <= 49:
-		demoted := (&node48[T]{header: *parent}).self()
+	case parent.kind() == nodeKind256 && size <= 129:
+		demoted := (&node128[T]{header: *parent}).self()
 		if parent.watch != nil {
 			demoted.watch = newWatchState()
 		}
-		demoted.setKind(nodeKind48)
+		demoted.setKind(nodeKind128)
 		demoted.setSize(size - 1)
 		demoted.setTxnID(txn.txnID)
-		n48 := demoted.node48()
-		n48.leaf = parent.getLeaf()
-		children := n48.children[:0]
+		n128 := demoted.node128()
+		n128.leaf = parent.getLeaf()
+		children := n128.children[:0]
 		for k, n := range parent.node256().children[:] {
 			if k != index && n != nil {
-				n48.index[k] = uint8(len(children) + 1)
+				n128.bitmap[k/64] |= uint64(1) << (k % 64)
 				children = append(children, n)
 			}
 		}
 		newParent = demoted
-	case parent.kind() == nodeKind48 && size <= 17:
+	case parent.kind() == nodeKind128 && size <= 65:
+		demoted := (&node64[T]{header: *parent}).self()
+		if parent.watch != nil {
+			demoted.watch = newWatchState()
+		}
+		demoted.setKind(nodeKind64)
+		demoted.setSize(size - 1)
+		demoted.setTxnID(txn.txnID)
+		n64 := demoted.node64()
+		n64.leaf = parent.getLeaf()
+		idx := 0
+		for i, child := range parent.children() {
+			if i != index {
+				n64.children[idx] = child
+				key := child.key()
+				n64.bitmap[key/64] |= uint64(1) << (key % 64)
+				idx++
+			}
+		}
+		newParent = demoted
+	case parent.kind() == nodeKind64 && size <= 17:
 		demoted := (&node16[T]{header: *parent}).self()
 		if parent.watch != nil {
 			demoted.watch = newWatchState()
@@ -736,11 +756,14 @@ func validateTree[T any](node *header[T], parents []*header[T], watches []*watch
 	// Node16 must have occupancy higher than 4
 	assert(node.kind() != nodeKind16 || node.size() > 4, "node16 has fewer children than 5")
 
-	// Node48 must have occupancy higher than 16
-	assert(node.kind() != nodeKind48 || node.size() > 16, "node48 has fewer children than 17")
+	// Node64 must have occupancy higher than 16
+	assert(node.kind() != nodeKind64 || node.size() > 16, "node64 has fewer children than 17")
 
-	// Node256 must have occupancy higher than 48
-	assert(node.kind() != nodeKind256 || node.size() > 48, "node256 has fewer children than 49")
+	// Node128 must have occupancy higher than 64
+	assert(node.kind() != nodeKind128 || node.size() > 64, "node128 has fewer children than 65")
+
+	// Node256 must have occupancy higher than 128
+	assert(node.kind() != nodeKind256 || node.size() > 128, "node256 has fewer children than 129")
 
 	// Nodes that have a watch channel that is to be closed must
 	// also have all their parent's watch channels to be closed.
