@@ -1766,78 +1766,78 @@ func Benchmark_findIndex16(b *testing.B) {
 	}
 }
 
-func Benchmark_find48(b *testing.B) {
-	n := &node48[bool]{
+func Benchmark_find64(b *testing.B) {
+	n := &node64[bool]{
 		header:   header[bool]{},
-		children: [48]*header[bool]{},
+		children: [64]*header[bool]{},
 		leaf:     nil,
-		index:    [256]uint8{},
+		bitmap:   [4]uint64{},
 	}
-	keyBytes := [48]byte{}
-	leaves := [48]leaf[bool]{}
-	for i := range 48 {
+	keyBytes := [64]byte{}
+	leaves := [64]leaf[bool]{}
+	for i := range 64 {
 		keyBytes[i] = byte(i)
 		leaves[i].prefixP = &keyBytes[i]
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = uint8(i + 1)
+		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)
 	}
-	n.setKind(nodeKind48)
-	n.setSize(48)
+	n.setKind(nodeKind64)
+	n.setSize(64)
 
 	for b.Loop() {
-		n.find(48)
+		n.find(64)
 	}
 }
 
-func Benchmark_findIndex48_hit(b *testing.B) {
-	n := &node48[bool]{
+func Benchmark_findIndex64_hit(b *testing.B) {
+	n := &node64[bool]{
 		header:   header[bool]{},
-		children: [48]*header[bool]{},
+		children: [64]*header[bool]{},
 		leaf:     nil,
-		index:    [256]uint8{},
+		bitmap:   [4]uint64{},
 	}
-	keyBytes := [48]byte{}
-	leaves := [48]leaf[bool]{}
-	for i := range 48 {
+	keyBytes := [64]byte{}
+	leaves := [64]leaf[bool]{}
+	for i := range 64 {
 		keyBytes[i] = byte(i)
 		leaves[i].prefixP = &keyBytes[i]
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = uint8(i + 1)
+		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)
 	}
-	n.setKind(nodeKind48)
-	n.setSize(48)
+	n.setKind(nodeKind64)
+	n.setSize(64)
 
 	for b.Loop() {
-		n.findIndex(47)
+		n.findIndex(63)
 	}
 }
 
-func Benchmark_findIndex48_miss(b *testing.B) {
-	n := &node48[bool]{
+func Benchmark_findIndex64_miss(b *testing.B) {
+	n := &node64[bool]{
 		header:   header[bool]{},
-		children: [48]*header[bool]{},
+		children: [64]*header[bool]{},
 		leaf:     nil,
-		index:    [256]uint8{},
+		bitmap:   [4]uint64{},
 	}
-	keyBytes := [48]byte{}
-	leaves := [48]leaf[bool]{}
-	for i := range 48 {
+	keyBytes := [64]byte{}
+	leaves := [64]leaf[bool]{}
+	for i := range 64 {
 		keyBytes[i] = byte(i)
 		leaves[i].prefixP = &keyBytes[i]
 		leaves[i].prefixLen = 1
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
-		n.index[byte(i)] = uint8(i + 1)
+		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)
 	}
-	n.setKind(nodeKind48)
-	n.setSize(48)
+	n.setKind(nodeKind64)
+	n.setSize(64)
 
 	for b.Loop() {
-		n.findIndex(48)
+		n.findIndex(64)
 	}
 }
 
