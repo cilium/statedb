@@ -60,6 +60,17 @@ func TestStringSet(t *testing.T) {
 	assert.Equal(t, 1, s5.Len())
 }
 
+func TestSetAllStopsEarly(t *testing.T) {
+	t.Parallel()
+
+	count := 0
+	for range part.NewSet("first", "second").All() {
+		count++
+		break
+	}
+	require.Equal(t, 1, count)
+}
+
 func TestSetJSON(t *testing.T) {
 	t.Parallel()
 	s := part.NewSet("foo", "bar", "baz")

@@ -96,7 +96,9 @@ func (s Set[T]) All() iter.Seq[T] {
 
 func (s Set[T]) yieldAll(yield func(v T) bool) {
 	for _, v := range s.tree.Iterator().All {
-		yield(v)
+		if !yield(v) {
+			return
+		}
 	}
 }
 
