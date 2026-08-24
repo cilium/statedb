@@ -460,20 +460,28 @@ func TestMultipleReconcilersPerModuleMetrics(t *testing.T) {
 		<-watch
 	}
 
-	require.NotNil(t, metrics.ReconciliationCountVar.Get("test/left"))
-	require.NotNil(t, metrics.ReconciliationCountVar.Get("test/right"))
-	require.NotNil(t, metrics.ReconciliationCurrentErrorsVar.Get("test/left"))
-	require.NotNil(t, metrics.ReconciliationCurrentErrorsVar.Get("test/right"))
-	assert.NotEqual(t, "0", metrics.ReconciliationCountVar.Get("test/left").String())
-	assert.NotEqual(t, "0", metrics.ReconciliationCountVar.Get("test/right").String())
-	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/left").String())
-	assert.Equal(t, "0", metrics.ReconciliationCurrentErrorsVar.Get("test/right").String())
+	// Status updates are committed before the reconciliation round publishes
+	// its metrics, so wait for the expected values to appear.
+	require.Eventually(t, func() bool {
+		leftCount := metrics.ReconciliationCountVar.Get("test/left")
+		rightCount := metrics.ReconciliationCountVar.Get("test/right")
+		leftErrors := metrics.ReconciliationCurrentErrorsVar.Get("test/left")
+		rightErrors := metrics.ReconciliationCurrentErrorsVar.Get("test/right")
+		return leftCount != nil && leftCount.String() != "0" &&
+			rightCount != nil && rightCount.String() != "0" &&
+			leftErrors != nil && leftErrors.String() == "0" &&
+			rightErrors != nil && rightErrors.String() == "0"
+	}, 5*time.Second, time.Millisecond)
 	assert.Nil(t, metrics.ReconciliationCountVar.Get("test"))
 
-	assert.NotNil(t, health.GetChild("job-reconcile-left"))
-	assert.NotNil(t, health.GetChild("job-refresh-left"))
-	assert.NotNil(t, health.GetChild("job-reconcile-right"))
-	assert.NotNil(t, health.GetChild("job-refresh-right"))
+	// The refresh jobs start independently from reconciliation, so reaching the
+	// done statuses does not guarantee that their health nodes exist yet.
+	require.Eventually(t, func() bool {
+		return health.GetChild("job-reconcile-left") != nil &&
+			health.GetChild("job-refresh-left") != nil &&
+			health.GetChild("job-reconcile-right") != nil &&
+			health.GetChild("job-refresh-right") != nil
+	}, 5*time.Second, time.Millisecond)
 
 	require.NoError(t, hive.Stop(log, context.TODO()), "Stop")
 }
