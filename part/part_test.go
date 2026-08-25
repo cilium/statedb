@@ -1351,6 +1351,28 @@ func benchmark_Insert(b *testing.B, opts ...Option) {
 	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func Benchmark_WatchReplace(b *testing.B) {
+	keys := make([][]byte, numObjectsToInsert)
+	tree := New[int]()
+	txn := tree.Txn()
+	for i := range keys {
+		keys[i] = binary.BigEndian.AppendUint64(nil, uint64(i))
+		txn.Insert(keys[i], i)
+	}
+	tree = txn.CommitAndNotify()
+
+	b.ResetTimer()
+	for b.Loop() {
+		txn := tree.Txn()
+		for i, key := range keys {
+			txn.Insert(key, i)
+		}
+		tree = txn.CommitAndNotify()
+	}
+	b.StopTimer()
+	b.ReportMetric(float64(b.N*numObjectsToInsert)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func benchmark_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	tree := New[int](RootOnlyWatch)
 	keys := [][]byte{}
