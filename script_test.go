@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cilium/hive"
 	"github.com/cilium/hive/cell"
@@ -46,6 +47,30 @@ func TestScript(t *testing.T) {
 		[]string{},
 		"testdata/*.txtar",
 	)
+}
+
+func TestWatchCmdClosesChangeIterator(t *testing.T) {
+	db, table, metrics := newTestDB(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	state, err := script.NewState(ctx, t.TempDir(), nil)
+	require.NoError(t, err)
+	engine := script.Engine{
+		Cmds: map[string]script.Cmd{"db/watch": WatchCmd(db)},
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- engine.ExecuteLine(state, "db/watch test", &strings.Builder{})
+	}()
+
+	require.Eventually(t, func() bool {
+		return expvarInt(metrics.DeleteTrackerCountVar.Get(table.Name())) == 1
+	}, time.Second, time.Millisecond)
+
+	cancel()
+	require.NoError(t, <-done)
+	require.EqualValues(t, 0, expvarInt(metrics.DeleteTrackerCountVar.Get(table.Name())))
 }
 
 func TestHeaderLine(t *testing.T) {
