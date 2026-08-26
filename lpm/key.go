@@ -48,9 +48,13 @@ func NetIPPrefix4ToIndexKey(prefix netip.Prefix) index.Key {
 	)
 }
 
+func lpmDataLen(prefixLen PrefixLen) int {
+	return (int(prefixLen) + 7) / 8
+}
+
 func EncodeLPMKey(data []byte, prefixLen PrefixLen) index.Key {
-	dataLen := (prefixLen + 7) / 8
-	if int(dataLen) > len(data) {
+	dataLen := lpmDataLen(prefixLen)
+	if dataLen > len(data) {
 		panic(fmt.Sprintf("invalid LPM key, data too short (%d) for prefix length (%d)", len(data), prefixLen))
 	}
 	key := make(index.Key, dataLen, dataLen+2)
@@ -69,7 +73,7 @@ func DecodeLPMKey(key index.Key) (data []byte, prefixLen PrefixLen) {
 	}
 	data = key[:len(key)-2]
 	prefixLen = binary.BigEndian.Uint16(key[len(key)-2:])
-	if int((prefixLen+7)/8) > len(data) {
+	if lpmDataLen(prefixLen) > len(data) {
 		panic("prefix length too long in LPM key")
 	}
 	return
