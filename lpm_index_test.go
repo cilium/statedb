@@ -288,6 +288,45 @@ func TestLPMIndexNonUniqueSnapshotIsolation(t *testing.T) {
 	require.Equal(t, prefix2, objs[1].Prefix, "uncommitted update leaked into old snapshot")
 }
 
+func TestLPMIndexIterationDeduplicatesObjects(t *testing.T) {
+	db := New()
+	multiPortIndex := LPMIndex[lpmTestObject]{
+		Name:   "multi-port",
+		Unique: false,
+		FromObject: func(obj lpmTestObject) iter.Seq2[[]byte, lpm.PrefixLen] {
+			return func(yield func([]byte, lpm.PrefixLen) bool) {
+				key := binary.BigEndian.AppendUint16(nil, obj.Port)
+				if !yield(key, 8) {
+					return
+				}
+				yield(key, 16)
+			}
+		},
+	}
+	tbl, err := NewTable(db, "lpm-deduplicate", lpmIDIndex, multiPortIndex)
+	require.NoError(t, err)
+
+	wtxn := db.WriteTxn(tbl)
+	_, _, err = tbl.Insert(wtxn, lpmTestObject{ID: 1, Port: 0x1234})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+
+	key := binary.BigEndian.AppendUint16(nil, 0x1200)
+	objs := Collect(tbl.Prefix(rtxn, multiPortIndex.Query(key, 8)))
+	require.Equal(t, []uint16{1}, toLPMTestObjectIDs(objs))
+
+	objs = Collect(tbl.LowerBound(rtxn, multiPortIndex.Query(nil, 0)))
+	require.Equal(t, []uint16{1}, toLPMTestObjectIDs(objs))
+}
+
+func toLPMTestObjectIDs(objs []lpmTestObject) []uint16 {
+	ids := make([]uint16, len(objs))
+	for i, obj := range objs {
+		ids[i] = obj.ID
+	}
+	return ids
+}
+
 func TestLPMIndexIteratorNonUnique(t *testing.T) {
 	idx := lpmIndex{
 		lpm:          lpm.New[lpmEntry](),
