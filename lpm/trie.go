@@ -477,7 +477,10 @@ func lpmLookup[T any](root *lpmNode[T], key index.Key) (value T, ok bool) {
 		nodePrefixLen := node.prefixLen()
 		matchLen := longestMatch(currentLen, node, keyData, keyPrefixLen)
 		if matchLen == keyPrefixLen {
-			return node.value, !node.imaginary
+			if matchLen == nodePrefixLen && !node.imaginary {
+				return node.value, true
+			}
+			break
 		}
 		if matchLen < nodePrefixLen {
 			break
