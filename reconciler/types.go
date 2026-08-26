@@ -431,6 +431,22 @@ func (s StatusSet) Get(name string) Status {
 	return s.statuses[i].Status
 }
 
+// Delete returns a new status set without the named reconciler.
+// A subsequent Pending call will not mark the reconciler pending unless its
+// name is passed to Pending again.
+func (s StatusSet) Delete(name string) StatusSet {
+	i, found := s.find(name)
+	if !found {
+		return s
+	}
+
+	statuses := make([]namedStatus, len(s.statuses)-1)
+	copy(statuses, s.statuses[:i])
+	copy(statuses[i:], s.statuses[i+1:])
+	s.statuses = statuses
+	return s
+}
+
 func (s StatusSet) All() map[string]Status {
 	m := make(map[string]Status, len(s.statuses))
 	for _, ns := range s.statuses {
