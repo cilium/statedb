@@ -255,6 +255,39 @@ func TestLPMIndexNonUnique(t *testing.T) {
 	require.EqualValues(t, 20, objs[0].ID)
 }
 
+func TestLPMIndexNonUniqueSnapshotIsolation(t *testing.T) {
+	db := New()
+	tbl := newLPMNonUniqueTestTable(db)
+
+	key := binary.BigEndian.AppendUint16(nil, 0x1234)
+	prefix1 := netip.MustParsePrefix("10.0.0.0/8")
+	prefix2 := netip.MustParsePrefix("10.1.0.0/16")
+
+	wtxn := db.WriteTxn(tbl)
+	for _, obj := range []lpmTestObject{
+		{ID: 10, Prefix: prefix1, Port: 0x1234, PortPrefixLen: 16},
+		{ID: 20, Prefix: prefix2, Port: 0x1234, PortPrefixLen: 16},
+	} {
+		_, _, err := tbl.Insert(wtxn, obj)
+		require.NoError(t, err)
+	}
+	oldSnapshot := wtxn.Commit()
+
+	wtxn = db.WriteTxn(tbl)
+	defer wtxn.Abort()
+	_, _, err := tbl.Insert(wtxn, lpmTestObject{
+		ID:            20,
+		Prefix:        netip.MustParsePrefix("10.1.1.0/24"),
+		Port:          0x1234,
+		PortPrefixLen: 16,
+	})
+	require.NoError(t, err)
+
+	objs := Collect(tbl.List(oldSnapshot, lpmPortNonUniqueIndex.Query(key, 16)))
+	require.Len(t, objs, 2)
+	require.Equal(t, prefix2, objs[1].Prefix, "uncommitted update leaked into old snapshot")
+}
+
 func TestLPMIndexIteratorNonUnique(t *testing.T) {
 	idx := lpmIndex{
 		lpm:          lpm.New[lpmEntry](),
