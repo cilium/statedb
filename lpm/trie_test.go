@@ -178,6 +178,25 @@ func TestEncodeDecodeLPMKey(t *testing.T) {
 	roundtrip([]byte{0xa, 0xb}, 16)
 }
 
+func TestEncodeDecodeLPMKeyMaxPrefixLen(t *testing.T) {
+	maxPrefixLen := PrefixLen(^uint16(0))
+	dataLen := (int(maxPrefixLen) + 7) / 8
+	data := make([]byte, dataLen)
+	data[len(data)-1] = 0xff
+
+	key := EncodeLPMKey(data, maxPrefixLen)
+	require.Len(t, key, dataLen+2)
+
+	decoded, prefixLen := DecodeLPMKey(key)
+	require.Equal(t, maxPrefixLen, prefixLen)
+	require.Len(t, decoded, dataLen)
+	require.Equal(t, byte(0xfe), decoded[len(decoded)-1])
+
+	require.Panics(t, func() {
+		DecodeLPMKey(index.Key{0xff, 0xff})
+	})
+}
+
 func TestDeleteCompressionInvariants(t *testing.T) {
 	prefix := func(p string) index.Key {
 		key := netip.MustParsePrefix(p)
