@@ -197,6 +197,8 @@ func TestLPMIndex(t *testing.T) {
 	})
 	txn = wtxn.Commit()
 
+	objs = Collect(tbl.Prefix(txn, lpmPrefixIndex.QueryPrefix(netip.MustParsePrefix("10.0.0.0/8"))))
+	require.Empty(t, objs)
 }
 
 func TestLPMIndexNonUnique(t *testing.T) {

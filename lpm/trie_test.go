@@ -100,6 +100,9 @@ func TestTrie(t *testing.T) {
 	values = slices.Collect(iteratorToValues(txn.Prefix(prefix("192.168.0.0/16"))))
 	require.Equal(t, []int{2, 3}, values)
 
+	values = slices.Collect(iteratorToValues(txn.Prefix(prefix("172.16.0.0/12"))))
+	require.Empty(t, values)
+
 	values = slices.Collect(iteratorToValues(txn.LowerBound(prefix("0.0.0.0/0"))))
 	require.Equal(t, []int{1, 999, 2, 3}, values)
 
