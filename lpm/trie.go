@@ -394,15 +394,15 @@ func (txn *Txn[T]) Prefix(key index.Key) *Iterator[T] {
 	var matchLen PrefixLen
 	for node != nil {
 		matchLen = longestMatch(matchLen, node, data, prefixLen)
-		if matchLen == prefixLen || matchLen < node.prefixLen() {
-			break
+		if matchLen == prefixLen {
+			return &Iterator[T]{start: node}
+		}
+		if matchLen < node.prefixLen() {
+			return nil
 		}
 		node = node.children[getBitAt(data, node.prefixLen())]
 	}
-	if node == nil {
-		return nil
-	}
-	return &Iterator[T]{start: node}
+	return nil
 }
 
 func (txn *Txn[T]) LowerBound(key index.Key) *Iterator[T] {
