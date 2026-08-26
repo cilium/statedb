@@ -201,6 +201,39 @@ func TestLPMIndex(t *testing.T) {
 	require.Empty(t, objs)
 }
 
+func TestNetIPPrefixIndexCanonicalizesMappedIPv4(t *testing.T) {
+	db := New()
+	tbl := newLPMTestTable(db)
+
+	wtxn := db.WriteTxn(tbl)
+	_, _, err := tbl.Insert(wtxn, lpmTestObject{
+		ID:     1,
+		Prefix: netip.MustParsePrefix("::ffff:10.0.0.0/104"),
+	})
+	require.NoError(t, err)
+	_, _, err = tbl.Insert(wtxn, lpmTestObject{
+		ID:     2,
+		Prefix: netip.MustParsePrefix("::/0"),
+	})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+
+	obj, _, found := tbl.Get(rtxn, lpmPrefixIndex.Query(netip.MustParseAddr("10.1.2.3")))
+	require.True(t, found)
+	require.EqualValues(t, 1, obj.ID)
+
+	obj, _, found = tbl.Get(rtxn, lpmPrefixIndex.Query(netip.MustParseAddr("::ffff:10.1.2.3")))
+	require.True(t, found)
+	require.EqualValues(t, 1, obj.ID)
+
+	_, _, found = tbl.Get(rtxn, lpmPrefixIndex.Query(netip.MustParseAddr("192.0.2.1")))
+	require.False(t, found, "IPv6 default route must not match an IPv4 address")
+
+	obj, _, found = tbl.Get(rtxn, lpmPrefixIndex.Query(netip.MustParseAddr("2001:db8::1")))
+	require.True(t, found)
+	require.EqualValues(t, 2, obj.ID)
+}
+
 func TestLPMIndexNonUnique(t *testing.T) {
 	db := New()
 	tbl := newLPMNonUniqueTestTable(db)
