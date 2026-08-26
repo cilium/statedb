@@ -84,8 +84,8 @@ cmp obj2.yaml obj2_get.yaml
 db/get -i prefix -f yaml -o obj1_get.yaml test1 10.0.0.0/8
 cmp obj1.yaml obj1_get.yaml
 
-db/get -i prefix -f yaml -o obj2_get.yaml test1 10.1.0.0/16
-cmp obj2.yaml obj2_get.yaml
+db/get -i prefix -f yaml -o obj1_get.yaml test1 10.1.0.0/16
+cmp obj1.yaml obj1_get.yaml
 
 # List
 db/list -o=list.table test1 1

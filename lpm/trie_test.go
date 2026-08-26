@@ -125,6 +125,32 @@ func TestTrie(t *testing.T) {
 	require.Equal(t, 999, v)
 }
 
+func TestTrieLookupQueryEndsAtCompressedNode(t *testing.T) {
+	t.Run("more specific node", func(t *testing.T) {
+		trie := New[string]()
+		txn := trie.Txn()
+		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{0}, 2), "00/2"))
+		trie = txn.Commit()
+
+		value, found := trie.Lookup(EncodeLPMKey([]byte{0}, 1))
+		require.False(t, found)
+		require.Empty(t, value)
+	})
+
+	t.Run("imaginary node", func(t *testing.T) {
+		trie := New[string]()
+		txn := trie.Txn()
+		require.NoError(t, txn.Insert(EncodeLPMKey(nil, 0), "default"))
+		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{0}, 2), "00/2"))
+		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{64}, 2), "01/2"))
+		trie = txn.Commit()
+
+		value, found := trie.Lookup(EncodeLPMKey([]byte{0}, 1))
+		require.True(t, found)
+		require.Equal(t, "default", value)
+	})
+}
+
 func TestEncodeDecodeLPMKey(t *testing.T) {
 	maskData := func(data []byte, prefixLen PrefixLen) []byte {
 		dataLen := (prefixLen + 7) / 8
