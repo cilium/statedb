@@ -570,12 +570,14 @@ func (e *lpmEntry) upsert(primaryKey index.Key, obj object) bool {
 	case -1:
 		oldHead := e.head
 		e.head = lpmEntryObject{primary: primaryKey, obj: obj}
+		e.tail = slices.Clone(e.tail)
 		e.tail = append(e.tail, lpmEntryObject{})
 		copy(e.tail[1:], e.tail[:len(e.tail)-1])
 		e.tail[0] = oldHead
 		return true
 	}
 	idx, found := e.searchTail(primaryKey)
+	e.tail = slices.Clone(e.tail)
 	if found {
 		e.tail[idx].obj = obj
 		return false
