@@ -95,19 +95,21 @@ func sanitizeAgo(s string) string {
 	return string(r.ReplaceAll([]byte(s), []byte("(??? ago)")))
 }
 
-func TestStatusSet(t *testing.T) {
-	assertJSONRoundtrip := func(s StatusSet) {
-		data, err := json.Marshal(s)
-		assert.NoError(t, err, "Marshal")
-		var s2 StatusSet
-		err = json.Unmarshal(data, &s2)
-		assert.NoError(t, err, "Unmarshal")
-		assert.Equal(t, sanitizeAgo(s.String()), sanitizeAgo(s2.String()))
-	}
+func assertStatusSetJSONRoundtrip(t *testing.T, s StatusSet) {
+	t.Helper()
 
+	data, err := json.Marshal(s)
+	assert.NoError(t, err, "Marshal")
+	var s2 StatusSet
+	err = json.Unmarshal(data, &s2)
+	assert.NoError(t, err, "Unmarshal")
+	assert.Equal(t, sanitizeAgo(s.String()), sanitizeAgo(s2.String()))
+}
+
+func TestStatusSet(t *testing.T) {
 	set := NewStatusSet()
 	assert.Equal(t, "Pending", set.String())
-	assertJSONRoundtrip(set)
+	assertStatusSetJSONRoundtrip(t, set)
 
 	s := set.Get("foo")
 	assert.Equal(t, s.Kind, StatusKindPending)
@@ -115,11 +117,17 @@ func TestStatusSet(t *testing.T) {
 
 	set = set.Set("foo", StatusDone())
 	set = set.Set("bar", StatusError(errors.New("fail")))
-	assertJSONRoundtrip(set)
+	assertStatusSetJSONRoundtrip(t, set)
 
 	assert.Equal(t, set.Get("foo").Kind, StatusKindDone)
 	assert.Equal(t, set.Get("bar").Kind, StatusKindError)
 	assert.Regexp(t, "^Errored: bar \\(fail\\), Done: foo \\(.* ago\\)", set.String())
+
+	previous := set
+	set = set.Set("foo", StatusRefreshing())
+	assert.Equal(t, StatusKindDone, previous.Get("foo").Kind)
+	assert.Equal(t, StatusKindRefreshing, set.Get("foo").Kind)
+	assert.Len(t, set.statuses, 2)
 
 	set = set.Pending()
 	assert.NotZero(t, set.Get("foo").ID)
@@ -127,5 +135,40 @@ func TestStatusSet(t *testing.T) {
 	assert.Equal(t, set.Get("bar").Kind, StatusKindPending)
 	assert.Equal(t, set.Get("baz").Kind, StatusKindPending)
 	assert.Regexp(t, "^Pending: bar foo \\(.* ago\\)", set.String())
-	assertJSONRoundtrip(set)
+	assertStatusSetJSONRoundtrip(t, set)
+}
+
+func TestStatusSetPendingWithReconcilers(t *testing.T) {
+	set := NewStatusSet().
+		Set("existing", StatusError(errors.New("previous failure"))).
+		Set("done", StatusDone())
+
+	existing := set.Get("existing")
+	done := set.Get("done")
+	names := []string{"new-b", "existing", "new-a", "new-b"}
+
+	pending := set.Pending(names...)
+
+	// Pending has value semantics and does not modify either the original set or
+	// the caller's list of default reconcilers.
+	assert.Equal(t, StatusKindError, set.Get("existing").Kind)
+	assert.Equal(t, existing.ID, set.Get("existing").ID)
+	assert.Equal(t, StatusKindDone, set.Get("done").Kind)
+	assert.Equal(t, done.ID, set.Get("done").ID)
+	assert.Equal(t, []string{"new-b", "existing", "new-a", "new-b"}, names)
+
+	assert.Len(t, pending.statuses, 4)
+	all := pending.All()
+	assert.Len(t, all, 4)
+	for _, name := range []string{"done", "existing", "new-a", "new-b"} {
+		status, found := all[name]
+		assert.True(t, found, name)
+		assert.Equal(t, StatusKindPending, status.Kind, name)
+		assert.Nil(t, status.Error, name)
+		assert.Equal(t, pending.id, status.ID, name)
+		assert.Equal(t, pending.updatedAt, status.UpdatedAt, name)
+	}
+	assert.NotEqual(t, set.id, pending.id)
+	assert.Regexp(t, `^Pending: done existing new-a new-b \(.* ago\)$`, pending.String())
+	assertStatusSetJSONRoundtrip(t, pending)
 }
