@@ -172,3 +172,37 @@ func TestStatusSetPendingWithReconcilers(t *testing.T) {
 	assert.Regexp(t, `^Pending: done existing new-a new-b \(.* ago\)$`, pending.String())
 	assertStatusSetJSONRoundtrip(t, pending)
 }
+
+func TestStatusSetDelete(t *testing.T) {
+	set := NewStatusSet().
+		Set("first", StatusDone()).
+		Set("middle", StatusError(errors.New("failed"))).
+		Set("last", StatusRefreshing())
+	original := set.All()
+
+	// Deleting a missing name is a no-op.
+	assert.Equal(t, set, set.Delete("missing"))
+
+	deleted := set.Delete("middle")
+	assert.Equal(t, original, set.All())
+	assert.Equal(t, map[string]Status{
+		"first": original["first"],
+		"last":  original["last"],
+	}, deleted.All())
+
+	// Pending retains only names that remain in the set.
+	pending := deleted.Pending()
+	assert.Len(t, pending.statuses, 2)
+	assert.NotContains(t, pending.All(), "middle")
+	assert.Equal(t, StatusKindPending, pending.Get("first").Kind)
+	assert.Equal(t, StatusKindPending, pending.Get("last").Kind)
+	readded := deleted.Pending("middle")
+	assert.Contains(t, readded.All(), "middle")
+	assert.Equal(t, StatusKindPending, readded.Get("middle").Kind)
+
+	// Deleting the boundary entries leaves an empty set.
+	empty := deleted.Delete("first").Delete("last")
+	assert.Empty(t, empty.statuses)
+	assert.Empty(t, empty.All())
+	assert.Equal(t, "Pending", empty.String())
+}
