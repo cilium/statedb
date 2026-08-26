@@ -113,6 +113,21 @@ func newLPMNonUniqueTestTable(db *DB) RWTable[lpmTestObject] {
 	return t
 }
 
+func TestNewTableRejectsLPMPrimaryIndex(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		indexer Indexer[lpmTestObject]
+	}{
+		{"NetIPPrefixIndex", lpmPrefixIndex},
+		{"LPMIndex", lpmPortIndex},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := NewTable(New(), "lpm-primary", test.indexer)
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestLPMIndex(t *testing.T) {
 	db := New()
 	tbl := newLPMTestTable(db)
