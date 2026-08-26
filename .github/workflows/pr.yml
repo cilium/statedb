@@ -35,8 +35,8 @@ jobs:
 
       - name: results
         if: success() || failure()
+        continue-on-error: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         uses: thollander/actions-comment-pull-request@v3
         with:
           comment-tag: results
           file-path: results.comment
-
