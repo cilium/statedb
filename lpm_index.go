@@ -200,11 +200,11 @@ type lpmIndex struct {
 
 // all implements tableIndex.
 func (l lpmIndex) all() (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.lpm.All()), l.watch
+	return newLPMIterator(l.lpm.All(), !l.unique), l.watch
 }
 
 func (l lpmIndex) allNoWatch() tableIndexIterator {
-	return newLPMIterator(l.lpm.All())
+	return newLPMIterator(l.lpm.All(), !l.unique)
 }
 
 // get implements tableIndex.
@@ -251,11 +251,11 @@ func (l lpmIndex) listNoWatch(key index.Key) tableIndexIterator {
 
 // lowerBound implements tableIndex.
 func (l lpmIndex) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.lpm.LowerBound(key)), l.watch
+	return newLPMIterator(l.lpm.LowerBound(key), !l.unique), l.watch
 }
 
 func (l lpmIndex) lowerBoundNoWatch(key index.Key) tableIndexIterator {
-	return newLPMIterator(l.lpm.LowerBound(key))
+	return newLPMIterator(l.lpm.LowerBound(key), !l.unique)
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -274,11 +274,11 @@ func (l lpmIndex) objectToKey(obj object) index.Key {
 
 // prefix implements tableIndex.
 func (l lpmIndex) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.lpm.Prefix(key)), l.watch
+	return newLPMIterator(l.lpm.Prefix(key), !l.unique), l.watch
 }
 
 func (l lpmIndex) prefixNoWatch(key index.Key) tableIndexIterator {
-	return newLPMIterator(l.lpm.Prefix(key))
+	return newLPMIterator(l.lpm.Prefix(key), !l.unique)
 }
 
 // rootWatch implements tableIndex.
@@ -316,11 +316,11 @@ type lpmIndexTxn struct {
 
 // all implements tableIndexTxn.
 func (l *lpmIndexTxn) all() (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.tx.All()), l.index.watch
+	return newLPMIterator(l.tx.All(), !l.index.unique), l.index.watch
 }
 
 func (l *lpmIndexTxn) allNoWatch() tableIndexIterator {
-	return newLPMIterator(l.tx.All())
+	return newLPMIterator(l.tx.All(), !l.index.unique)
 }
 
 // commit implements tableIndexTxn.
@@ -404,11 +404,11 @@ func (l *lpmIndexTxn) listNoWatch(key index.Key) tableIndexIterator {
 
 // lowerBound implements tableIndexTxn.
 func (l *lpmIndexTxn) lowerBound(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.tx.LowerBound(key)), l.index.watch
+	return newLPMIterator(l.tx.LowerBound(key), !l.index.unique), l.index.watch
 }
 
 func (l *lpmIndexTxn) lowerBoundNoWatch(key index.Key) tableIndexIterator {
-	return newLPMIterator(l.tx.LowerBound(key))
+	return newLPMIterator(l.tx.LowerBound(key), !l.index.unique)
 }
 
 // lowerBoundNext implements tableIndexTxn.
@@ -435,11 +435,11 @@ func (l *lpmIndexTxn) objectToKey(obj object) index.Key {
 
 // prefix implements tableIndexTxn.
 func (l *lpmIndexTxn) prefix(key index.Key) (tableIndexIterator, <-chan struct{}) {
-	return newLPMIterator(l.tx.Prefix(key)), l.index.watch
+	return newLPMIterator(l.tx.Prefix(key), !l.index.unique), l.index.watch
 }
 
 func (l *lpmIndexTxn) prefixNoWatch(key index.Key) tableIndexIterator {
-	return newLPMIterator(l.tx.Prefix(key))
+	return newLPMIterator(l.tx.Prefix(key), !l.index.unique)
 }
 
 // reindex implements tableIndexTxn.
@@ -657,17 +657,38 @@ func (e *lpmEntry) appendObjects(dst []object) []object {
 }
 
 type lpmIteratorAdapter struct {
-	iter *lpm.Iterator[lpmEntry]
+	iter        *lpm.Iterator[lpmEntry]
+	deduplicate bool
 }
 
-func newLPMIterator(iter *lpm.Iterator[lpmEntry]) tableIndexIterator {
-	return &lpmIteratorAdapter{iter: iter}
+func newLPMIterator(iter *lpm.Iterator[lpmEntry], deduplicate bool) tableIndexIterator {
+	return &lpmIteratorAdapter{iter: iter, deduplicate: deduplicate}
 }
 
 func (l *lpmIteratorAdapter) All(yield func([]byte, object) bool) {
+	var visited map[string]struct{}
+	if l.deduplicate {
+		visited = map[string]struct{}{}
+	}
+	emit := func(key []byte, entry lpmEntryObject) bool {
+		if visited != nil {
+			primary := string(entry.primary)
+			if _, found := visited[primary]; found {
+				return true
+			}
+			visited[primary] = struct{}{}
+		}
+		return yield(key, entry.obj)
+	}
 	l.iter.All(func(key []byte, entry lpmEntry) bool {
-		for _, obj := range entry.All {
-			if !yield(key, obj) {
+		if !entry.used {
+			return true
+		}
+		if !emit(key, entry.head) {
+			return false
+		}
+		for _, obj := range entry.tail {
+			if !emit(key, obj) {
 				return false
 			}
 		}
