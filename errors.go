@@ -20,6 +20,9 @@ var (
 	// ErrPrimaryIndexNotUnique indicates that the primary index for the table is not marked unique.
 	ErrPrimaryIndexNotUnique = errors.New("primary index not unique")
 
+	// ErrPrimaryIndexNotSupported indicates that the index type cannot be used as a primary index.
+	ErrPrimaryIndexNotSupported = errors.New("index type cannot be used as primary index")
+
 	// ErrEmptyIndexName indicates that a table index has an empty name.
 	ErrEmptyIndexName = errors.New("index name is empty")
 

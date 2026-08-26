@@ -322,6 +322,12 @@ type Indexer[Obj any] interface {
 	newTableIndex() tableIndex
 }
 
+// secondaryOnlyIndexer marks index implementations that cannot be used as a
+// table's primary index.
+type secondaryOnlyIndexer interface {
+	secondaryOnly()
+}
+
 // TableWritable is a constraint for objects that implement tabular
 // pretty-printing. Used by the "db" script commands to render a table.
 type TableWritable interface {

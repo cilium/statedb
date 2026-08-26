@@ -85,6 +85,10 @@ func NewTableAny[Obj any](
 		return nil, tableError(tableName, ErrEmptyIndexName)
 	}
 
+	if _, secondaryOnly := primaryIndexer.(secondaryOnlyIndexer); secondaryOnly {
+		return nil, tableError(tableName, ErrPrimaryIndexNotSupported)
+	}
+
 	// Primary index must always be unique
 	if !primaryIndexer.isUnique() {
 		return nil, tableError(tableName, ErrPrimaryIndexNotUnique)

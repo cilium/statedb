@@ -84,6 +84,8 @@ func (a NetIPPrefixIndex[Obj]) isIndexerOf(Obj) {
 	panic("isIndexerOf")
 }
 
+func (a NetIPPrefixIndex[Obj]) secondaryOnly() {}
+
 func (i NetIPPrefixIndex[Obj]) isUnique() bool {
 	return i.Unique
 }
@@ -126,6 +128,8 @@ type LPMIndex[Obj any] struct {
 func (l LPMIndex[Obj]) isIndexerOf(Obj) {
 	panic("isIndexerOf")
 }
+
+func (l LPMIndex[Obj]) secondaryOnly() {}
 
 // fromString implements Indexer.
 func (l LPMIndex[Obj]) fromString(s string) (index.Key, error) {
