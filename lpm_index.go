@@ -13,8 +13,8 @@ import (
 	"github.com/cilium/statedb/lpm"
 )
 
-// NetIPPrefixIndex indexes objects with a [netip.Prefix] in a LPM
-// index.
+// NetIPPrefixIndex indexes objects with a [netip.Prefix] in a LPM index.
+// IPv4-mapped IPv6 addresses and prefixes are canonicalized to IPv4.
 type NetIPPrefixIndex[Obj any] struct {
 	// Name of the index
 	Name string
@@ -29,10 +29,9 @@ type NetIPPrefixIndex[Obj any] struct {
 }
 
 func (a NetIPPrefixIndex[Obj]) Query(addr netip.Addr) Query[Obj] {
-	addr16 := addr.As16()
 	return Query[Obj]{
 		index: a.Name,
-		key:   lpm.EncodeLPMKey(addr16[:], 128),
+		key:   lpm.NetIPPrefixToIndexKey(netip.PrefixFrom(addr, addr.BitLen())),
 	}
 }
 

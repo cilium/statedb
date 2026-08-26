@@ -11,18 +11,32 @@ import (
 	"github.com/cilium/statedb/index"
 )
 
+// NetIPPrefixToIndexKey encodes prefix as an LPM index key. IPv4-mapped IPv6
+// prefixes contained in ::ffff:0:0/96 are canonicalized to IPv4.
 func NetIPPrefixToIndexKey(prefix netip.Prefix) index.Key {
-	addr := prefix.Addr().As16()
-	bits := prefix.Bits()
-	if prefix.Addr().Is4() {
-		// As we're working with the 16-byte format we'll need to add
-		// the 12 bytes of the IPv4-mapped IPv6 address prefix (::FFFF:).
-		bits += 12 * 8
-	}
-	return EncodeLPMKey(
-		addr[:],
-		PrefixLen(bits),
+	const (
+		familyBits           = 8
+		mappedIPv4PrefixBits = 96
 	)
+
+	prefix = prefix.Masked()
+	if prefix.Bits() >= mappedIPv4PrefixBits && prefix.Addr().Is4In6() {
+		prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-mappedIPv4PrefixBits)
+	}
+
+	addr := prefix.Addr()
+	var data [1 + 16]byte
+	if addr.Is4() {
+		data[0] = 4
+		addr4 := addr.As4()
+		copy(data[1:], addr4[:])
+		return EncodeLPMKey(data[:1+len(addr4)], PrefixLen(familyBits+prefix.Bits()))
+	}
+
+	data[0] = 6
+	addr16 := addr.As16()
+	copy(data[1:], addr16[:])
+	return EncodeLPMKey(data[:1+len(addr16)], PrefixLen(familyBits+prefix.Bits()))
 }
 
 func NetIPPrefix4ToIndexKey(prefix netip.Prefix) index.Key {
