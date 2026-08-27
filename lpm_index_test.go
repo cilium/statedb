@@ -113,6 +113,20 @@ func newLPMNonUniqueTestTable(db *DB) RWTable[lpmTestObject] {
 	return t
 }
 
+func mustLPMQuery[Obj any](idx LPMIndex[Obj], data []byte, prefixLen lpm.PrefixLen) Query[Obj] {
+	query, err := idx.Query(data, prefixLen)
+	if err != nil {
+		panic(err)
+	}
+	return query
+}
+
+func TestLPMIndexQueryRejectsShortData(t *testing.T) {
+	query, err := lpmPortIndex.Query([]byte{0xff}, 9)
+	require.Equal(t, Query[lpmTestObject]{}, query)
+	require.EqualError(t, err, "invalid LPM key, data too short (1) for prefix length (9)")
+}
+
 func TestNewTableRejectsLPMPrimaryIndex(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -161,7 +175,7 @@ func TestLPMIndex(t *testing.T) {
 	})
 	txn := wtxn.Commit()
 
-	obj, _, found := tbl.Get(txn, lpmPortIndex.Query([]byte{0xff, 0x11}, 16))
+	obj, _, found := tbl.Get(txn, mustLPMQuery(lpmPortIndex, []byte{0xff, 0x11}, 16))
 	require.True(t, found)
 	require.EqualValues(t, 1, obj.ID)
 
@@ -277,17 +291,17 @@ func TestLPMIndexNonUnique(t *testing.T) {
 	txn := wtxn.Commit()
 
 	// Get returns the first matching object.
-	obj, _, found := tbl.Get(txn, lpmPortNonUniqueIndex.Query(key, 16))
+	obj, _, found := tbl.Get(txn, mustLPMQuery(lpmPortNonUniqueIndex, key, 16))
 	require.True(t, found)
 	require.EqualValues(t, 10, obj.ID)
 
 	// List returns all matches for the key.
-	objs := Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	objs := Collect(tbl.List(txn, mustLPMQuery(lpmPortNonUniqueIndex, key, 16)))
 	require.Len(t, objs, 2)
 	require.EqualValues(t, []uint16{10, 20}, []uint16{objs[0].ID, objs[1].ID})
 
 	// Prefix iteration returns all objects matching the broader prefix.
-	objs = Collect(tbl.Prefix(txn, lpmPortNonUniqueIndex.Query(key, 8)))
+	objs = Collect(tbl.Prefix(txn, mustLPMQuery(lpmPortNonUniqueIndex, key, 8)))
 	require.Len(t, objs, 3)
 	require.ElementsMatch(t, []uint16{10, 20, 30}, []uint16{objs[0].ID, objs[1].ID, objs[2].ID})
 
@@ -298,7 +312,7 @@ func TestLPMIndexNonUnique(t *testing.T) {
 	require.EqualValues(t, 10, old.ID)
 	txn = wtxn.Commit()
 
-	objs = Collect(tbl.List(txn, lpmPortNonUniqueIndex.Query(key, 16)))
+	objs = Collect(tbl.List(txn, mustLPMQuery(lpmPortNonUniqueIndex, key, 16)))
 	require.Len(t, objs, 1)
 	require.EqualValues(t, 20, objs[0].ID)
 }
@@ -331,7 +345,7 @@ func TestLPMIndexNonUniqueSnapshotIsolation(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	objs := Collect(tbl.List(oldSnapshot, lpmPortNonUniqueIndex.Query(key, 16)))
+	objs := Collect(tbl.List(oldSnapshot, mustLPMQuery(lpmPortNonUniqueIndex, key, 16)))
 	require.Len(t, objs, 2)
 	require.Equal(t, prefix2, objs[1].Prefix, "uncommitted update leaked into old snapshot")
 }
@@ -360,10 +374,10 @@ func TestLPMIndexIterationDeduplicatesObjects(t *testing.T) {
 	rtxn := wtxn.Commit()
 
 	key := binary.BigEndian.AppendUint16(nil, 0x1200)
-	objs := Collect(tbl.Prefix(rtxn, multiPortIndex.Query(key, 8)))
+	objs := Collect(tbl.Prefix(rtxn, mustLPMQuery(multiPortIndex, key, 8)))
 	require.Equal(t, []uint16{1}, toLPMTestObjectIDs(objs))
 
-	objs = Collect(tbl.LowerBound(rtxn, multiPortIndex.Query(nil, 0)))
+	objs = Collect(tbl.LowerBound(rtxn, mustLPMQuery(multiPortIndex, nil, 0)))
 	require.Equal(t, []uint16{1}, toLPMTestObjectIDs(objs))
 }
 
@@ -400,14 +414,14 @@ func TestLPMIndexIteratorNonUnique(t *testing.T) {
 		}
 	}
 
-	key16 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1234), 16)
-	key8 := lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8)
+	key16 := mustEncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1234), 16)
+	key8 := mustEncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8)
 
 	txn.insertKey(index.Uint16(10), key16, obj(10, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
 	txn.insertKey(index.Uint16(20), key16, obj(20, 0x1234, 16, netip.MustParsePrefix("10.0.0.0/8")))
 	txn.insertKey(index.Uint16(30), key8, obj(30, 0x1200, 8, netip.MustParsePrefix("10.1.0.0/16")))
 
-	iter, _ := txn.prefix(lpm.EncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8))
+	iter, _ := txn.prefix(mustEncodeLPMKey(binary.BigEndian.AppendUint16(nil, 0x1200), 8))
 	var ids []uint16
 	iter.All(func(_ []byte, obj object) bool {
 		ids = append(ids, obj.data.(lpmTestObject).ID)
@@ -577,7 +591,7 @@ func TestQuickLPMIndexNonUnique(t *testing.T) {
 		}
 
 		key := binary.BigEndian.AppendUint16(nil, port)
-		listObjs := Collect(tbl.List(rtxn, lpmPortNonUniqueIndex.Query(key, 16)))
+		listObjs := Collect(tbl.List(rtxn, mustLPMQuery(lpmPortNonUniqueIndex, key, 16)))
 		expectedIDs := longestMatch(port)
 		listIDs := toIDs(listObjs)
 		if !slices.Equal(expectedIDs, listIDs) {
@@ -585,7 +599,7 @@ func TestQuickLPMIndexNonUnique(t *testing.T) {
 			return false
 		}
 
-		obj, _, found := tbl.Get(rtxn, lpmPortNonUniqueIndex.Query(key, 16))
+		obj, _, found := tbl.Get(rtxn, mustLPMQuery(lpmPortNonUniqueIndex, key, 16))
 		if len(expectedIDs) > 0 && !found {
 			t.Logf("expected result but Get returned no object")
 			return false

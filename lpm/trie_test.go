@@ -43,7 +43,7 @@ func TestTrie(t *testing.T) {
 
 	prefix := func(p string) index.Key {
 		key := netip.MustParsePrefix(p)
-		return EncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
+		return mustEncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
 	}
 
 	txn := lpm.Txn()
@@ -59,7 +59,7 @@ func TestTrie(t *testing.T) {
 
 	lookupAddr := func(addrS string) (int, bool) {
 		addr := netip.MustParseAddr(addrS)
-		return lpm.Lookup(EncodeLPMKey(addr.AsSlice(), 32))
+		return lpm.Lookup(mustEncodeLPMKey(addr.AsSlice(), 32))
 	}
 
 	for i, c := range cases {
@@ -119,7 +119,7 @@ func TestTrie(t *testing.T) {
 	require.Empty(t, values)
 
 	txn = lpm.Txn()
-	v, found = txn.Delete(EncodeLPMKey(netip.MustParseAddr("10.1.1.1").AsSlice(), 32))
+	v, found = txn.Delete(mustEncodeLPMKey(netip.MustParseAddr("10.1.1.1").AsSlice(), 32))
 	lpm = txn.Commit()
 	require.True(t, found)
 	require.Equal(t, 999, v)
@@ -129,10 +129,10 @@ func TestTrieLookupQueryEndsAtCompressedNode(t *testing.T) {
 	t.Run("more specific node", func(t *testing.T) {
 		trie := New[string]()
 		txn := trie.Txn()
-		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{0}, 2), "00/2"))
+		require.NoError(t, txn.Insert(mustEncodeLPMKey([]byte{0}, 2), "00/2"))
 		trie = txn.Commit()
 
-		value, found := trie.Lookup(EncodeLPMKey([]byte{0}, 1))
+		value, found := trie.Lookup(mustEncodeLPMKey([]byte{0}, 1))
 		require.False(t, found)
 		require.Empty(t, value)
 	})
@@ -140,12 +140,12 @@ func TestTrieLookupQueryEndsAtCompressedNode(t *testing.T) {
 	t.Run("imaginary node", func(t *testing.T) {
 		trie := New[string]()
 		txn := trie.Txn()
-		require.NoError(t, txn.Insert(EncodeLPMKey(nil, 0), "default"))
-		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{0}, 2), "00/2"))
-		require.NoError(t, txn.Insert(EncodeLPMKey([]byte{64}, 2), "01/2"))
+		require.NoError(t, txn.Insert(mustEncodeLPMKey(nil, 0), "default"))
+		require.NoError(t, txn.Insert(mustEncodeLPMKey([]byte{0}, 2), "00/2"))
+		require.NoError(t, txn.Insert(mustEncodeLPMKey([]byte{64}, 2), "01/2"))
 		trie = txn.Commit()
 
-		value, found := trie.Lookup(EncodeLPMKey([]byte{0}, 1))
+		value, found := trie.Lookup(mustEncodeLPMKey([]byte{0}, 1))
 		require.True(t, found)
 		require.Equal(t, "default", value)
 	})
@@ -165,7 +165,7 @@ func TestEncodeDecodeLPMKey(t *testing.T) {
 		return masked
 	}
 	roundtrip := func(data []byte, prefixLen PrefixLen) {
-		key := EncodeLPMKey(data, prefixLen)
+		key := mustEncodeLPMKey(data, prefixLen)
 		assert.Len(t, key, 2+((int(prefixLen)+7)/8))
 		data2, prefixLen2 := DecodeLPMKey(key)
 		assert.Equal(t, prefixLen, prefixLen2)
@@ -184,7 +184,7 @@ func TestEncodeDecodeLPMKeyMaxPrefixLen(t *testing.T) {
 	data := make([]byte, dataLen)
 	data[len(data)-1] = 0xff
 
-	key := EncodeLPMKey(data, maxPrefixLen)
+	key := mustEncodeLPMKey(data, maxPrefixLen)
 	require.Len(t, key, dataLen+2)
 
 	decoded, prefixLen := DecodeLPMKey(key)
@@ -200,7 +200,7 @@ func TestEncodeDecodeLPMKeyMaxPrefixLen(t *testing.T) {
 func TestDeleteCompressionInvariants(t *testing.T) {
 	prefix := func(p string) index.Key {
 		key := netip.MustParsePrefix(p)
-		return EncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
+		return mustEncodeLPMKey(key.Addr().AsSlice(), uint16(key.Bits()))
 	}
 
 	var assertNoImaginarySingleChild func(*lpmNode[int])
@@ -253,7 +253,7 @@ func TestQuickRoundTripEncodeDecodeLPMKey(t *testing.T) {
 	check := func(data []byte, prefixLen uint8) bool {
 		prefixLen = prefixLen % 128
 		prefixLen = min(prefixLen, uint8(len(data)*8))
-		key := EncodeLPMKey(data, PrefixLen(prefixLen))
+		key := mustEncodeLPMKey(data, PrefixLen(prefixLen))
 		assert.Len(t, key, 2+((int(prefixLen)+7)/8))
 		data2, prefixLen2 := DecodeLPMKey(key)
 		assert.Equal(t, PrefixLen(prefixLen), prefixLen2)
@@ -387,7 +387,7 @@ func FuzzLPMTrie(f *testing.F) {
 			}
 
 			txn := tree.Txn()
-			txn.Insert(EncodeLPMKey([]byte{k}, PrefixLen(prefixLen)), seen[seenk])
+			txn.Insert(mustEncodeLPMKey([]byte{k}, PrefixLen(prefixLen)), seen[seenk])
 			tree = txn.Commit()
 			if tree.size != len(seen) {
 				t.Errorf("unexpected length after insert of %s: %d (expected %d), root %+v", seenk, tree.size, len(seen), tree.root)
@@ -396,7 +396,7 @@ func FuzzLPMTrie(f *testing.F) {
 
 		// Now, validate
 		for seenK, seenV := range seen {
-			val, found := tree.Lookup(EncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
+			val, found := tree.Lookup(mustEncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
 			if !found {
 				t.Errorf("value %s not found", seenK)
 			}
@@ -411,7 +411,7 @@ func FuzzLPMTrie(f *testing.F) {
 			oldTree := tree
 
 			// Check that the value is still in the tree
-			val, found := tree.Lookup(EncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
+			val, found := tree.Lookup(mustEncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
 			if !found {
 				t.Errorf("value %s not found", seenK)
 			} else if val.val != seenV.val {
@@ -419,7 +419,7 @@ func FuzzLPMTrie(f *testing.F) {
 			}
 
 			txn := tree.Txn()
-			v, found := txn.Delete(EncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
+			v, found := txn.Delete(mustEncodeLPMKey([]byte{seenV.k}, PrefixLen(seenV.plen)))
 			tree = txn.Commit()
 			if !found {
 				t.Errorf("value %s to be deleted not found, root %+v, size %d", seenK, oldTree.root, oldTree.size)
