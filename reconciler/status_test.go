@@ -6,6 +6,7 @@ package reconciler
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"regexp"
 	"testing"
 	"time"
@@ -114,10 +115,17 @@ func TestStatusSet(t *testing.T) {
 	s := set.Get("foo")
 	assert.Equal(t, s.Kind, StatusKindPending)
 	assert.NotZero(t, s.ID)
+	assert.False(t, set.IsPendingOrRefreshing())
+	assert.True(t, set.IsDone())
 
 	set = set.Set("foo", StatusDone())
+	assert.False(t, set.IsPendingOrRefreshing())
+	assert.True(t, set.IsDone())
+
 	set = set.Set("bar", StatusError(errors.New("fail")))
 	assertStatusSetJSONRoundtrip(t, set)
+	assert.False(t, set.IsPendingOrRefreshing())
+	assert.False(t, set.IsDone())
 
 	assert.Equal(t, set.Get("foo").Kind, StatusKindDone)
 	assert.Equal(t, set.Get("bar").Kind, StatusKindError)
@@ -127,6 +135,8 @@ func TestStatusSet(t *testing.T) {
 	set = set.Set("foo", StatusRefreshing())
 	assert.Equal(t, StatusKindDone, previous.Get("foo").Kind)
 	assert.Equal(t, StatusKindRefreshing, set.Get("foo").Kind)
+	assert.True(t, set.IsPendingOrRefreshing())
+	assert.False(t, set.IsDone())
 	assert.Len(t, set.statuses, 2)
 
 	set = set.Pending()
@@ -134,6 +144,8 @@ func TestStatusSet(t *testing.T) {
 	assert.Equal(t, set.Get("foo").Kind, StatusKindPending)
 	assert.Equal(t, set.Get("bar").Kind, StatusKindPending)
 	assert.Equal(t, set.Get("baz").Kind, StatusKindPending)
+	assert.True(t, set.IsPendingOrRefreshing())
+	assert.False(t, set.IsDone())
 	assert.Regexp(t, "^Pending: bar foo \\(.* ago\\)", set.String())
 	assertStatusSetJSONRoundtrip(t, set)
 }
@@ -158,7 +170,7 @@ func TestStatusSetPendingWithReconcilers(t *testing.T) {
 	assert.Equal(t, []string{"new-b", "existing", "new-a", "new-b"}, names)
 
 	assert.Len(t, pending.statuses, 4)
-	all := pending.All()
+	all := maps.Collect(pending.All())
 	assert.Len(t, all, 4)
 	for _, name := range []string{"done", "existing", "new-a", "new-b"} {
 		status, found := all[name]
@@ -178,31 +190,31 @@ func TestStatusSetDelete(t *testing.T) {
 		Set("first", StatusDone()).
 		Set("middle", StatusError(errors.New("failed"))).
 		Set("last", StatusRefreshing())
-	original := set.All()
+	original := maps.Collect(set.All())
 
 	// Deleting a missing name is a no-op.
 	assert.Equal(t, set, set.Delete("missing"))
 
 	deleted := set.Delete("middle")
-	assert.Equal(t, original, set.All())
+	assert.Equal(t, original, maps.Collect(set.All()))
 	assert.Equal(t, map[string]Status{
 		"first": original["first"],
 		"last":  original["last"],
-	}, deleted.All())
+	}, maps.Collect(deleted.All()))
 
 	// Pending retains only names that remain in the set.
 	pending := deleted.Pending()
 	assert.Len(t, pending.statuses, 2)
-	assert.NotContains(t, pending.All(), "middle")
+	assert.NotContains(t, maps.Collect(pending.All()), "middle")
 	assert.Equal(t, StatusKindPending, pending.Get("first").Kind)
 	assert.Equal(t, StatusKindPending, pending.Get("last").Kind)
 	readded := deleted.Pending("middle")
-	assert.Contains(t, readded.All(), "middle")
+	assert.Contains(t, maps.Collect(readded.All()), "middle")
 	assert.Equal(t, StatusKindPending, readded.Get("middle").Kind)
 
 	// Deleting the boundary entries leaves an empty set.
 	empty := deleted.Delete("first").Delete("last")
 	assert.Empty(t, empty.statuses)
-	assert.Empty(t, empty.All())
+	assert.Empty(t, maps.Collect(empty.All()))
 	assert.Equal(t, "Pending", empty.String())
 }
