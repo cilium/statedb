@@ -30,32 +30,42 @@ func NetIPPrefixToIndexKey(prefix netip.Prefix) index.Key {
 		data[0] = 4
 		addr4 := addr.As4()
 		copy(data[1:], addr4[:])
-		return EncodeLPMKey(data[:1+len(addr4)], PrefixLen(familyBits+prefix.Bits()))
+		return mustEncodeLPMKey(data[:1+len(addr4)], PrefixLen(familyBits+prefix.Bits()))
 	}
 
 	data[0] = 6
 	addr16 := addr.As16()
 	copy(data[1:], addr16[:])
-	return EncodeLPMKey(data[:1+len(addr16)], PrefixLen(familyBits+prefix.Bits()))
+	return mustEncodeLPMKey(data[:1+len(addr16)], PrefixLen(familyBits+prefix.Bits()))
 }
 
 func NetIPPrefix4ToIndexKey(prefix netip.Prefix) index.Key {
 	addr := prefix.Addr().As4()
 	bits := prefix.Bits()
-	return EncodeLPMKey(
+	return mustEncodeLPMKey(
 		addr[:],
 		PrefixLen(bits),
 	)
+}
+
+func mustEncodeLPMKey(data []byte, prefixLen PrefixLen) index.Key {
+	key, err := EncodeLPMKey(data, prefixLen)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 func lpmDataLen(prefixLen PrefixLen) int {
 	return (int(prefixLen) + 7) / 8
 }
 
-func EncodeLPMKey(data []byte, prefixLen PrefixLen) index.Key {
+// EncodeLPMKey encodes data and its prefix length as an LPM index key. It
+// returns an error if data does not contain enough bits for prefixLen.
+func EncodeLPMKey(data []byte, prefixLen PrefixLen) (index.Key, error) {
 	dataLen := lpmDataLen(prefixLen)
 	if dataLen > len(data) {
-		panic(fmt.Sprintf("invalid LPM key, data too short (%d) for prefix length (%d)", len(data), prefixLen))
+		return nil, fmt.Errorf("invalid LPM key, data too short (%d) for prefix length (%d)", len(data), prefixLen)
 	}
 	key := make(index.Key, dataLen, dataLen+2)
 	copy(key, data[:dataLen])
@@ -64,7 +74,7 @@ func EncodeLPMKey(data []byte, prefixLen PrefixLen) index.Key {
 			key[dataLen-1] &= 0xff << (8 - rem)
 		}
 	}
-	return binary.BigEndian.AppendUint16(key, prefixLen)
+	return binary.BigEndian.AppendUint16(key, prefixLen), nil
 }
 
 func DecodeLPMKey(key index.Key) (data []byte, prefixLen PrefixLen) {

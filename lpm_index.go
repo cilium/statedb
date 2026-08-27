@@ -137,7 +137,7 @@ func (l LPMIndex[Obj]) fromString(s string) (index.Key, error) {
 	if err != nil {
 		return index.Key{}, err
 	}
-	return lpm.EncodeLPMKey(data, plen), nil
+	return lpm.EncodeLPMKey(data, plen)
 }
 
 // indexName implements Indexer.
@@ -152,19 +152,24 @@ func (l LPMIndex[Obj]) ObjectToKey(obj Obj) index.Key {
 	return nil
 }
 
-// Query constructs a query against the index with the given prefix.
-func (l LPMIndex[Obj]) Query(data []byte, prefixLen lpm.PrefixLen) Query[Obj] {
+// Query constructs a query against the index with the given prefix. It returns
+// an error if data does not contain enough bits for prefixLen.
+func (l LPMIndex[Obj]) Query(data []byte, prefixLen lpm.PrefixLen) (Query[Obj], error) {
+	key, err := lpm.EncodeLPMKey(data, prefixLen)
+	if err != nil {
+		return Query[Obj]{}, err
+	}
 	return Query[Obj]{
 		index: l.Name,
-		key:   lpm.EncodeLPMKey(data, prefixLen),
-	}
+		key:   key,
+	}, nil
 }
 
 func (l LPMIndex[Obj]) QueryFromObject(obj Obj) Query[Obj] {
 	for key, length := range l.FromObject(obj) {
 		return Query[Obj]{
 			index: l.Name,
-			key:   lpm.EncodeLPMKey(key, length),
+			key:   mustEncodeLPMKey(key, length),
 		}
 	}
 	return Query[Obj]{}
@@ -178,7 +183,7 @@ func (l LPMIndex[Obj]) newTableIndex() tableIndex {
 		objectToKeys: func(obj object) index.KeySet {
 			keys := make([]index.Key, 0, 2)
 			for data, prefixLen := range l.FromObject(obj.data.(Obj)) {
-				keys = append(keys, lpm.EncodeLPMKey(data, prefixLen))
+				keys = append(keys, mustEncodeLPMKey(data, prefixLen))
 			}
 			return index.NewKeySet(keys...)
 		},
@@ -188,6 +193,14 @@ func (l LPMIndex[Obj]) newTableIndex() tableIndex {
 
 func (l LPMIndex[Obj]) isUnique() bool {
 	return l.Unique
+}
+
+func mustEncodeLPMKey(data []byte, prefixLen lpm.PrefixLen) index.Key {
+	key, err := lpm.EncodeLPMKey(data, prefixLen)
+	if err != nil {
+		panic(err)
+	}
+	return key
 }
 
 var _ Indexer[struct{}] = LPMIndex[struct{}]{}

@@ -232,9 +232,13 @@ func (txn *Txn[T]) Insert(key index.Key, value T) error {
 	// We found a [node] with which we matched fewer bits than are in the [key].
 	// As they can't exist in the same location we'll need to fork the tree
 	// with an imaginary node at the point where their prefixes diverge.
+	imaginaryKey, err := EncodeLPMKey(node.key, matchLen)
+	if err != nil {
+		return err
+	}
 	txn.size++
 	imaginary := &lpmNode[T]{
-		key:       EncodeLPMKey(node.key, matchLen),
+		key:       imaginaryKey,
 		imaginary: true,
 		txnID:     txn.txnID,
 	}
