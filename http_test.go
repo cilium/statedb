@@ -88,7 +88,7 @@ func Test_http_runQuery(t *testing.T) {
 		items = append(items, obj)
 		return nil
 	}
-	runQuery(indexTxn, false, index.Uint64(1), onObject)
+	require.NoError(t, runQuery(indexTxn, false, index.Uint64(1), onObject))
 	if assert.Len(t, items, 1) {
 		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
 	}
@@ -97,7 +97,7 @@ func Test_http_runQuery(t *testing.T) {
 	indexTxn, err = txn.indexReadTxn(table, table.indexPos(tagsIndex.Name))
 	require.NoError(t, err)
 	items = nil
-	runQuery(indexTxn, false, index.String("foo"), onObject)
+	require.NoError(t, runQuery(indexTxn, false, index.String("foo"), onObject))
 
 	if assert.Len(t, items, 2) {
 		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
@@ -108,7 +108,7 @@ func Test_http_runQuery(t *testing.T) {
 	indexTxn, err = txn.indexReadTxn(table, RevisionIndexPos)
 	require.NoError(t, err)
 	items = nil
-	runQuery(indexTxn, true, index.Uint64(0), onObject)
+	require.NoError(t, runQuery(indexTxn, true, index.Uint64(0), onObject))
 	if assert.Len(t, items, 4) {
 		// Items are in revision (creation) order
 		assert.EqualValues(t, items[0].data.(*testObject).ID, 1)
@@ -116,6 +116,48 @@ func Test_http_runQuery(t *testing.T) {
 		assert.EqualValues(t, items[2].data.(*testObject).ID, 3)
 		assert.EqualValues(t, items[3].data.(*testObject).ID, 4)
 	}
+}
+
+func Test_http_runQuery_write_error(t *testing.T) {
+	db, table, _ := httpFixture(t)
+	indexTxn, err := db.ReadTxn().indexReadTxn(table, table.indexPos(idIndex.Name))
+	require.NoError(t, err)
+
+	writeErr := errors.New("client disconnected")
+	called := 0
+	err = runQuery(indexTxn, true, index.Uint64(0), func(object) error {
+		called++
+		return writeErr
+	})
+	require.ErrorIs(t, err, writeErr)
+	require.Equal(t, 1, called)
+}
+
+func Test_http_query_write_error_does_not_panic(t *testing.T) {
+	db, table, _ := httpFixture(t)
+
+	body, err := json.Marshal(QueryRequest{
+		Key:   base64.StdEncoding.EncodeToString(index.Uint64(1)),
+		Table: table.Name(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/query", bytes.NewReader(body))
+	w := failingResponseWriter{header: make(http.Header), err: errors.New("client disconnected")}
+	require.NotPanics(t, func() {
+		dbHandler{db}.query(&w, req)
+	})
+}
+
+type failingResponseWriter struct {
+	header http.Header
+	err    error
+}
+
+func (w *failingResponseWriter) Header() http.Header { return w.header }
+func (w *failingResponseWriter) WriteHeader(int)     {}
+func (w *failingResponseWriter) Write([]byte) (int, error) {
+	return 0, w.err
 }
 
 func Test_http_query(t *testing.T) {
