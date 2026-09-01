@@ -48,3 +48,8 @@ func TestKeySet_DuplicateKeys(t *testing.T) {
 	})
 	require.ElementsMatch(t, vs, [][]byte{[]byte("baz"), []byte("quux"), []byte("baz")})
 }
+
+func TestKeySet_Empty(t *testing.T) {
+	ks := index.NewKeySet()
+	require.False(t, ks.Exists(index.Key{}))
+}

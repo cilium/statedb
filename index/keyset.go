@@ -34,6 +34,9 @@ func (ks KeySet) Foreach(fn func(Key)) {
 }
 
 func (ks KeySet) Exists(k Key) bool {
+	if ks.head == nil {
+		return false
+	}
 	if ks.head.Equal(k) {
 		return true
 	}

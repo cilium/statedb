@@ -1386,6 +1386,25 @@ func TestDB_EmptyKeys(t *testing.T) {
 
 }
 
+func TestDB_DeleteEmptySecondaryKey(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+
+	wtxn := db.WriteTxn(table)
+	obj := &testObject{ID: 1, Tags: part.NewSet("")}
+	_, _, err := table.Insert(wtxn, obj)
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Delete(wtxn, obj)
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	require.Empty(t, Collect(table.List(db.ReadTxn(), tagsIndex.Query(""))))
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
