@@ -284,7 +284,7 @@ func (l lpmIndex) lowerBoundNextNoWatch(key index.Key) func() ([]byte, object, b
 }
 
 // objectToKey implements tableIndex.
-func (l lpmIndex) objectToKey(obj object) index.Key {
+func (l lpmIndex) objectToKey(obj object) (index.Key, bool) {
 	return l.objectToKeys(obj).First()
 }
 
@@ -445,7 +445,7 @@ func (l *lpmIndexTxn) notify() {
 }
 
 // objectToKey implements tableIndexTxn.
-func (l *lpmIndexTxn) objectToKey(obj object) index.Key {
+func (l *lpmIndexTxn) objectToKey(obj object) (index.Key, bool) {
 	return l.index.objectToKey(obj)
 }
 
