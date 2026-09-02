@@ -306,11 +306,12 @@ type Query[Obj any] struct {
 
 type Indexer[Obj any] interface {
 	// QueryFromObject constructs a query from an object against the
-	// primary index.
-	QueryFromObject(Obj) Query[Obj]
+	// primary index. The boolean is false when the object has no key.
+	QueryFromObject(Obj) (Query[Obj], bool)
 
-	// ObjectToKey returns the primary key of the object.
-	ObjectToKey(Obj) index.Key
+	// ObjectToKey returns the primary key of the object. The boolean is false
+	// when the object has no key.
+	ObjectToKey(Obj) (index.Key, bool)
 
 	// isIndexerOf is a marker method to constrain the indexer to the 'Obj'
 	// type which enforces that indexer of a wrong type is not used.
