@@ -1386,6 +1386,121 @@ func TestDB_EmptyKeys(t *testing.T) {
 
 }
 
+func TestDB_EmptyPrimaryKey(t *testing.T) {
+	t.Parallel()
+
+	db := New()
+	table, err := NewTable(db, "test", keyIndex, tagsIndex)
+	require.NoError(t, err)
+
+	obj := &testObject{Key: "", Tags: part.NewSet("tag")}
+	wtxn := db.WriteTxn(table)
+	_, hadOld, err := table.Insert(wtxn, obj)
+	require.NoError(t, err)
+	require.False(t, hadOld)
+	wtxn.Commit()
+
+	stored, _, found := table.Get(db.ReadTxn(), keyIndex.Query(""))
+	require.True(t, found)
+	require.Equal(t, obj, stored)
+	require.Len(t, Collect(table.List(db.ReadTxn(), tagsIndex.Query("tag"))), 1)
+
+	updated := &testObject{Key: "", Tags: part.NewSet("updated")}
+	wtxn = db.WriteTxn(table)
+	_, hadOld, err = table.Insert(wtxn, updated)
+	require.NoError(t, err)
+	require.True(t, hadOld)
+	wtxn.Commit()
+	require.Empty(t, Collect(table.List(db.ReadTxn(), tagsIndex.Query("tag"))))
+	require.Len(t, Collect(table.List(db.ReadTxn(), tagsIndex.Query("updated"))), 1)
+
+	wtxn = db.WriteTxn(table)
+	_, hadOld, err = table.Delete(wtxn, &testObject{})
+	require.NoError(t, err)
+	require.True(t, hadOld)
+	wtxn.Commit()
+	_, _, found = table.Get(db.ReadTxn(), keyIndex.Query(""))
+	require.False(t, found)
+}
+
+func TestDB_PrimaryKeyCanSkipObject(t *testing.T) {
+	t.Parallel()
+
+	primaryIndex := Index[*testObject, string]{
+		Name: "optional-key",
+		FromObject: func(obj *testObject) index.KeySet {
+			if obj.Key == "skip" {
+				return index.NewKeySet()
+			}
+			return index.NewKeySet(index.String(obj.Key))
+		},
+		FromKey: index.String,
+		Unique:  true,
+	}
+	db := New()
+	table, err := NewTable(db, "test", primaryIndex)
+	require.NoError(t, err)
+
+	wtxn := db.WriteTxn(table)
+	_, hadOld, err := table.Insert(wtxn, &testObject{Key: "skip"})
+	require.NoError(t, err)
+	require.False(t, hadOld)
+	wtxn.Commit()
+	require.Zero(t, table.NumObjects(db.ReadTxn()))
+	require.Empty(t, Collect(table.All(db.ReadTxn())))
+
+	wtxn = db.WriteTxn(table)
+	_, hadOld, err = table.Insert(wtxn, &testObject{Key: ""})
+	require.NoError(t, err)
+	require.False(t, hadOld)
+	wtxn.Commit()
+	require.Equal(t, 1, table.NumObjects(db.ReadTxn()))
+	_, _, found := table.Get(db.ReadTxn(), primaryIndex.Query(""))
+	require.True(t, found)
+}
+
+func TestDB_EmptyFirstKeyReindex(t *testing.T) {
+	t.Parallel()
+
+	// The nil first key is intentional: it verifies that a valid empty key
+	// does not prevent Foreach from visiting the non-empty tail.
+	multiKeyIndex := Index[*testObject, string]{
+		Name: "multi-key",
+		FromObject: func(obj *testObject) index.KeySet {
+			if obj.Key == "" {
+				return index.NewKeySet(nil)
+			}
+			return index.NewKeySet(nil, index.String(obj.Key))
+		},
+		FromKey: index.String,
+		Unique:  false,
+	}
+	db, table, _ := newTestDB(t, multiKeyIndex)
+
+	obj := &testObject{ID: 1, Key: "foo"}
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, obj)
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.Len(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query(""))), 1)
+	require.Len(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query("foo"))), 1)
+
+	updated := &testObject{ID: 1, Key: "bar"}
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, updated)
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.Empty(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query("foo"))))
+	require.Len(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query("bar"))), 1)
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Delete(wtxn, &testObject{ID: 1})
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.Empty(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query(""))))
+	require.Empty(t, Collect(table.List(db.ReadTxn(), multiKeyIndex.Query("bar"))))
+}
+
 func TestDB_DeleteEmptySecondaryKey(t *testing.T) {
 	t.Parallel()
 

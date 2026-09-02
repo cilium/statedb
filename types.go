@@ -428,7 +428,7 @@ type tableIndexReader interface {
 	all() (tableIndexIterator, <-chan struct{})
 	allNoWatch() tableIndexIterator
 	rootWatch() <-chan struct{}
-	objectToKey(obj object) index.Key
+	objectToKey(obj object) (index.Key, bool)
 }
 
 type tableIndex interface {
