@@ -70,11 +70,15 @@ func (i Index[Obj, Key]) Query(key Key) Query[Obj] {
 	}
 }
 
-func (i Index[Obj, Key]) QueryFromObject(obj Obj) Query[Obj] {
+func (i Index[Obj, Key]) QueryFromObject(obj Obj) (Query[Obj], bool) {
+	key, ok := i.objectToKey(obj)
+	if !ok {
+		return Query[Obj]{}, false
+	}
 	return Query[Obj]{
 		index: i.Name,
-		key:   i.objectToKey(obj),
-	}
+		key:   key,
+	}, true
 }
 
 // QueryFromKey constructs a query against the index using the given
@@ -87,17 +91,16 @@ func (i Index[Obj, Key]) QueryFromKey(key index.Key) Query[Obj] {
 	}
 }
 
-func (i Index[Obj, Key]) ObjectToKey(obj Obj) index.Key {
+func (i Index[Obj, Key]) ObjectToKey(obj Obj) (index.Key, bool) {
 	return i.objectToKey(obj)
 }
 
-func (i Index[Obj, Key]) objectToKey(obj Obj) index.Key {
+func (i Index[Obj, Key]) objectToKey(obj Obj) (index.Key, bool) {
 	keys := i.FromObject(obj)
 	if keys.Len() > 1 {
 		panic("primary index must return at most one key")
 	}
-	key, _ := keys.First()
-	return key
+	return keys.First()
 }
 
 // newTableIndex constructs a new instance of this index type.
