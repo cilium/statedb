@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"go.yaml.in/yaml/v3"
 )
 
 func errp(s string) *string {
@@ -40,10 +41,11 @@ func TestStatusString(t *testing.T) {
 	assert.Regexp(t, `Error: <nil> \([0-9]+\.[0-9]+.+s ago\)`, s.String())
 }
 
-func TestStatusJSON(t *testing.T) {
+func TestStatusJSONYAML(t *testing.T) {
 	testCases := []struct {
-		s        Status
-		expected string
+		s            Status
+		expectedJson string
+		expectedYaml string
 	}{
 		{
 			Status{
@@ -52,6 +54,7 @@ func TestStatusJSON(t *testing.T) {
 				Error:     nil,
 			},
 			`{"updated-at":"1970-01-01T00:00:01Z","kind":"Done"}`,
+			"updated-at: 1970-01-01T00:00:01Z\nkind: Done\n",
 		},
 		{
 			Status{
@@ -60,6 +63,7 @@ func TestStatusJSON(t *testing.T) {
 				Error:     nil,
 			},
 			`{"updated-at":"1970-01-01T00:00:02Z","kind":"Pending"}`,
+			"updated-at: 1970-01-01T00:00:02Z\nkind: Pending\n",
 		},
 		{
 			Status{
@@ -68,6 +72,7 @@ func TestStatusJSON(t *testing.T) {
 				Error:     errp("some-error"),
 			},
 			`{"updated-at":"1970-01-01T00:00:03Z","error":"some-error","kind":"Error"}`,
+			"updated-at: 1970-01-01T00:00:03Z\nerror: some-error\nkind: Error\n",
 		},
 		{
 			Status{
@@ -76,16 +81,21 @@ func TestStatusJSON(t *testing.T) {
 				Error:     nil,
 			},
 			`{"updated-at":"1970-01-01T00:00:04Z","kind":"Refreshing"}`,
+			"updated-at: 1970-01-01T00:00:04Z\nkind: Refreshing\n",
 		},
 	}
 
 	for _, tc := range testCases {
-		b, err := json.Marshal(tc.s)
+		jsonData, err := json.Marshal(tc.s)
 		assert.NoError(t, err, "Marshal")
-		assert.Equal(t, tc.expected, string(b))
+		assert.Equal(t, tc.expectedJson, string(jsonData))
+
+		yamlData, err := yaml.Marshal(tc.s)
+		assert.NoError(t, err, "Marshal YAML")
+		assert.Equal(t, tc.expectedYaml, string(yamlData))
 
 		var s Status
-		assert.NoError(t, json.Unmarshal(b, &s), "Unmarshal")
+		assert.NoError(t, json.Unmarshal(jsonData, &s), "Unmarshal")
 		assert.Equal(t, tc.s, s)
 	}
 
@@ -105,6 +115,27 @@ func assertStatusSetJSONRoundtrip(t *testing.T, s StatusSet) {
 	err = json.Unmarshal(data, &s2)
 	assert.NoError(t, err, "Unmarshal")
 	assert.Equal(t, sanitizeAgo(s.String()), sanitizeAgo(s2.String()))
+}
+
+func TestStatusSetYAML(t *testing.T) {
+	set := StatusSet{}.
+		Set("done", Status{Kind: StatusKindDone, UpdatedAt: time.Unix(1, 0).UTC()}).
+		Set("error", Status{
+			Kind:      StatusKindError,
+			UpdatedAt: time.Unix(2, 0).UTC(),
+			Error:     errp("failed"),
+		})
+
+	actual, err := yaml.Marshal(set)
+	assert.NoError(t, err, "Marshal StatusSet")
+	assert.Equal(t, `done:
+    updated-at: 1970-01-01T00:00:01Z
+    kind: Done
+error:
+    updated-at: 1970-01-01T00:00:02Z
+    error: failed
+    kind: Error
+`, string(actual))
 }
 
 func TestStatusSet(t *testing.T) {
