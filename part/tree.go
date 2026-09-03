@@ -15,7 +15,7 @@ import (
 // This allows watching any part of the tree (any prefix) for changes.
 type Tree[T any] struct {
 	root      *header[T]
-	rootWatch *watchState
+	rootWatch *atomicWatchPointer
 	size      int // the number of objects in the tree
 	opts      options
 	prevTxn   *atomic.Pointer[Txn[T]] // the previous txn for reusing the allocation
@@ -30,7 +30,7 @@ func New[T any](opts ...Option) Tree[T] {
 	}
 	t := Tree[T]{
 		root:      nil,
-		rootWatch: newWatchState(),
+		rootWatch: newWatchIdentity(),
 		size:      0,
 		opts:      o,
 		prevTxn:   &atomic.Pointer[Txn[T]]{},
