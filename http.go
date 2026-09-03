@@ -183,9 +183,8 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 	for {
 		changes, watch := changeIter.nextAny(h.db.ReadTxn())
 		for change := range changes {
-			err := enc.Encode(change)
-			if err != nil {
-				panic(err)
+			if err := enc.Encode(change); err != nil {
+				return
 			}
 		}
 		w.(http.Flusher).Flush()
