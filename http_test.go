@@ -160,6 +160,17 @@ func Test_http_changes_write_error_does_not_panic(t *testing.T) {
 	})
 }
 
+func Test_http_dumpTable_write_error_does_not_panic(t *testing.T) {
+	db, table, _ := httpFixture(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/dump/"+table.Name(), nil)
+	req.SetPathValue("table", table.Name())
+	w := failingResponseWriter{header: make(http.Header), err: errors.New("client disconnected")}
+	require.NotPanics(t, func() {
+		dbHandler{db}.dumpTable(&w, req)
+	})
+}
+
 type failingResponseWriter struct {
 	header http.Header
 	err    error
