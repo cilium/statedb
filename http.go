@@ -187,7 +187,9 @@ func (h dbHandler) changes(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		w.(http.Flusher).Flush()
+		if err := http.NewResponseController(w).Flush(); err != nil {
+			return
+		}
 		select {
 		case <-r.Context().Done():
 			return
