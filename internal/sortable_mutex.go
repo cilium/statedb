@@ -48,8 +48,15 @@ type SortableMutexes []SortableMutex
 
 // Lock sorts the mutexes, and then locks them in order. If any lock cannot be acquired,
 // this will block while holding the locks with a lower sequence number.
+// Panics if the same mutex is included more than once.
 func (s SortableMutexes) Lock() {
-	slices.SortFunc(s, func(a, b SortableMutex) int { return cmp.Compare(a.Seq(), b.Seq()) })
+	slices.SortFunc(s, func(a, b SortableMutex) int {
+		aSeq, bSeq := a.Seq(), b.Seq()
+		if aSeq == bSeq {
+			panic("SortableMutexes: duplicate mutex")
+		}
+		return cmp.Compare(a.Seq(), b.Seq())
+	})
 	for _, mu := range s {
 		mu.Lock()
 	}
