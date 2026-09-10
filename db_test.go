@@ -1520,6 +1520,41 @@ func TestDB_DeleteEmptySecondaryKey(t *testing.T) {
 	require.Empty(t, Collect(table.List(db.ReadTxn(), tagsIndex.Query(""))))
 }
 
+func TestDB_CommitHooks(t *testing.T) {
+	t.Parallel()
+
+	var (
+		cnt  int
+		last struct {
+			txn    ReadTxn
+			tables []string
+		}
+
+		hook = func(txn ReadTxn, tables []string) {
+			cnt, last.txn, last.tables = cnt+1, txn, slices.Clone(tables)
+		}
+
+		db   = New(WithCommitHooks(hook, nil, hook)) // nil hooks are ignored
+		tbl1 = newTestObjectTable(t, db, "foo")
+		tbl2 = newTestObjectTable(t, db, "bar")
+		tbl3 = newTestObjectTable(t, db, "baz")
+	)
+
+	db.WriteTxn(tbl1, tbl3).Commit()
+
+	require.Equal(t, 2, cnt, "The commit hook should have been invoked exactly twice (registered twice)")
+	require.Equal(t, db.ReadTxn(), last.txn, "The commit hook should be given the correct read transaction")
+	require.ElementsMatch(t, last.tables, []string{"foo", "baz"},
+		"The commit hook should be given the correct list of tables")
+
+	db.WriteTxn(tbl2).Commit()
+
+	require.Equal(t, 4, cnt, "The commit hook should have been invoked two more times")
+	require.Equal(t, db.ReadTxn(), last.txn, "The commit hook should be given the correct read transaction")
+	require.ElementsMatch(t, last.tables, []string{"bar"},
+		"The commit hook should be given the correct list of tables")
+}
+
 func TestWriteJSON(t *testing.T) {
 	t.Parallel()
 
