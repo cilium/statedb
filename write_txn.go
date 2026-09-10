@@ -454,6 +454,11 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 		txn.notify()
 	}
 
+	// Invoke commit hooks, if any.
+	for _, hook := range db.commitHooks {
+		hook((*readTxn)(&root), txn.tableNames)
+	}
+
 	// With the root pointer updated, we can now release the tables for the next write transaction.
 	txn.smus.Unlock()
 

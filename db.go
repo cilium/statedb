@@ -97,6 +97,7 @@ type dbState struct {
 	gcRateLimitInterval time.Duration
 	metrics             Metrics
 	writeTxnPool        sync.Pool
+	commitHooks         []CommitHook
 }
 
 type dbRoot = []*tableEntry
@@ -104,12 +105,31 @@ type dbRoot = []*tableEntry
 type Option func(*opts)
 
 type opts struct {
-	metrics Metrics
+	metrics     Metrics
+	commitHooks []CommitHook
 }
 
 func WithMetrics(m Metrics) Option {
 	return func(o *opts) {
 		o.metrics = m
+	}
+}
+
+// CommitHook is a commit hook that can be registered through [WithCommitHooks].
+// Commit hooks are run synchronously, must be strictly read-only, and fast.
+// The given list of tables is only valid until the hook terminates, and must
+// explicitly copied if longer retention is needed.
+type CommitHook func(txn ReadTxn, tables []string)
+
+// WithCommitHooks registers hooks that get invoked every time that a transaction
+// is committed, before releasing the associated locks. They get passed the read
+// transaction for that snapshot, and the list of tables locked by the transaction.
+// The hooks must be strictly read-only, and cannot abort the transaction.
+func WithCommitHooks(hooks ...CommitHook) Option {
+	return func(o *opts) {
+		o.commitHooks = append(o.commitHooks,
+			slices.DeleteFunc(hooks, func(hook CommitHook) bool { return hook == nil })...,
+		)
 	}
 }
 
@@ -130,6 +150,7 @@ func New(options ...Option) *DB {
 		dbState: &dbState{
 			metrics:             opts.metrics,
 			gcRateLimitInterval: defaultGCRateLimitInterval,
+			commitHooks:         opts.commitHooks,
 		},
 	}
 	db.updateWriteTxnPoolLocked(0)
