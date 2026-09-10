@@ -394,8 +394,8 @@ type tableInternal interface {
 	setTablePos(int)
 	indexPos(string) int
 	getIndexer(name string) *anyIndexer
-	secondary() []anyIndexer               // Secondary indexers (if any)
-	sortableMutex() internal.SortableMutex // The sortable mutex for locking the table for writing
+	secondary() []anyIndexer                // Secondary indexers (if any)
+	sortableMutex() *internal.SortableMutex // The sortable mutex for locking the table for writing
 	anyChanges(txn WriteTxn) (anyChangeIterator, error)
 	typeName() string                       // Returns the 'Obj' type as string
 	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
