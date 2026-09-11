@@ -40,9 +40,16 @@ func (n *header[T]) prefix() []byte {
 }
 
 func (n *header[T]) isPrefixOf(key []byte) bool {
-	// This is essentially same as bytes.HasPrefix(key, this.prefix()), but slight bit
-	// faster as we don't need to construct the slice header for length comparison.
-	return uint16(len(key)) >= n.prefixLen && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
+	switch n.prefixLen {
+	case 0:
+		return true
+	case 1:
+		return len(key) > 0 && *n.prefixP == key[0]
+	default:
+		// This is essentially same as bytes.HasPrefix(key, this.prefix()), but slight bit
+		// faster as we don't need to construct the slice header for length comparison.
+		return uint16(len(key)) >= n.prefixLen && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
+	}
 }
 
 func (n *header[T]) setPrefix(p []byte) {
