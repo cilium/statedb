@@ -188,25 +188,12 @@ func (db *DB) ReadTxn() ReadTxn {
 // The modifications performed in the write transaction are not visible outside
 // it until Commit() is called. To discard the changes call Abort().
 //
+// Panics if called with duplicate tables.
+//
 // The returned WriteTxn is not thread-safe.
 func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn := db.writeTxnPool.Get().(*writeTxnState)
 	txn.db = db
-
-	// Deduplicate the set of tables to avoid acquiring the same table lock
-	// more than once, which would deadlock down the line.
-	seen := make(map[int]struct{}, len(tables))
-	tables = slices.DeleteFunc(slices.Clone(tables), func(table TableMeta) bool {
-		pos := table.tablePos()
-		if pos < 0 {
-			panic(tableError(table.Name(), ErrTableNotRegistered))
-		}
-		if _, exists := seen[pos]; exists {
-			return true
-		}
-		seen[pos] = struct{}{}
-		return false
-	})
 
 	txn.smus = reuseSlice(txn.smus, len(tables))
 	for i, table := range tables {
@@ -229,10 +216,9 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
 	for i, table := range tables {
 		pos := table.tablePos()
-		tableEntryCopy := *txn.tableEntries[pos]
-		tableEntryCopy.indexes = slices.Clone(tableEntryCopy.indexes)
+		tableEntryCopy := cloneTableEntry(txn.tableEntries[pos])
 		tableEntryCopy.locked = true
-		txn.tableEntries[pos] = &tableEntryCopy
+		txn.tableEntries[pos] = tableEntryCopy
 		name := table.Name()
 		txn.tableNames[i] = name
 

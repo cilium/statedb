@@ -179,13 +179,9 @@ func TestDB_WriteTxn_DuplicateTables(t *testing.T) {
 	t.Parallel()
 
 	db, table := newTestDBWithMetrics(t, &NopMetrics{})
-
-	txn := db.WriteTxn(table, table)
-	_, _, err := table.Insert(txn, &testObject{ID: 1})
-	require.NoError(t, err, "Insert")
-	txn.Commit()
-
-	require.Equal(t, 1, table.NumObjects(db.ReadTxn()))
+	require.PanicsWithValue(t, `SortableMutexes: duplicate mutex`, func() {
+		db.WriteTxn(table, table)
+	})
 }
 
 func TestDB_Insert_SamePointer(t *testing.T) {
@@ -1430,7 +1426,7 @@ func TestDB_PrimaryKeyCanSkipObject(t *testing.T) {
 		Name: "optional-key",
 		FromObject: func(obj *testObject) index.KeySet {
 			if obj.Key == "skip" {
-				return index.NewKeySet()
+				return index.EmptyKeySet
 			}
 			return index.NewKeySet(index.String(obj.Key))
 		},
