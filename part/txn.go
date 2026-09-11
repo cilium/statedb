@@ -148,14 +148,14 @@ func (txn *Txn[T]) RootWatch() <-chan struct{} {
 
 // Get fetches the value associated with the given key.
 func (txn *Txn[T]) Get(key []byte) (T, bool) {
-	value, _, ok := search(txn.root, txn.rootWatch, key)
+	value, ok := search(txn.root, key)
 	return value, ok
 }
 
 // GetWatch fetches the value associated with the given key and returns a watch
 // channel that closes when the key is modified.
 func (txn *Txn[T]) GetWatch(key []byte) (T, <-chan struct{}, bool) {
-	value, watch, ok := search(txn.root, txn.rootWatch, key)
+	value, watch, ok := searchWatch(txn.root, txn.rootWatch, key)
 	return value, watch.channel(), ok
 }
 
