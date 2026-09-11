@@ -1426,7 +1426,7 @@ func TestDB_PrimaryKeyCanSkipObject(t *testing.T) {
 		Name: "optional-key",
 		FromObject: func(obj *testObject) index.KeySet {
 			if obj.Key == "skip" {
-				return index.NewKeySet()
+				return index.EmptyKeySet
 			}
 			return index.NewKeySet(index.String(obj.Key))
 		},
