@@ -63,7 +63,7 @@ func TestKeySet_DuplicateKeys(t *testing.T) {
 }
 
 func TestKeySet_Empty(t *testing.T) {
-	ks := index.NewKeySet()
+	ks := index.EmptyKeySet
 	require.Zero(t, ks.Len())
 	_, ok := ks.First()
 	require.False(t, ok)
