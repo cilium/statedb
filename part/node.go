@@ -650,7 +650,26 @@ type node256[T any] struct {
 	children [256]*header[T]
 }
 
-func search[T any](root *header[T], rootWatch *atomicWatchPointer, key []byte) (value T, watch watchTarget, ok bool) {
+func search[T any](this *header[T], key []byte) (value T, ok bool) {
+	for this != nil {
+		if !this.isPrefixOf(key) {
+			return
+		}
+
+		key = key[this.prefixLen:]
+		if len(key) == 0 {
+			if leaf := this.getLeaf(); leaf != nil {
+				return leaf.value, true
+			}
+			return
+		}
+
+		this = this.find(key[0])
+	}
+	return
+}
+
+func searchWatch[T any](root *header[T], rootWatch *atomicWatchPointer, key []byte) (value T, watch watchTarget, ok bool) {
 	this := root
 	watch = watchTarget{direct: rootWatch}
 	if root == nil {
