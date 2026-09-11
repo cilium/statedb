@@ -216,10 +216,9 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
 	for i, table := range tables {
 		pos := table.tablePos()
-		tableEntryCopy := *txn.tableEntries[pos]
-		tableEntryCopy.indexes = slices.Clone(tableEntryCopy.indexes)
+		tableEntryCopy := cloneTableEntry(txn.tableEntries[pos])
 		tableEntryCopy.locked = true
-		txn.tableEntries[pos] = &tableEntryCopy
+		txn.tableEntries[pos] = tableEntryCopy
 		name := table.Name()
 		txn.tableNames[i] = name
 
