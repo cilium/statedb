@@ -16,6 +16,7 @@ import (
 	"github.com/cilium/hive/hivetest"
 	"github.com/cilium/hive/script"
 	"github.com/cilium/hive/script/scripttest"
+	"github.com/cilium/statedb/index"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -71,6 +72,31 @@ func TestWatchCmdClosesChangeIterator(t *testing.T) {
 	cancel()
 	require.NoError(t, <-done)
 	require.EqualValues(t, 0, expvarInt(metrics.DeleteTrackerCountVar.Get(table.Name())))
+}
+
+func TestQueryCmdWithoutFromString(t *testing.T) {
+	db := New()
+	primary := Index[*testObject, uint64]{
+		Name: "id",
+		FromObject: func(obj *testObject) index.KeySet {
+			return index.NewKeySet(index.Uint64(obj.ID))
+		},
+		FromKey: index.Uint64,
+		Unique:  true,
+	}
+	_, err := NewTable(db, "test", primary)
+	require.NoError(t, err)
+
+	state, err := script.NewState(t.Context(), t.TempDir(), nil)
+	require.NoError(t, err)
+	engine := script.Engine{
+		Cmds: map[string]script.Cmd{"db/get": GetCmd(db)},
+	}
+
+	require.NotPanics(t, func() {
+		err = engine.ExecuteLine(state, "db/get test 1", &strings.Builder{})
+	})
+	require.ErrorContains(t, err, `query: index "id" does not support string queries`)
 }
 
 func TestHeaderLine(t *testing.T) {

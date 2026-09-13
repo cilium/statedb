@@ -6,6 +6,7 @@ package statedb
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
@@ -49,6 +50,9 @@ func (i Index[Obj, Key]) isUnique() bool {
 
 // fromString implements Indexer.
 func (i Index[Obj, Key]) fromString(s string) (index.Key, error) {
+	if i.FromString == nil {
+		return nil, fmt.Errorf("index %q does not support string queries", i.Name)
+	}
 	return i.FromString(s)
 }
 
