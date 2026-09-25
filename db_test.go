@@ -1732,3 +1732,78 @@ func expvarFloat(v expvar.Var) float64 {
 	}
 	return -1
 }
+
+func TestDB_RegisterTableDuringWriteTxn(t *testing.T) {
+	t.Parallel()
+
+	db := New()
+	a := newTestObjectTable(t, db, "a")
+	wtxn := db.WriteTxn(a)
+	b := newTestObjectTable(t, db, "b")
+	wtxn.Commit()
+
+	require.Equal(t, 0, b.NumObjects(db.ReadTxn()))
+	wtxn = db.WriteTxn(b)
+	_, _, err := b.Insert(wtxn, &testObject{ID: 1})
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.Equal(t, 1, b.NumObjects(db.ReadTxn()))
+}
+
+func TestDB_FailedCompareAndSwapDoesNotNotify(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t)
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+
+	_, rev, watch, found := table.GetWatch(rtxn, idIndex.Query(1))
+	require.True(t, found)
+	_, rootWatch := table.AllWatch(rtxn)
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.CompareAndSwap(wtxn, rev+1, &testObject{ID: 1})
+	require.ErrorIs(t, err, ErrRevisionNotEqual)
+	_, _, err = table.CompareAndSwap(wtxn, rev, &testObject{ID: 2})
+	require.ErrorIs(t, err, ErrObjectNotFound)
+	_, _, err = table.CompareAndDelete(wtxn, rev+1, &testObject{ID: 1})
+	require.ErrorIs(t, err, ErrRevisionNotEqual)
+	rtxn = wtxn.Commit()
+
+	require.Equal(t, rev, table.Revision(rtxn))
+	require.Equal(t, 1, table.NumObjects(rtxn))
+	select {
+	case <-watch:
+		t.Fatal("object watch channel closed by failed CompareAndSwap")
+	case <-rootWatch:
+		t.Fatal("root watch channel closed by failed CompareAndSwap")
+	default:
+	}
+}
+
+func TestDB_AbortReleasesIndexTxn(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1, Tags: part.NewSet("foo")})
+	require.NoError(t, err)
+	wtxn.Abort()
+
+	for i, idx := range db.ReadTxn().root()[table.tablePos()].indexes {
+		if pidx, ok := idx.(*partIndex); ok {
+			require.Nil(t, pidx.tx, "index %d retains aborted transaction", i)
+		}
+	}
+
+	// The table is still writable after abort.
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, &testObject{ID: 2, Tags: part.NewSet("bar")})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+	require.Equal(t, 1, table.NumObjects(rtxn))
+	_, _, found := table.Get(rtxn, idIndex.Query(1))
+	require.False(t, found)
+}

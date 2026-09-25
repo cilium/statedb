@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"unsafe"
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
@@ -192,6 +193,8 @@ func (r *partIndex) commit() (tableIndex, tableIndexTxnNotify) {
 	return r, nil
 }
 
+func (r *partIndex) abort() {}
+
 // get implements tableIndex.
 func (r *partIndex) get(ikey index.Key) (iobj object, watch <-chan struct{}, found bool) {
 	return partGet(r.unique, &r.tree, ikey)
@@ -359,13 +362,21 @@ func (r *partIndexTxn) allNoWatch() tableIndexIterator {
 
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	if r.unique {
+		// A unique list is a Get() and the result does not refer to the
+		// tree, so no snapshot is needed.
+		return partList(true, r.tx, ikey)
+	}
 	snapshot := r.tx.Clone()
-	return partList(r.unique, &snapshot, ikey)
+	return partList(false, &snapshot, ikey)
 }
 
 func (r *partIndexTxn) listNoWatch(ikey index.Key) tableIndexIterator {
+	if r.unique {
+		return partListNoWatch(true, r.tx, ikey)
+	}
 	snapshot := r.tx.Clone()
-	return partListNoWatch(r.unique, &snapshot, ikey)
+	return partListNoWatch(false, &snapshot, ikey)
 }
 
 // lowerBound implements tableIndexTxn.
@@ -418,6 +429,13 @@ func (r *partIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
 			objectToKeys: r.objectToKeys,
 		},
 	}, r
+}
+
+// abort implements tableIndexTxn.
+func (r *partIndexTxn) abort() {
+	// The transaction is stored in the [partIndex] that is shared with
+	// the committed root. Drop it to not retain the aborted changes.
+	r.tx = nil
 }
 
 // delete implements tableIndexTxn.
@@ -614,6 +632,19 @@ func (k nonUniqueKey) encodedSecondary() []byte {
 	return k[:k.secondaryLen()]
 }
 
+// markVisited adds the encoded primary key to the visited set. Returns false
+// if it was already visited.
+func markVisited(visited map[string]struct{}, primary []byte) bool {
+	// The keys are slices of the keys stored in the tree which are never
+	// mutated, so the string can refer to them directly without copying.
+	key := unsafe.String(unsafe.SliceData(primary), len(primary))
+	if _, found := visited[key]; found {
+		return false
+	}
+	visited[key] = struct{}{}
+	return true
+}
+
 type nonUniquePartIterator struct {
 	iter         part.Iterator[object]
 	prefixSearch bool
@@ -647,15 +678,12 @@ func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
 		}
 
 		if it.prefixSearch {
-			primary := nuk.encodedPrimary()
-
 			// When doing a prefix search on a non-unique index we may see the
 			// same object multiple times since multiple keys may point it.
 			// Skip if we've already seen this object.
-			if _, found := visited[string(primary)]; found {
+			if !markVisited(visited, nuk.encodedPrimary()) {
 				continue
 			}
-			visited[string(primary)] = struct{}{}
 		}
 
 		if !yield(key, iobj) {
@@ -715,11 +743,9 @@ func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) 
 		nuk := nonUniqueKey(key)
 		secondary := nuk.encodedSecondary()
 		if bytes.Compare(secondary, it.searchKey) >= 0 {
-			primary := nuk.encodedPrimary()
-			if _, found := visited[string(primary)]; found {
+			if !markVisited(visited, nuk.encodedPrimary()) {
 				continue
 			}
-			visited[string(primary)] = struct{}{}
 
 			if !yield(key, iobj) {
 				return
@@ -744,11 +770,9 @@ func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
 		nuk := nonUniqueKey(key)
 		secondary := nuk.encodedSecondary()
 		if bytes.Compare(secondary, it.searchKey) >= 0 {
-			primary := nuk.encodedPrimary()
-			if _, found := it.visited[string(primary)]; found {
+			if !markVisited(it.visited, nuk.encodedPrimary()) {
 				continue
 			}
-			it.visited[string(primary)] = struct{}{}
 
 			return key, obj, true
 		}

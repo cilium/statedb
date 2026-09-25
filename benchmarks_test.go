@@ -191,6 +191,37 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	b.ReportMetric(float64(b.N*len(ids))/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_ListInsert(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+
+	ids := []uint64{}
+	for i := range numObjectsToInsert {
+		ids = append(ids, uint64(i))
+	}
+	rand.Shuffle(numObjectsToInsert, func(i, j int) {
+		ids[i], ids[j] = ids[j], ids[i]
+	})
+	txn := db.WriteTxn(table)
+	for _, id := range ids {
+		_, _, err := table.Insert(txn, &testObject{ID: id})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+	}
+	txn.Commit()
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		for _, id := range ids {
+			for old := range table.List(txn, idIndex.Query(id)) {
+				table.Insert(txn, old.clone())
+			}
+		}
+		txn.Commit()
+	}
+	b.ReportMetric(float64(b.N*len(ids))/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_RandomInsert(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	ids := []uint64{}
@@ -460,6 +491,30 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_LowerBound_SecondaryIndex(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	tagSet := part.NewSet("test")
+	txn := db.WriteTxn(table)
+	for i := range numObjectsToInsert {
+		_, _, err := table.Insert(txn, &testObject{ID: uint64(i), Tags: tagSet})
+		require.NoError(b, err)
+	}
+	rtxn := txn.Commit()
+
+	q := tagsIndex.Query("t")
+	for b.Loop() {
+		count := 0
+		for range table.LowerBound(rtxn, q) {
+			count++
+		}
+		if count != numObjectsToInsert {
+			b.Fatalf("wrong number of objects, expected %d, got %d", numObjectsToInsert, count)
+		}
+	}
+
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 const numObjectsIteration = 100000
 
 func BenchmarkDB_FullIteration_All(b *testing.B) {
@@ -678,4 +733,31 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 		b.ReportMetric(float64(samples[len(samples)*99/100]/time.Microsecond), "99th_µs")
 	}
 
+}
+
+func BenchmarkDB_WriteTxn_1_DefaultMetrics(b *testing.B) {
+	db := New()
+	table := newTestObjectTable(b, db, "test")
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: 123})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+		txn.Commit()
+	}
+}
+
+func BenchmarkDB_WriteTxn_1_ExpVarMetrics(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, NewExpVarMetrics(false))
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: 123})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+		txn.Commit()
+	}
 }
