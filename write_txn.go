@@ -82,13 +82,19 @@ func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableInde
 	if !table.locked {
 		return nil, tableError(meta.Name(), ErrTableNotLockedForWriting)
 	}
-	indexEntry := table.indexes[indexPos]
-	itxn, created := indexEntry.txn()
+	return txn.tableIndexTxn(table, indexPos), nil
+}
+
+// tableIndexTxn returns a transaction to read/write to a specific index of
+// the given locked table. The created transaction is memoized and used for
+// subsequent reads and/or writes.
+func (txn *writeTxnState) tableIndexTxn(table *tableEntry, indexPos int) tableIndexTxn {
+	itxn, created := table.indexes[indexPos].txn()
 	if created {
 		table.indexes[indexPos] = itxn
 		txn.numTxns++
 	}
-	return itxn, nil
+	return itxn
 }
 
 // mustIndexReadTxn returns a transaction to read from the specific index.
@@ -129,7 +135,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 
 	// Update the primary index first
 	obj := object{data: newData}
-	idIndexTxn := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
+	idIndexTxn := txn.tableIndexTxn(table, PrimaryIndexPos)
 	idKey, indexed := idIndexTxn.objectToKey(obj)
 	if !indexed {
 		return object{}, false, nil, nil
@@ -187,7 +193,7 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	}
 
 	// Update revision index
-	revIndexTxn := txn.mustIndexWriteTxn(meta, RevisionIndexPos)
+	revIndexTxn := txn.tableIndexTxn(table, RevisionIndexPos)
 	if oldExists {
 		binary.BigEndian.PutUint64(txn.revKey[:], oldObj.revision)
 		revIndexTxn.delete(txn.revKey[:])
@@ -197,25 +203,20 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	// If it's new, possibly remove an older deleted object with the same
 	// primary key from the graveyard.
 	if !oldExists {
-		if old, existed := txn.mustIndexReadTxn(meta, GraveyardIndexPos).getNoWatch(idKey); existed {
-			txn.mustIndexWriteTxn(meta, GraveyardIndexPos).delete(idKey)
+		if old, existed := table.indexes[GraveyardIndexPos].getNoWatch(idKey); existed {
+			txn.tableIndexTxn(table, GraveyardIndexPos).delete(idKey)
 			binary.BigEndian.PutUint64(txn.revKey[:], old.revision)
-			txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).delete(txn.revKey[:])
+			txn.tableIndexTxn(table, GraveyardRevisionIndexPos).delete(txn.revKey[:])
 		}
 	}
 
 	// Then update secondary indexes
 	for _, indexer := range meta.secondary() {
-		indexTxn := txn.mustIndexWriteTxn(meta, indexer.pos)
+		indexTxn := txn.tableIndexTxn(table, indexer.pos)
 		indexTxn.reindex(idKey, oldObj, obj)
 	}
 
 	return oldObj, oldExists, watch, nil
-}
-
-func (txn *writeTxnState) hasDeleteTrackers(meta TableMeta) bool {
-	table := txn.tableEntries[meta.tablePos()]
-	return table.deleteTrackers.Len() > 0
 }
 
 func (txn *writeTxnState) addDeleteTracker(meta TableMeta, trackerName string, dt anyDeleteTracker) error {
@@ -249,7 +250,7 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	// Delete from the primary index first to grab the object.
 	// We assume that "data" has only enough defined fields to
 	// compute the primary key.
-	idIndex := txn.mustIndexWriteTxn(meta, PrimaryIndexPos)
+	idIndex := txn.tableIndexTxn(table, PrimaryIndexPos)
 	idKey, indexed := idIndex.objectToKey(object{data: data})
 	if !indexed {
 		return object{}, false, nil
@@ -277,21 +278,21 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 
 	// Remove the object from the revision index.
 	binary.BigEndian.PutUint64(txn.revKey[:], obj.revision)
-	txn.mustIndexWriteTxn(meta, RevisionIndexPos).delete(txn.revKey[:])
+	txn.tableIndexTxn(table, RevisionIndexPos).delete(txn.revKey[:])
 
 	// Then update secondary indexes.
 	for _, indexer := range meta.secondary() {
-		txn.mustIndexWriteTxn(meta, indexer.pos).reindex(idKey, obj, object{})
+		txn.tableIndexTxn(table, indexer.pos).reindex(idKey, obj, object{})
 	}
 
 	// And finally insert the object into the graveyard.
-	if txn.hasDeleteTrackers(meta) {
-		graveyardIndex := txn.mustIndexWriteTxn(meta, GraveyardIndexPos)
+	if table.deleteTrackers.Len() > 0 {
+		graveyardIndex := txn.tableIndexTxn(table, GraveyardIndexPos)
 		obj.revision = revision
 		if _, existed := graveyardIndex.insertNoWatch(idKey, obj); existed {
 			panic("BUG: Double deletion! Deleted object already existed in graveyard")
 		}
-		txn.mustIndexWriteTxn(meta, GraveyardRevisionIndexPos).insertNoWatch(index.Uint64(revision), obj)
+		txn.tableIndexTxn(table, GraveyardRevisionIndexPos).insertNoWatch(index.Uint64(revision), obj)
 	}
 
 	return obj, true, nil
