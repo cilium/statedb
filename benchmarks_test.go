@@ -460,6 +460,30 @@ func BenchmarkDB_Prefix_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_LowerBound_SecondaryIndex(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{}, tagsIndex)
+	tagSet := part.NewSet("test")
+	txn := db.WriteTxn(table)
+	for i := range numObjectsToInsert {
+		_, _, err := table.Insert(txn, &testObject{ID: uint64(i), Tags: tagSet})
+		require.NoError(b, err)
+	}
+	rtxn := txn.Commit()
+
+	q := tagsIndex.Query("t")
+	for b.Loop() {
+		count := 0
+		for range table.LowerBound(rtxn, q) {
+			count++
+		}
+		if count != numObjectsToInsert {
+			b.Fatalf("wrong number of objects, expected %d, got %d", numObjectsToInsert, count)
+		}
+	}
+
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 const numObjectsIteration = 100000
 
 func BenchmarkDB_FullIteration_All(b *testing.B) {
