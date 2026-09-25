@@ -1660,6 +1660,24 @@ func Benchmark_Iterator_Next(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func Benchmark_LowerBound(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+
+	for b.Loop() {
+		for j := uint64(1); j <= numObjectsToInsert; j++ {
+			iter := tree.LowerBound(uint64Key(j))
+			_, v, ok := iter.Next()
+			if !ok || v != j {
+				b.Fatalf("expected %d, got %d (%v)", j, v, ok)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func Benchmark_Hashmap_Insert(b *testing.B) {
 	for b.Loop() {
 		m := map[uint64]uint64{}
