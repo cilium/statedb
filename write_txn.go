@@ -125,7 +125,6 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	if !table.locked {
 		return object{}, false, nil, tableError(tableName, ErrTableNotLockedForWriting)
 	}
-	oldRevision := table.revision
 
 	// Update the primary index first
 	obj := object{data: newData}
@@ -134,6 +133,20 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 	if !indexed {
 		return object{}, false, nil, nil
 	}
+
+	// For CompareAndSwap() validate against the given guard revision before
+	// modifying the index to not wake up watchers if the swap fails.
+	if guardRevision > 0 {
+		oldObj, oldExists := idIndexTxn.getNoWatch(idKey)
+		if !oldExists {
+			// CompareAndSwap requires the object to exist.
+			return object{}, false, nil, ErrObjectNotFound
+		}
+		if oldObj.revision != guardRevision {
+			return oldObj, true, nil, ErrRevisionNotEqual
+		}
+	}
+
 	table.revision++
 	obj.revision = table.revision
 
@@ -169,25 +182,6 @@ func (txn *writeTxnState) modify(meta TableMeta, guardRevision Revision, newData
 					"Insert() of the same object (%T) back into the table. Is the immutable object being mutated?",
 					obj.data))
 			}
-		}
-	}
-
-	// For CompareAndSwap() validate against the given guard revision
-	if guardRevision > 0 {
-		if !oldExists {
-			// CompareAndSwap requires the object to exist. Revert
-			// the insert.
-			idIndexTxn.delete(idKey)
-			table.revision = oldRevision
-			return object{}, false, watch, ErrObjectNotFound
-		}
-		if oldObj.revision != guardRevision {
-			// Revert the change. We're assuming here that it's rarer for CompareAndSwap() to
-			// fail and thus we're optimizing to have only one lookup in the common case
-			// (versus doing a Get() and then Insert()).
-			idIndexTxn.insertNoWatch(idKey, oldObj)
-			table.revision = oldRevision
-			return oldObj, true, watch, ErrRevisionNotEqual
 		}
 	}
 
@@ -259,18 +253,22 @@ func (txn *writeTxnState) delete(meta TableMeta, guardRevision Revision, data an
 	if !indexed {
 		return object{}, false, nil
 	}
+
+	// For CompareAndDelete() validate against guard revision before modifying
+	// the index to not wake up watchers if there's a mismatch.
+	if guardRevision > 0 {
+		obj, existed := idIndex.getNoWatch(idKey)
+		if !existed {
+			return object{}, false, nil
+		}
+		if obj.revision != guardRevision {
+			return obj, true, ErrRevisionNotEqual
+		}
+	}
+
 	obj, existed := idIndex.delete(idKey)
 	if !existed {
 		return object{}, false, nil
-	}
-
-	// For CompareAndDelete() validate against guard revision and if there's a mismatch,
-	// revert the change.
-	if guardRevision > 0 {
-		if obj.revision != guardRevision {
-			idIndex.insertNoWatch(idKey, obj)
-			return obj, true, ErrRevisionNotEqual
-		}
 	}
 
 	table.revision++
