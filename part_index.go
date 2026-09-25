@@ -362,13 +362,21 @@ func (r *partIndexTxn) allNoWatch() tableIndexIterator {
 
 // list implements tableIndexTxn.
 func (r *partIndexTxn) list(ikey index.Key) (tableIndexIterator, <-chan struct{}) {
+	if r.unique {
+		// A unique list is a Get() and the result does not refer to the
+		// tree, so no snapshot is needed.
+		return partList(true, r.tx, ikey)
+	}
 	snapshot := r.tx.Clone()
-	return partList(r.unique, &snapshot, ikey)
+	return partList(false, &snapshot, ikey)
 }
 
 func (r *partIndexTxn) listNoWatch(ikey index.Key) tableIndexIterator {
+	if r.unique {
+		return partListNoWatch(true, r.tx, ikey)
+	}
 	snapshot := r.tx.Clone()
-	return partListNoWatch(r.unique, &snapshot, ikey)
+	return partListNoWatch(false, &snapshot, ikey)
 }
 
 // lowerBound implements tableIndexTxn.
