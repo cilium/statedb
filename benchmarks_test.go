@@ -693,3 +693,16 @@ func BenchmarkDB_WriteTxn_1_DefaultMetrics(b *testing.B) {
 		txn.Commit()
 	}
 }
+
+func BenchmarkDB_WriteTxn_1_ExpVarMetrics(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, NewExpVarMetrics(false))
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: 123})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+		txn.Commit()
+	}
+}
