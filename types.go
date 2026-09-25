@@ -7,6 +7,7 @@ import (
 	"io"
 	"iter"
 	"slices"
+	"time"
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/internal"
@@ -402,7 +403,7 @@ type tableInternal interface {
 	unmarshalYAML(data []byte) (any, error) // Unmarshal the data into 'Obj'
 	numDeletedObjects(txn ReadTxn) int      // Number of objects in graveyard
 	acquired(*writeTxnState)
-	released()
+	released(now time.Time)
 	getAcquiredInfo() string
 	tableHeader() []string
 	tableRowAny(any) []string

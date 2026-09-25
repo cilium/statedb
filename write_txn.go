@@ -337,18 +337,19 @@ func (handle *writeTxnHandle) Abort() {
 	}
 
 	txn := handle.writeTxnState
+	now := time.Now()
 	for _, table := range txn.lockedTables {
 		for _, idx := range table.indexes {
 			idx.abort()
 		}
-		table.meta.released()
+		table.meta.released(now)
 	}
 
 	txn.smus.Unlock()
 	txn.db.metrics.WriteTxnDuration(
 		txn.handle,
 		txn.tableNames,
-		time.Since(txn.acquiredAt))
+		now.Sub(txn.acquiredAt))
 	handle.returnToPool()
 }
 
@@ -431,7 +432,6 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 				table.init = nil
 			}
 		}
-		table.meta.released()
 		table.locked = false
 	}
 	txn.tableEntries = nil
@@ -455,6 +455,10 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	}
 
 	// With the root pointer updated, we can now release the tables for the next write transaction.
+	now := time.Now()
+	for _, table := range txn.lockedTables {
+		table.meta.released(now)
+	}
 	txn.smus.Unlock()
 
 	// Notify table initializations
@@ -465,7 +469,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	txn.db.metrics.WriteTxnDuration(
 		txn.handle,
 		txn.tableNames,
-		time.Since(txn.acquiredAt))
+		now.Sub(txn.acquiredAt))
 
 	handle.returnToPool()
 
