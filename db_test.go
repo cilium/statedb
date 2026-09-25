@@ -1749,3 +1749,36 @@ func TestDB_RegisterTableDuringWriteTxn(t *testing.T) {
 	wtxn.Commit()
 	require.Equal(t, 1, b.NumObjects(db.ReadTxn()))
 }
+
+func TestDB_FailedCompareAndSwapDoesNotNotify(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t)
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+
+	_, rev, watch, found := table.GetWatch(rtxn, idIndex.Query(1))
+	require.True(t, found)
+	_, rootWatch := table.AllWatch(rtxn)
+
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.CompareAndSwap(wtxn, rev+1, &testObject{ID: 1})
+	require.ErrorIs(t, err, ErrRevisionNotEqual)
+	_, _, err = table.CompareAndSwap(wtxn, rev, &testObject{ID: 2})
+	require.ErrorIs(t, err, ErrObjectNotFound)
+	_, _, err = table.CompareAndDelete(wtxn, rev+1, &testObject{ID: 1})
+	require.ErrorIs(t, err, ErrRevisionNotEqual)
+	rtxn = wtxn.Commit()
+
+	require.Equal(t, rev, table.Revision(rtxn))
+	require.Equal(t, 1, table.NumObjects(rtxn))
+	select {
+	case <-watch:
+		t.Fatal("object watch channel closed by failed CompareAndSwap")
+	case <-rootWatch:
+		t.Fatal("root watch channel closed by failed CompareAndSwap")
+	default:
+	}
+}
