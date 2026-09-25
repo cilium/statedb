@@ -5,7 +5,6 @@ package part
 
 import (
 	"bytes"
-	"sort"
 )
 
 // Iterator for key and value pairs where value is of type T
@@ -261,9 +260,7 @@ loop:
 				children := this.children()
 
 				// Find the smallest child that is equal or larger than the lower bound
-				idx := sort.Search(len(children), func(i int) bool {
-					return children[i].key() >= key[0]
-				})
+				_, idx := this.findIndex(key[0])
 				if idx >= this.size() {
 					break loop
 				}
