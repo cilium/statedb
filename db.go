@@ -223,9 +223,7 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 		txn.smus[i] = table.sortableMutex()
 	}
 
-	lockAt := time.Now()
-	txn.smus.Lock()
-	acquiredAt := time.Now()
+	lockAt, acquiredAt := txn.smus.Lock()
 
 	txn.oldRoot = db.root.Load()
 
