@@ -157,7 +157,7 @@ func main() {
 
 					reconciler.WithRoundLimits(
 						*incrBatchSize,
-						rate.NewLimiter(1000.0, 10),
+						rate.NewLimiter(10000.0, 10),
 					),
 				)
 				return err
