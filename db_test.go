@@ -1782,3 +1782,28 @@ func TestDB_FailedCompareAndSwapDoesNotNotify(t *testing.T) {
 	default:
 	}
 }
+
+func TestDB_AbortReleasesIndexTxn(t *testing.T) {
+	t.Parallel()
+
+	db, table, _ := newTestDB(t, tagsIndex)
+	wtxn := db.WriteTxn(table)
+	_, _, err := table.Insert(wtxn, &testObject{ID: 1, Tags: part.NewSet("foo")})
+	require.NoError(t, err)
+	wtxn.Abort()
+
+	for i, idx := range db.ReadTxn().root()[table.tablePos()].indexes {
+		if pidx, ok := idx.(*partIndex); ok {
+			require.Nil(t, pidx.tx, "index %d retains aborted transaction", i)
+		}
+	}
+
+	// The table is still writable after abort.
+	wtxn = db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, &testObject{ID: 2, Tags: part.NewSet("bar")})
+	require.NoError(t, err)
+	rtxn := wtxn.Commit()
+	require.Equal(t, 1, table.NumObjects(rtxn))
+	_, _, found := table.Get(rtxn, idIndex.Query(1))
+	require.False(t, found)
+}

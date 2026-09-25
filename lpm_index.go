@@ -312,6 +312,8 @@ func (l lpmIndex) commit() (tableIndex, tableIndexTxnNotify) {
 	return l, nil
 }
 
+func (l lpmIndex) abort() {}
+
 // txn implements tableIndex.
 func (l lpmIndex) txn() (tableIndexTxn, bool) {
 	if l.prevTxn != nil {
@@ -482,6 +484,9 @@ func (l *lpmIndexTxn) reindex(primaryKey index.Key, old object, new object) {
 		})
 	}
 }
+
+// abort implements tableIndexTxn.
+func (l *lpmIndexTxn) abort() {}
 
 // rootWatch implements tableIndexTxn.
 func (l *lpmIndexTxn) rootWatch() <-chan struct{} {

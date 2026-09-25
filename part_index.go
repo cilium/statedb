@@ -192,6 +192,8 @@ func (r *partIndex) commit() (tableIndex, tableIndexTxnNotify) {
 	return r, nil
 }
 
+func (r *partIndex) abort() {}
+
 // get implements tableIndex.
 func (r *partIndex) get(ikey index.Key) (iobj object, watch <-chan struct{}, found bool) {
 	return partGet(r.unique, &r.tree, ikey)
@@ -418,6 +420,13 @@ func (r *partIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
 			objectToKeys: r.objectToKeys,
 		},
 	}, r
+}
+
+// abort implements tableIndexTxn.
+func (r *partIndexTxn) abort() {
+	// The transaction is stored in the [partIndex] that is shared with
+	// the committed root. Drop it to not retain the aborted changes.
+	r.tx = nil
 }
 
 // delete implements tableIndexTxn.

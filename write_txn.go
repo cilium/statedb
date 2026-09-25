@@ -336,6 +336,9 @@ func (handle *writeTxnHandle) Abort() {
 	txn := handle.writeTxnState
 	for _, table := range txn.tableEntries {
 		if table.locked {
+			for _, idx := range table.indexes {
+				idx.abort()
+			}
 			table.meta.released()
 		}
 	}

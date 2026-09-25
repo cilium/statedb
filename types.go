@@ -437,6 +437,10 @@ type tableIndex interface {
 	tableIndexReader
 	txn() (tableIndexTxn, bool)
 	commit() (idx tableIndex, txn tableIndexTxnNotify)
+
+	// abort discards the index transaction, if any, and releases the
+	// resources held by it.
+	abort()
 }
 
 type tableIndexTxn interface {
