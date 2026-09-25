@@ -437,6 +437,11 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	}
 	txn.tableEntries = nil
 
+	// Include any tables that were registered after this transaction was created.
+	if n := len(root); len(currentRoot) > n {
+		root = append(root, currentRoot[n:]...)
+	}
+
 	// Commit the transaction to build the new root tree and then
 	// atomically store it.
 	db.root.Store(&root)

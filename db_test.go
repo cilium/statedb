@@ -1732,3 +1732,20 @@ func expvarFloat(v expvar.Var) float64 {
 	}
 	return -1
 }
+
+func TestDB_RegisterTableDuringWriteTxn(t *testing.T) {
+	t.Parallel()
+
+	db := New()
+	a := newTestObjectTable(t, db, "a")
+	wtxn := db.WriteTxn(a)
+	b := newTestObjectTable(t, db, "b")
+	wtxn.Commit()
+
+	require.Equal(t, 0, b.NumObjects(db.ReadTxn()))
+	wtxn = db.WriteTxn(b)
+	_, _, err := b.Insert(wtxn, &testObject{ID: 1})
+	require.NoError(t, err)
+	wtxn.Commit()
+	require.Equal(t, 1, b.NumObjects(db.ReadTxn()))
+}
