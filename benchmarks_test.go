@@ -191,6 +191,37 @@ func benchmarkDB_Modify_vs_GetInsert(b *testing.B, doGetInsert bool) {
 	b.ReportMetric(float64(b.N*len(ids))/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_ListInsert(b *testing.B) {
+	db, table := newTestDBWithMetrics(b, &NopMetrics{})
+
+	ids := []uint64{}
+	for i := range numObjectsToInsert {
+		ids = append(ids, uint64(i))
+	}
+	rand.Shuffle(numObjectsToInsert, func(i, j int) {
+		ids[i], ids[j] = ids[j], ids[i]
+	})
+	txn := db.WriteTxn(table)
+	for _, id := range ids {
+		_, _, err := table.Insert(txn, &testObject{ID: id})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+	}
+	txn.Commit()
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		for _, id := range ids {
+			for old := range table.List(txn, idIndex.Query(id)) {
+				table.Insert(txn, old.clone())
+			}
+		}
+		txn.Commit()
+	}
+	b.ReportMetric(float64(b.N*len(ids))/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func BenchmarkDB_RandomInsert(b *testing.B) {
 	db, table := newTestDBWithMetrics(b, &NopMetrics{})
 	ids := []uint64{}
