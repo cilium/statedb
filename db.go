@@ -168,6 +168,7 @@ func (db *DB) updateWriteTxnPoolLocked(numTables int) {
 			return &writeTxnState{
 				db:           db,
 				tableEntries: make([]*tableEntry, 0, numTables),
+				lockedTables: make([]*tableEntry, 0, defaultNumTables),
 				smus:         make(internal.SortableMutexes, 0, defaultNumTables),
 				tableNames:   make([]string, 0, defaultNumTables),
 			}
@@ -236,11 +237,13 @@ func (db *DB) WriteTxn(tables ...TableMeta) WriteTxn {
 	txn.acquiredAt = acquiredAt
 
 	txn.tableNames = reuseSlice(txn.tableNames, len(tables))
+	txn.lockedTables = reuseSlice(txn.lockedTables, len(tables))
 	for i, table := range tables {
 		pos := table.tablePos()
 		tableEntryCopy := cloneTableEntry(txn.tableEntries[pos])
 		tableEntryCopy.locked = true
 		txn.tableEntries[pos] = tableEntryCopy
+		txn.lockedTables[i] = tableEntryCopy
 		name := table.Name()
 		txn.tableNames[i] = name
 
