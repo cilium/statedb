@@ -32,6 +32,7 @@ type writeTxnState struct {
 
 	oldRoot      *dbRoot                  // snapshot of the root at the time WriteTxn was called
 	tableEntries []*tableEntry            // table entries being modified
+	lockedTables []*tableEntry            // the entries of the locked tables
 	numTxns      int                      // number of index transactions opened
 	smus         internal.SortableMutexes // the (sorted) table locks
 	tableNames   []string
@@ -302,6 +303,8 @@ func (handle *writeTxnHandle) returnToPool() {
 	txn := handle.writeTxnState
 	txn.oldRoot = nil
 	txn.tableEntries = nil
+	clear(txn.lockedTables)
+	txn.lockedTables = txn.lockedTables[:0]
 	txn.numTxns = 0
 	clear(txn.smus)
 	txn.smus = txn.smus[:0]
@@ -334,13 +337,11 @@ func (handle *writeTxnHandle) Abort() {
 	}
 
 	txn := handle.writeTxnState
-	for _, table := range txn.tableEntries {
-		if table.locked {
-			for _, idx := range table.indexes {
-				idx.abort()
-			}
-			table.meta.released()
+	for _, table := range txn.lockedTables {
+		for _, idx := range table.indexes {
+			idx.abort()
 		}
+		table.meta.released()
 	}
 
 	txn.smus.Unlock()
@@ -383,11 +384,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// We don't notify yet (CommitOnly) as the root needs to be updated
 	// first as otherwise readers would wake up too early.
 	txnToNotify := make([]tableIndexTxnNotify, 0, txn.numTxns)
-	for pos := range txn.tableEntries {
-		table := txn.tableEntries[pos]
-		if !table.locked {
-			continue
-		}
+	for _, table := range txn.lockedTables {
 		for i, idx := range table.indexes {
 			var txn tableIndexTxnNotify
 			table.indexes[i], txn = idx.commit()
@@ -411,19 +408,20 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// Since the root may have changed since the pointer was last read in WriteTxn(),
 	// load it again and modify the latest version that we now have immobilised by
 	// the root lock.
-	currentRoot := *db.root.Load()
 	root := txn.tableEntries
+	if currentRoot := db.root.Load(); currentRoot != txn.oldRoot {
+		// Tables that were not locked might have changed or new tables
+		// may have been registered. Refresh the entries from the current
+		// root and put the locked tables back in.
+		root = append(root[:0], *currentRoot...)
+		for _, table := range txn.lockedTables {
+			root[table.meta.tablePos()] = table
+		}
+	}
 	var initChansToClose []chan struct{}
 
 	// Insert the modified tables into the root tree of tables.
-	for pos := range txn.tableEntries {
-		table := txn.tableEntries[pos]
-		if !table.locked {
-			// Table was not locked so it might have changed.
-			// Update the entry from the current root.
-			root[pos] = currentRoot[pos]
-			continue
-		}
+	for _, table := range txn.lockedTables {
 		// Check if tables become initialized. We close the channel only after
 		// we've swapped in the new root so that one cannot get a snapshot of
 		// an uninitialized table after observing the channel closing.
@@ -437,11 +435,6 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 		table.locked = false
 	}
 	txn.tableEntries = nil
-
-	// Include any tables that were registered after this transaction was created.
-	if n := len(root); len(currentRoot) > n {
-		root = append(root, currentRoot[n:]...)
-	}
 
 	// Commit the transaction to build the new root tree and then
 	// atomically store it. The root is stored in the handle to avoid
