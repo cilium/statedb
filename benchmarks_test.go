@@ -679,3 +679,17 @@ func BenchmarkDB_PropagationDelay(b *testing.B) {
 	}
 
 }
+
+func BenchmarkDB_WriteTxn_1_DefaultMetrics(b *testing.B) {
+	db := New()
+	table := newTestObjectTable(b, db, "test")
+
+	for b.Loop() {
+		txn := db.WriteTxn(table)
+		_, _, err := table.Insert(txn, &testObject{ID: 123})
+		if err != nil {
+			b.Fatalf("Insert error: %s", err)
+		}
+		txn.Commit()
+	}
+}

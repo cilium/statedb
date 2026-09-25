@@ -142,8 +142,9 @@ func New(options ...Option) *DB {
 		o(&opts)
 	}
 	if opts.metrics == nil {
-		// Use the default metrics implementation but don't publish it.
-		opts.metrics = NewExpVarMetrics(false)
+		// No metrics implementation given. Nothing would be able to observe
+		// the metrics, so don't bother collecting them.
+		opts.metrics = &NopMetrics{}
 	}
 
 	db := &DB{
