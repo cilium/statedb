@@ -444,8 +444,10 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	}
 
 	// Commit the transaction to build the new root tree and then
-	// atomically store it.
-	db.root.Store(&root)
+	// atomically store it. The root is stored in the handle to avoid
+	// a separate allocation for it.
+	handle.readTxn = root
+	db.root.Store((*dbRoot)(&handle.readTxn))
 	db.mu.Unlock()
 
 	// Now that new root is committed, we can notify readers by closing the watch channels of
@@ -456,7 +458,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 
 	// Invoke commit hooks, if any.
 	for _, hook := range db.commitHooks {
-		hook((*readTxn)(&root), txn.tableNames)
+		hook(&handle.readTxn, txn.tableNames)
 	}
 
 	// With the root pointer updated, we can now release the tables for the next write transaction.
@@ -474,7 +476,6 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 
 	handle.returnToPool()
 
-	handle.readTxn = root
 	return &handle.readTxn
 }
 
