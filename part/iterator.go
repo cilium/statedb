@@ -173,9 +173,11 @@ func prefixSearch[T any](root *header[T], rootWatch *atomicWatchPointer, prefix 
 	}
 }
 
-func traverseToMin[T any](n *header[T], edges [][]*header[T]) [][]*header[T] {
+// traverseToMin appends the edges to explore to find the smallest leaf
+// under [n]. [nEdge] is either nil or a single element slice holding [n].
+func traverseToMin[T any](n *header[T], nEdge []*header[T], edges [][]*header[T]) [][]*header[T] {
 	if leaf := n.getLeaf(); leaf != nil {
-		return append(edges, []*header[T]{n})
+		return append(edges, singletonEdge(n, nEdge))
 	}
 	children := n.children()
 
@@ -190,9 +192,19 @@ func traverseToMin[T any](n *header[T], edges [][]*header[T]) [][]*header[T] {
 			edges = append(edges, children[1:])
 		}
 		// Recurse into the smallest child
-		return traverseToMin(children[0], edges)
+		return traverseToMin(children[0], children[:1], edges)
 	}
 	return edges
+}
+
+// singletonEdge returns [nEdge] if it is set, or otherwise allocates
+// a single element slice for [n]. [nEdge] is a slice into the children
+// of the parent of [n] and is used to avoid the allocation.
+func singletonEdge[T any](n *header[T], nEdge []*header[T]) []*header[T] {
+	if nEdge != nil {
+		return nEdge
+	}
+	return []*header[T]{n}
 }
 
 func lowerbound[T any](start *header[T], key []byte) Iterator[T] {
@@ -201,9 +213,14 @@ func lowerbound[T any](start *header[T], key []byte) Iterator[T] {
 	}
 
 	// The starting edges to explore. This contains all larger nodes encountered
-	// on the path to the node larger or equal to the key.
-	var edges [][]*header[T]
+	// on the path to the node larger or equal to the key. Preallocate
+	// to avoid growing the slice one edge at a time.
+	edges := make([][]*header[T], 0, 4)
 	this := start
+
+	// thisEdge is the single element slice holding [this] in its parent's
+	// children. Nil for [start].
+	var thisEdge []*header[T]
 loop:
 	for {
 		switch bytes.Compare(this.prefix(), key[:min(len(key), int(this.prefixLen))]) {
@@ -215,7 +232,7 @@ loop:
 		case 0:
 			if int(this.prefixLen) == len(key) {
 				// Exact match.
-				edges = append(edges, []*header[T]{this})
+				edges = append(edges, singletonEdge(this, thisEdge))
 				break loop
 			}
 
@@ -228,6 +245,7 @@ loop:
 				children := this.node256().children[:]
 				idx := int(key[0])
 				this = children[idx]
+				thisEdge = children[idx : idx+1]
 
 				// Add all larger children and recurse further.
 				children = children[idx+1:]
@@ -254,11 +272,12 @@ loop:
 					edges = append(edges, children[idx+1:])
 				}
 				this = children[idx]
+				thisEdge = children[idx : idx+1]
 			}
 
 		case 1:
 			// Prefix bigger than lowerbound, go to smallest node and stop.
-			edges = traverseToMin(this, edges)
+			edges = traverseToMin(this, thisEdge, edges)
 			break loop
 		}
 	}
