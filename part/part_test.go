@@ -1660,6 +1660,53 @@ func Benchmark_Iterator_Next(b *testing.B) {
 	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func Benchmark_LowerBound(b *testing.B) {
+	tree := New[uint64](RootOnlyWatch)
+	for j := uint64(1); j <= numObjectsToInsert; j++ {
+		_, _, tree = tree.Insert(uint64Key(j), j)
+	}
+
+	for b.Loop() {
+		for j := uint64(1); j <= numObjectsToInsert; j++ {
+			iter := tree.LowerBound(uint64Key(j))
+			_, v, ok := iter.Next()
+			if !ok || v != j {
+				b.Fatalf("expected %d, got %d (%v)", j, v, ok)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
+func Benchmark_LowerBound_Random(b *testing.B) {
+	// Random keys in a larger tree to exercise all node kinds.
+	rng := rand.New(rand.NewSource(1))
+	empty := New[uint64](RootOnlyWatch)
+	txn := empty.Txn()
+	keys := make([]uint64, 0, 100*numObjectsToInsert)
+	for range 100 * numObjectsToInsert {
+		k := rng.Uint64()
+		keys = append(keys, k)
+		txn.Insert(uint64Key(k), k)
+	}
+	tree := txn.Commit()
+	queries := make([][]byte, 0, numObjectsToInsert)
+	for _, k := range keys[:numObjectsToInsert] {
+		queries = append(queries, uint64Key(k))
+	}
+
+	for b.Loop() {
+		for i, q := range queries {
+			iter := tree.LowerBound(q)
+			_, v, ok := iter.Next()
+			if !ok || v != keys[i] {
+				b.Fatalf("expected %d, got %d (%v)", keys[i], v, ok)
+			}
+		}
+	}
+	b.ReportMetric(float64(numObjectsToInsert*b.N)/b.Elapsed().Seconds(), "objects/sec")
+}
+
 func Benchmark_Hashmap_Insert(b *testing.B) {
 	for b.Loop() {
 		m := map[uint64]uint64{}
