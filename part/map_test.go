@@ -148,6 +148,34 @@ func TestFromMapOverwritesSingleton(t *testing.T) {
 	require.Equal(t, map[string]int{"a": 1}, maps.Collect(original.All()))
 }
 
+func TestMapEqualityWithTreeBackedSingleton(t *testing.T) {
+	t.Parallel()
+
+	// Duplicate serialized keys can leave a map with one entry in tree form.
+	var treeBacked Map[string, int]
+	require.NoError(t, json.Unmarshal([]byte(`[{"k":"a","v":2},{"k":"a","v":2}]`), &treeBacked))
+	require.Equal(t, 1, treeBacked.Len())
+	require.True(t, treeBacked.hasTree)
+
+	for _, tc := range []struct {
+		name       string
+		other      Map[string, int]
+		keysEqual  bool
+		fullyEqual bool
+	}{
+		{"same entry", Map[string, int]{}.Set("a", 2), true, true},
+		{"different value", Map[string, int]{}.Set("a", 3), true, false},
+		{"different key", Map[string, int]{}.Set("b", 2), false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.keysEqual, treeBacked.EqualKeys(tc.other))
+			require.Equal(t, tc.keysEqual, tc.other.EqualKeys(treeBacked))
+			require.Equal(t, tc.fullyEqual, treeBacked.SlowEqual(tc.other))
+			require.Equal(t, tc.fullyEqual, tc.other.SlowEqual(treeBacked))
+		})
+	}
+}
+
 func TestSingletonMap(t *testing.T) {
 	t.Parallel()
 	var m Map[string, int]
