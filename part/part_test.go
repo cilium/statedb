@@ -1298,6 +1298,35 @@ func TestInitialTransactionLeafWatch(t *testing.T) {
 	}
 }
 
+func TestDeleteParentCache(t *testing.T) {
+	t.Parallel()
+
+	tree := New[int]()
+	txn := tree.Txn()
+	for length := 1; length <= 100; length++ {
+		txn.Insert(bytes.Repeat([]byte{'a'}, length), length)
+	}
+	tree = txn.CommitAndNotify()
+	txn = tree.Txn()
+
+	_, found := txn.Delete(bytes.Repeat([]byte{'a'}, 100))
+	require.True(t, found)
+	require.Greater(t, cap(txn.deleteParentsCache), 32)
+	backing := &txn.deleteParentsCache[:cap(txn.deleteParentsCache)][0]
+	for _, parent := range txn.deleteParentsCache[:cap(txn.deleteParentsCache)] {
+		require.Nil(t, parent.node)
+	}
+
+	_, found = txn.Delete(bytes.Repeat([]byte{'a'}, 99))
+	require.True(t, found)
+	require.Same(t, backing, &txn.deleteParentsCache[:cap(txn.deleteParentsCache)][0])
+	_, found = txn.Delete(append(bytes.Repeat([]byte{'a'}, 98), 'b'))
+	require.False(t, found)
+	for _, parent := range txn.deleteParentsCache[:cap(txn.deleteParentsCache)] {
+		require.Nil(t, parent.node)
+	}
+}
+
 func Test_lowerbound_bigger(t *testing.T) {
 	t.Parallel()
 
@@ -1576,6 +1605,28 @@ func Benchmark_txn_delete_100(b *testing.B) {
 
 func Benchmark_txn_delete_1000(b *testing.B) {
 	benchmark_txn_delete_batch(b, 1000)
+}
+
+func BenchmarkDeleteParentCache(b *testing.B) {
+	for _, depth := range []int{8, 100} {
+		b.Run(fmt.Sprintf("depth_%d", depth), func(b *testing.B) {
+			tree := New[int](RootOnlyWatch)
+			txn := tree.Txn()
+			for length := 1; length <= depth; length++ {
+				txn.Insert(bytes.Repeat([]byte{'a'}, length), length)
+			}
+			tree = txn.CommitAndNotify()
+			txn = tree.Txn()
+			key := bytes.Repeat([]byte{'a'}, depth)
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				txn.Delete(key)
+				txn.Insert(key, depth)
+			}
+		})
+	}
 }
 
 func benchmark_txn_delete_batch(b *testing.B, batchSize int) {
