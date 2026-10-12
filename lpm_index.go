@@ -308,7 +308,7 @@ func (l lpmIndex) rootWatch() <-chan struct{} {
 	return l.watch
 }
 
-func (l lpmIndex) commit() (tableIndex, tableIndexTxnNotify) {
+func (l lpmIndex) commitInto(tableIndex) (tableIndex, tableIndexTxnNotify) {
 	return l, nil
 }
 
@@ -348,7 +348,7 @@ func (l *lpmIndexTxn) allNoWatch() tableIndexIterator {
 }
 
 // commit implements tableIndexTxn.
-func (l *lpmIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
+func (l *lpmIndexTxn) commitInto(tableIndex) (tableIndex, tableIndexTxnNotify) {
 	lpm := l.tx.Commit()
 	l.tx.Clear()
 	return lpmIndex{
@@ -444,8 +444,8 @@ func (l *lpmIndexTxn) lowerBoundNextNoWatch(key index.Key) func() ([]byte, objec
 	return newLPMNextFunc(l.tx.LowerBound(key))
 }
 
-// notify implements tableIndexTxn.
-func (l *lpmIndexTxn) notify() {
+// Notify implements tableIndexTxnNotify.
+func (l *lpmIndexTxn) Notify() {
 	if l.index.watch != nil {
 		close(l.index.watch)
 		l.index.watch = nil

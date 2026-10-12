@@ -437,7 +437,7 @@ type tableIndexReader interface {
 type tableIndex interface {
 	tableIndexReader
 	txn() (tableIndexTxn, bool)
-	commit() (idx tableIndex, txn tableIndexTxnNotify)
+	commitInto(tableIndex) (idx tableIndex, txn tableIndexTxnNotify)
 
 	// abort discards the index transaction, if any, and releases the
 	// resources held by it.
@@ -456,7 +456,7 @@ type tableIndexTxn interface {
 }
 
 type tableIndexTxnNotify interface {
-	notify()
+	Notify()
 }
 
 type tableInitialization struct {
@@ -486,12 +486,17 @@ type tableEntry struct {
 	// indexes are the table indexes that store the objects
 	indexes []tableIndex
 
+	indexAllocator tableIndexAllocator
+
 	// revision is the current table revision. It's the same
 	// as the revision of the last inserted object.
 	revision uint64
 
 	// locked marks the table locked for writes.
 	locked bool
+
+	// hasIndexTxn records whether this table opened any index transactions.
+	hasIndexTxn bool
 }
 
 type tableEntryWithIndexes0 struct {
@@ -539,6 +544,8 @@ func cloneTableEntry(entry *tableEntry) *tableEntry {
 	*clone = *entry
 	copy(indexes, entry.indexes)
 	clone.indexes = indexes
+	clone.indexAllocator.partIndexes = nil
+	clone.hasIndexTxn = false
 	return clone
 }
 

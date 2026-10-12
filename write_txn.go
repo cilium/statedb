@@ -91,6 +91,7 @@ func (txn *writeTxnState) indexWriteTxn(meta TableMeta, indexPos int) (tableInde
 func (txn *writeTxnState) tableIndexTxn(table *tableEntry, indexPos int) tableIndexTxn {
 	itxn, created := table.indexes[indexPos].txn()
 	if created {
+		table.hasIndexTxn = true
 		table.indexes[indexPos] = itxn
 		txn.numTxns++
 	}
@@ -389,7 +390,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	for _, table := range txn.lockedTables {
 		for i, idx := range table.indexes {
 			var txn tableIndexTxnNotify
-			table.indexes[i], txn = idx.commit()
+			table.indexes[i], txn = idx.commitInto(table.allocIndex(i))
 			if txn != nil {
 				txnToNotify = append(txnToNotify, txn)
 			}
@@ -447,7 +448,7 @@ func (handle *writeTxnHandle) Commit() ReadTxn {
 	// Now that new root is committed, we can notify readers by closing the watch channels of
 	// mutated radix tree nodes in all changed indexes and on the root itself.
 	for _, txn := range txnToNotify {
-		txn.notify()
+		txn.Notify()
 	}
 
 	// Invoke commit hooks, if any.

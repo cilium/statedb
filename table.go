@@ -270,6 +270,7 @@ func (t *genTable[Obj]) tableEntry() *tableEntry {
 	entry.indexes[RevisionIndexPos] = newRevisionIndex()
 	entry.indexes[GraveyardRevisionIndexPos] = newRevisionIndex()
 	entry.indexes[GraveyardIndexPos] = newGraveyardIndex(primaryIndex)
+	entry.indexAllocator.layout = newTableIndexAllocationLayout(entry.indexes)
 
 	return &entry
 }

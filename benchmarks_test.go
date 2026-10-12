@@ -95,6 +95,30 @@ func BenchmarkDB_WriteTxn_100_SecondaryIndex(b *testing.B) {
 	b.ReportMetric(float64(b.N)/b.Elapsed().Seconds(), "objects/sec")
 }
 
+func BenchmarkDB_WriteTxn_SecondaryIndexes(b *testing.B) {
+	for _, count := range []int{0, 1, 4, 8, 16} {
+		b.Run(fmt.Sprintf("indexes_%d", count), func(b *testing.B) {
+			indexes := make([]Indexer[*testObject], count)
+			for i := range indexes {
+				idx := tagsIndex
+				idx.Name = fmt.Sprintf("tags%d", i)
+				indexes[i] = idx
+			}
+			db, table := newTestDBWithMetrics(b, &NopMetrics{}, indexes...)
+			tags := part.NewSet("tag")
+			b.ReportAllocs()
+			for b.Loop() {
+				txn := db.WriteTxn(table)
+				_, _, err := table.Insert(txn, &testObject{ID: 123, Tags: tags})
+				if err != nil {
+					b.Fatal(err)
+				}
+				txn.Commit()
+			}
+		})
+	}
+}
+
 func BenchmarkDB_WriteTxn_CommitOnly_100Tables(b *testing.B) {
 	db := New(WithMetrics(&NopMetrics{}))
 	for i := range 99 {

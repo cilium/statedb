@@ -189,8 +189,13 @@ func (r *partIndex) objectToKey(obj object) (index.Key, bool) {
 	return keys.First()
 }
 
-func (r *partIndex) commit() (tableIndex, tableIndexTxnNotify) {
-	return r, nil
+func (r *partIndex) commitInto(destination tableIndex) (tableIndex, tableIndexTxnNotify) {
+	if destination == nil {
+		return r, nil
+	}
+	dst := destination.(*partIndex)
+	*dst = *r
+	return dst, nil
 }
 
 func (r *partIndex) abort() {}
@@ -421,14 +426,18 @@ func (r *partIndexTxn) rootWatch() <-chan struct{} {
 }
 
 // commit implements tableIndexTxn.
-func (r *partIndexTxn) commit() (tableIndex, tableIndexTxnNotify) {
-	return &partIndex{
-		tree: r.tx.Commit(),
+func (r *partIndexTxn) commitInto(destination tableIndex) (tableIndex, tableIndexTxnNotify) {
+	txn := r.tx
+	dst := destination.(*partIndex)
+	*dst = partIndex{
+		tree: txn.Commit(),
 		partIndexTxn: partIndexTxn{
 			unique:       r.unique,
 			objectToKeys: r.objectToKeys,
 		},
-	}, r
+	}
+	r.tx = nil
+	return dst, txn
 }
 
 // abort implements tableIndexTxn.
@@ -473,14 +482,6 @@ func (r *partIndexTxn) modify(key index.Key, obj object, mod func(old, new objec
 
 func (r *partIndexTxn) modifyNoWatch(key index.Key, obj object, mod func(old, new object) object) (old object, newObj object, hadOld bool) {
 	return r.tx.Modify(key, obj, mod)
-}
-
-// notify implements tableIndexTxn.
-func (r *partIndexTxn) notify() {
-	if r.tx != nil {
-		r.tx.Notify()
-		r.tx = nil
-	}
 }
 
 // prefix implements tableIndexTxn.
