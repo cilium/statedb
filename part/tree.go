@@ -46,10 +46,7 @@ type Option func(*options)
 var RootOnlyWatch = (*options).setRootOnlyWatch
 
 func newTxn[T any](o options) *Txn[T] {
-	txn := &Txn[T]{}
-	txn.deleteParentsCache = make([]deleteParent[T], 0, 32)
-	txn.opts = o
-	return txn
+	return &Txn[T]{opts: o}
 }
 
 // Txn constructs a new transaction against the tree. Transactions
