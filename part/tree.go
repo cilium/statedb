@@ -69,7 +69,12 @@ func (t *Tree[T]) Txn() *Txn[T] {
 	}
 	txn.opts = t.opts
 	txn.root = t.root
-	txn.oldRoot = t.root
+	// The old snapshot is only needed by the optional invariant checks.
+	// Keeping it in the cached transaction would retain replaced values.
+	txn.oldRoot = nil
+	if runValidation {
+		txn.oldRoot = t.root
+	}
 	txn.rootWatch = t.rootWatch
 	txn.size = t.size
 	txn.prevTxn = t.prevTxn

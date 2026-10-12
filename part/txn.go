@@ -254,6 +254,7 @@ func (txn *Txn[T]) Notify() {
 	if !txn.opts.rootOnlyWatch() {
 		validateRemovedWatches(txn.oldRoot, txn.root)
 	}
+	txn.oldRoot = nil
 }
 
 // PrintTree to the standard output. For debugging.
