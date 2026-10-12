@@ -268,7 +268,7 @@ func (txn *Txn[T]) PrintTree() {
 }
 
 func (txn *Txn[T]) cloneNode(n *header[T]) *header[T] {
-	if n.txnID() == txn.txnID {
+	if !n.isLeaf() && n.txnID() == txn.txnID {
 		// The node was already cloned during this transaction and can
 		// be mutated in-place.
 		return n
