@@ -138,6 +138,16 @@ func TestStringMap(t *testing.T) {
 	assert.True(t, m.SlowEqual(m3))
 }
 
+func TestFromMapOverwritesSingleton(t *testing.T) {
+	t.Parallel()
+
+	original := Map[string, int]{}.Set("a", 1)
+	merged := FromMap(original, map[string]int{"a": 2, "b": 3})
+
+	require.Equal(t, map[string]int{"a": 2, "b": 3}, maps.Collect(merged.All()))
+	require.Equal(t, map[string]int{"a": 1}, maps.Collect(original.All()))
+}
+
 func TestSingletonMap(t *testing.T) {
 	t.Parallel()
 	var m Map[string, int]
