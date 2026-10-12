@@ -48,3 +48,18 @@ func BenchmarkSmallWriteTxn(b *testing.B) {
 		})
 	}
 }
+
+var freshWriteTxnSink Tree[int]
+
+// BenchmarkFreshWriteTxn includes the cost of creating a new tree and its
+// first transaction, where deletion scratch should not be needed.
+func BenchmarkFreshWriteTxn(b *testing.B) {
+	key := []byte("key")
+	b.ReportAllocs()
+	for i := range b.N {
+		tree := New[int](RootOnlyWatch)
+		txn := tree.Txn()
+		txn.Insert(key, i)
+		freshWriteTxnSink = txn.CommitAndNotify()
+	}
+}

@@ -1327,6 +1327,20 @@ func TestDeleteParentCache(t *testing.T) {
 	}
 }
 
+func TestDeleteScratchAllocatedLazily(t *testing.T) {
+	t.Parallel()
+
+	tree := New[int]()
+	txn := tree.Txn()
+	require.Nil(t, txn.deleteParentsCache)
+	txn.Delete([]byte("missing"))
+	require.Nil(t, txn.deleteParentsCache)
+	txn.Insert([]byte("present"), 1)
+	require.Nil(t, txn.deleteParentsCache)
+	txn.Delete([]byte("present"))
+	require.NotNil(t, txn.deleteParentsCache)
+}
+
 func Test_lowerbound_bigger(t *testing.T) {
 	t.Parallel()
 
