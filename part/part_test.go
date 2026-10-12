@@ -1267,6 +1267,37 @@ func Test_closed_chan_regression(t *testing.T) {
 	}
 }
 
+func TestInitialTransactionLeafWatch(t *testing.T) {
+	t.Parallel()
+
+	for _, withSibling := range []bool{false, true} {
+		t.Run(fmt.Sprintf("withSibling=%t", withSibling), func(t *testing.T) {
+			tree := New[int]()
+			txn := tree.Txn()
+			if withSibling {
+				txn.Insert([]byte("ac"), 0)
+			}
+			_, _, firstWatch := txn.InsertWatch([]byte("ab"), 1)
+			_, _, secondWatch := txn.InsertWatch([]byte("ab"), 2)
+			tree = txn.CommitAndNotify()
+
+			select {
+			case <-firstWatch:
+			default:
+				t.Fatal("watch on overwritten leaf remained open")
+			}
+			select {
+			case <-secondWatch:
+				t.Fatal("watch on current leaf closed")
+			default:
+			}
+			value, found := tree.Get([]byte("ab"))
+			require.True(t, found)
+			require.Equal(t, 2, value)
+		})
+	}
+}
+
 func Test_lowerbound_bigger(t *testing.T) {
 	t.Parallel()
 
