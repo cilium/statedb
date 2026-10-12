@@ -45,12 +45,12 @@ func FromMap[K comparable, V any](m Map[K, V], hm map[K]V) Map[K, V] {
 
 	m.ensureTree()
 	txn := m.tree.Txn()
-	for key, value := range hm {
-		txn.Insert(m.keyToBytes(key), mapKVPair[K, V]{key, value})
-	}
 	if m.singleton != nil {
 		txn.Insert(m.keyToBytes(m.singleton.Key), *m.singleton)
 		m.singleton = nil
+	}
+	for key, value := range hm {
+		txn.Insert(m.keyToBytes(key), mapKVPair[K, V]{key, value})
 	}
 	m.tree = txn.Commit()
 	return m
