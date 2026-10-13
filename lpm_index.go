@@ -693,17 +693,17 @@ func newLPMIterator(iter *lpm.Iterator[lpmEntry], deduplicate bool) tableIndexIt
 }
 
 func (l *lpmIteratorAdapter) All(yield func([]byte, object) bool) {
-	var visited map[string]struct{}
+	var visited map[uint64]struct{}
 	if l.deduplicate {
-		visited = map[string]struct{}{}
+		visited = map[uint64]struct{}{}
 	}
 	emit := func(key []byte, entry lpmEntryObject) bool {
 		if visited != nil {
-			primary := string(entry.primary)
-			if _, found := visited[primary]; found {
+			revision := entry.obj.revision
+			if _, found := visited[revision]; found {
 				return true
 			}
-			visited[primary] = struct{}{}
+			visited[revision] = struct{}{}
 		}
 		return yield(key, entry.obj)
 	}
