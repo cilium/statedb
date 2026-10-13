@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"unsafe"
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
@@ -632,16 +631,14 @@ func (k nonUniqueKey) encodedSecondary() []byte {
 	return k[:k.secondaryLen()]
 }
 
-// markVisited adds the encoded primary key to the visited set. Returns false
-// if it was already visited.
-func markVisited(visited map[string]struct{}, primary []byte) bool {
-	// The keys are slices of the keys stored in the tree which are never
-	// mutated, so the string can refer to them directly without copying.
-	key := unsafe.String(unsafe.SliceData(primary), len(primary))
-	if _, found := visited[key]; found {
+// markVisited adds the object's table revision to the visited set. Revisions
+// are unique within a table, so this identifies an object across its index keys.
+// Returns false if it was already visited.
+func markVisited(visited map[uint64]struct{}, revision uint64) bool {
+	if _, found := visited[revision]; found {
 		return false
 	}
-	visited[key] = struct{}{}
+	visited[revision] = struct{}{}
 	return true
 }
 
@@ -653,7 +650,7 @@ type nonUniquePartIterator struct {
 
 // All implements tableIndexIterator.
 func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
-	var visited map[string]struct{}
+	var visited map[uint64]struct{}
 	if it.prefixSearch {
 		// When prefix searching, keep track of objects we've already seen as
 		// multiple keys in non-unique index may map to a single object.
@@ -662,7 +659,7 @@ func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
 		//
 		// This of course makes iterating over a non-unique index with a prefix
 		// (or lowerbound search) about 20x slower than normal!
-		visited = map[string]struct{}{}
+		visited = map[uint64]struct{}{}
 	}
 	for key, iobj := range it.iter.All {
 		nuk := nonUniqueKey(key)
@@ -681,7 +678,7 @@ func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
 			// When doing a prefix search on a non-unique index we may see the
 			// same object multiple times since multiple keys may point it.
 			// Skip if we've already seen this object.
-			if !markVisited(visited, nuk.encodedPrimary()) {
+			if !markVisited(visited, iobj.revision) {
 				continue
 			}
 		}
@@ -730,12 +727,12 @@ type nonUniqueLowerBoundPartIterator struct {
 
 	// Keep track of objects we've already seen as multiple keys in non-unique
 	// index may map to a single object. Only used by Next().
-	visited map[string]struct{}
+	visited map[uint64]struct{}
 }
 
 // All implements tableIndexIterator.
 func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) {
-	visited := map[string]struct{}{}
+	visited := map[uint64]struct{}{}
 	for key, iobj := range it.iter.All {
 		// With a non-unique index we have a composite key <secondary><primary><secondary len>.
 		// This means we need to check every key that it's larger or equal to the search key.
@@ -743,7 +740,7 @@ func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) 
 		nuk := nonUniqueKey(key)
 		secondary := nuk.encodedSecondary()
 		if bytes.Compare(secondary, it.searchKey) >= 0 {
-			if !markVisited(visited, nuk.encodedPrimary()) {
+			if !markVisited(visited, iobj.revision) {
 				continue
 			}
 
@@ -756,7 +753,7 @@ func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) 
 
 func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
 	if it.visited == nil {
-		it.visited = map[string]struct{}{}
+		it.visited = map[uint64]struct{}{}
 	}
 	for {
 		key, obj, ok := it.iter.Next()
@@ -770,7 +767,7 @@ func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
 		nuk := nonUniqueKey(key)
 		secondary := nuk.encodedSecondary()
 		if bytes.Compare(secondary, it.searchKey) >= 0 {
-			if !markVisited(it.visited, nuk.encodedPrimary()) {
+			if !markVisited(it.visited, obj.revision) {
 				continue
 			}
 
