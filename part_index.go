@@ -7,10 +7,31 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sync"
 
 	"github.com/cilium/statedb/index"
 	"github.com/cilium/statedb/part"
 )
+
+const maxPooledVisitedEntries = 1024
+
+var visitedPool = sync.Pool{
+	New: func() any {
+		return make(map[uint64]struct{})
+	},
+}
+
+func getVisited() map[uint64]struct{} {
+	return visitedPool.Get().(map[uint64]struct{})
+}
+
+func putVisited(visited map[uint64]struct{}) {
+	if len(visited) > maxPooledVisitedEntries {
+		return
+	}
+	clear(visited)
+	visitedPool.Put(visited)
+}
 
 // Index implements the indexing of objects (FromObjects) and
 // querying of objects from the index (FromKey).
@@ -659,7 +680,8 @@ func (it *nonUniquePartIterator) All(yield func([]byte, object) bool) {
 		//
 		// This of course makes iterating over a non-unique index with a prefix
 		// (or lowerbound search) about 20x slower than normal!
-		visited = map[uint64]struct{}{}
+		visited = getVisited()
+		defer putVisited(visited)
 	}
 	for key, iobj := range it.iter.All {
 		nuk := nonUniqueKey(key)
@@ -728,11 +750,13 @@ type nonUniqueLowerBoundPartIterator struct {
 	// Keep track of objects we've already seen as multiple keys in non-unique
 	// index may map to a single object. Only used by Next().
 	visited map[uint64]struct{}
+	done    bool
 }
 
 // All implements tableIndexIterator.
 func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) {
-	visited := map[uint64]struct{}{}
+	visited := getVisited()
+	defer putVisited(visited)
 	for key, iobj := range it.iter.All {
 		// With a non-unique index we have a composite key <secondary><primary><secondary len>.
 		// This means we need to check every key that it's larger or equal to the search key.
@@ -752,12 +776,18 @@ func (it *nonUniqueLowerBoundPartIterator) All(yield func([]byte, object) bool) 
 }
 
 func (it *nonUniqueLowerBoundPartIterator) Next() ([]byte, object, bool) {
+	if it.done {
+		return nil, object{}, false
+	}
 	if it.visited == nil {
-		it.visited = map[uint64]struct{}{}
+		it.visited = getVisited()
 	}
 	for {
 		key, obj, ok := it.iter.Next()
 		if !ok {
+			putVisited(it.visited)
+			it.visited = nil
+			it.done = true
 			return nil, object{}, false
 		}
 
