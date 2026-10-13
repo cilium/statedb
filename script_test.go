@@ -6,6 +6,8 @@ package statedb
 import (
 	"context"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +22,47 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type mismatchedTableRow struct {
+	ID uint64
+}
+
+func (mismatchedTableRow) TableHeader() []string { return []string{"ID", "Extra"} }
+func (mismatchedTableRow) TableRow() []string    { return []string{"value"} }
+
+func TestScriptCommandsRejectMismatchedTableRows(t *testing.T) {
+	db := New()
+	primary := Index[mismatchedTableRow, uint64]{
+		Name: "id",
+		FromObject: func(obj mismatchedTableRow) index.KeySet {
+			return index.NewKeySet(index.Uint64(obj.ID))
+		},
+		FromKey: index.Uint64,
+		Unique:  true,
+	}
+	table, err := NewTable(db, "mismatched", primary)
+	require.NoError(t, err)
+	wtxn := db.WriteTxn(table)
+	_, _, err = table.Insert(wtxn, mismatchedTableRow{ID: 1})
+	require.NoError(t, err)
+	wtxn.Commit()
+
+	tmpDir := t.TempDir()
+	cmpFile := filepath.Join(tmpDir, "cmp.txt")
+	require.NoError(t, os.WriteFile(cmpFile, []byte("ID\n"), 0600))
+	state, err := script.NewState(t.Context(), tmpDir, nil)
+	require.NoError(t, err)
+	engine := script.Engine{Cmds: map[string]script.Cmd{
+		"db/show": ShowCmd(db),
+		"db/cmp":  CompareCmd(db),
+	}}
+
+	err = engine.ExecuteLine(state, "db/show mismatched", &strings.Builder{})
+	require.ErrorContains(t, err, `table "mismatched": TableRow returned 1 columns, want 2 from TableHeader`)
+
+	err = engine.ExecuteLine(state, "db/cmp mismatched cmp.txt", &strings.Builder{})
+	require.ErrorContains(t, err, `table "mismatched": TableRow returned 1 columns, want 2 from TableHeader`)
+}
 
 func TestScript(t *testing.T) {
 	t.Parallel()
