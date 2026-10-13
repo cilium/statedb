@@ -695,7 +695,8 @@ func newLPMIterator(iter *lpm.Iterator[lpmEntry], deduplicate bool) tableIndexIt
 func (l *lpmIteratorAdapter) All(yield func([]byte, object) bool) {
 	var visited map[uint64]struct{}
 	if l.deduplicate {
-		visited = map[uint64]struct{}{}
+		visited = getVisited()
+		defer putVisited(visited)
 	}
 	emit := func(key []byte, entry lpmEntryObject) bool {
 		if visited != nil {
