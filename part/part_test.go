@@ -1920,8 +1920,8 @@ func Benchmark_find64(b *testing.B) {
 	leaves := [64]leaf[bool]{}
 	for i := range 64 {
 		keyBytes[i] = byte(i)
-		leaves[i].prefixP = &keyBytes[i]
-		leaves[i].prefixLen = 1
+		leaves[i].keyP = &keyBytes[i]
+		leaves[i].setPrefix(0, 1)
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
 		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)
@@ -1945,8 +1945,8 @@ func Benchmark_findIndex64_hit(b *testing.B) {
 	leaves := [64]leaf[bool]{}
 	for i := range 64 {
 		keyBytes[i] = byte(i)
-		leaves[i].prefixP = &keyBytes[i]
-		leaves[i].prefixLen = 1
+		leaves[i].keyP = &keyBytes[i]
+		leaves[i].setPrefix(0, 1)
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
 		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)
@@ -1970,8 +1970,8 @@ func Benchmark_findIndex64_miss(b *testing.B) {
 	leaves := [64]leaf[bool]{}
 	for i := range 64 {
 		keyBytes[i] = byte(i)
-		leaves[i].prefixP = &keyBytes[i]
-		leaves[i].prefixLen = 1
+		leaves[i].keyP = &keyBytes[i]
+		leaves[i].setPrefix(0, 1)
 		leaves[i].setKind(nodeKindLeaf)
 		n.children[i] = leaves[i].self()
 		n.bitmap[byte(i)/64] |= uint64(1) << (byte(i) % 64)

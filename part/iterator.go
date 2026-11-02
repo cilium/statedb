@@ -146,7 +146,7 @@ func prefixSearch[T any](root *header[T], rootWatch *atomicWatchPointer, prefix 
 	watch := watchTarget{direct: rootWatch}
 	for {
 		// Does the node have part of the prefix we're looking for?
-		commonPrefix := this.prefix()[:min(len(prefix), int(this.prefixLen))]
+		commonPrefix := this.prefix()[:min(len(prefix), int(this.prefixLen()))]
 		if !bytes.HasPrefix(prefix, commonPrefix) {
 			// Mismatching prefix, return the watch channel from the previous matching node.
 			return newIterator[T](nil), watch
@@ -222,14 +222,14 @@ func lowerbound[T any](start *header[T], key []byte) Iterator[T] {
 	var thisEdge []*header[T]
 loop:
 	for {
-		switch bytes.Compare(this.prefix(), key[:min(len(key), int(this.prefixLen))]) {
+		switch bytes.Compare(this.prefix(), key[:min(len(key), int(this.prefixLen()))]) {
 		case -1:
 			// Prefix is smaller, stop here and return an iterator for
 			// the larger nodes in the parent's.
 			break loop
 
 		case 0:
-			if int(this.prefixLen) == len(key) {
+			if int(this.prefixLen()) == len(key) {
 				// Exact match.
 				edges = append(edges, singletonEdge(this, thisEdge))
 				break loop
@@ -238,7 +238,7 @@ loop:
 			// Prefix matches the beginning of the key, but more
 			// remains of the key. Drop the matching part and keep
 			// going further.
-			key = key[this.prefixLen:]
+			key = key[this.prefixLen():]
 
 			if this.kind() == nodeKind256 {
 				children := this.node256().children[:]
