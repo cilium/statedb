@@ -23,40 +23,55 @@ const (
 	nodeKind256
 )
 
-// header is the common header shared by all node kinds.
+// header is the common header shared by all node kinds. Prefixes are ranges
+// within a full key. For leaves, prefixEnd is also the full key length.
 type header[T any] struct {
-	flags     uint16 // kind(4b) | unused(3b) | size(9b)
-	prefixLen uint16
-	prefixP   *byte            // the compressed prefix, [0] is the key
-	watch     lazyWatchChannel // watch that is closed when this node mutates
+	flags       uint16 // kind(4b) | unused(3b) | num-children(9b)
+	prefixStart uint16
+	prefixEnd   uint16
+	prefixSize  uint8            // cached length; 255 means derive from the range
+	prefixKey   byte             // cached first prefix byte, in header padding
+	keyP        *byte            // a full key containing the compressed prefix
+	watch       lazyWatchChannel // watch that is closed when this node mutates
 }
 
 func (n *header[T]) key() byte {
-	return *n.prefixP
+	return n.prefixKey
 }
 
 func (n *header[T]) prefix() []byte {
-	return unsafe.Slice(n.prefixP, n.prefixLen)
+	return unsafe.Slice(n.keyP, n.prefixEnd)[n.prefixStart:]
+}
+
+func (n *header[T]) prefixLen() uint16 {
+	if n.prefixSize < 255 {
+		return uint16(n.prefixSize)
+	}
+	return n.prefixEnd - n.prefixStart
+}
+
+func (n *header[T]) setPrefix(start, end uint16) {
+	n.prefixStart = start
+	n.prefixEnd = end
+	n.prefixSize = uint8(min(end-start, 255))
+	if start < end {
+		n.prefixKey = *(*byte)(unsafe.Add(unsafe.Pointer(n.keyP), start))
+	}
 }
 
 func (n *header[T]) isPrefixOf(key []byte) bool {
-	switch n.prefixLen {
+	switch n.prefixSize {
 	case 0:
 		return true
 	case 1:
-		return len(key) > 0 && *n.prefixP == key[0]
+		return len(key) > 0 && n.key() == key[0]
 	default:
+		prefixLen := n.prefixLen()
 		// This is essentially same as bytes.HasPrefix(key, this.prefix()), but slight bit
 		// faster as we don't need to construct the slice header for length comparison.
-		return uint16(len(key)) >= n.prefixLen && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
+		prefixP := (*byte)(unsafe.Add(unsafe.Pointer(n.keyP), n.prefixStart))
+		return uint16(len(key)) >= prefixLen && unsafe.String(prefixP, prefixLen) == string(key[:prefixLen])
 	}
-}
-
-func (n *header[T]) setPrefix(p []byte) {
-	if len(p) > 0 {
-		n.prefixP = &p[0]
-	}
-	n.prefixLen = uint16(len(p))
 }
 
 const kindMask = uint16(0b1111_000_00000000_0)
@@ -210,7 +225,7 @@ func (n *header[T]) clone(watch bool) *header[T] {
 	switch n.kind() {
 	case nodeKindLeaf:
 		src := n.getLeaf()
-		l := &leaf[T]{value: src.value, keyLen: src.keyLen, keyP: src.keyP}
+		l := &leaf[T]{value: src.value}
 		n.cloneHeaderTo(&l.header, watch)
 		nCopy = l.self()
 	case nodeKind4:
@@ -246,8 +261,11 @@ func (n *header[T]) clone(watch bool) *header[T] {
 
 func (n *header[T]) cloneHeaderTo(h *header[T], watch bool) {
 	h.flags = n.flags
-	h.prefixLen = n.prefixLen
-	h.prefixP = n.prefixP
+	h.prefixStart = n.prefixStart
+	h.prefixEnd = n.prefixEnd
+	h.prefixSize = n.prefixSize
+	h.prefixKey = n.prefixKey
+	h.keyP = n.keyP
 	if !watch {
 		h.watch.disable()
 	}
@@ -263,8 +281,11 @@ func (n *header[T]) promote(txnID uint64) *header[T] {
 	switch n.kind() {
 	case nodeKindLeaf:
 		node4 := &node4[T]{}
-		node4.prefixLen = n.prefixLen
-		node4.prefixP = n.prefixP
+		node4.prefixStart = n.prefixStart
+		node4.prefixEnd = n.prefixEnd
+		node4.prefixSize = n.prefixSize
+		node4.prefixKey = n.prefixKey
+		node4.keyP = n.keyP
 		node4.leaf = n.getLeaf()
 		node4.txnID = txnID
 		node4.setKind(nodeKind4)
@@ -587,13 +608,11 @@ func (n *header[T]) remove(idx int) {
 
 type leaf[T any] struct {
 	header[T]
-	value  T
-	keyLen uint16
-	keyP   *byte // the full key
+	value T
 }
 
 func (l *leaf[T]) fullKey() []byte {
-	return unsafe.Slice(l.keyP, l.keyLen)
+	return unsafe.Slice(l.keyP, l.prefixEnd)
 }
 
 func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
@@ -601,8 +620,9 @@ func newLeaf[T any](o options, prefix, key []byte, value T) *leaf[T] {
 	if len(key) > 0 {
 		keyP = &key[0]
 	}
-	leaf := &leaf[T]{keyLen: uint16(len(key)), keyP: keyP, value: value}
-	leaf.setPrefix(prefix)
+	leaf := &leaf[T]{value: value}
+	leaf.keyP = keyP
+	leaf.setPrefix(uint16(len(key)-len(prefix)), uint16(len(key)))
 	leaf.setKind(nodeKindLeaf)
 	if o.rootOnlyWatch() {
 		leaf.watch.disable()
@@ -656,7 +676,7 @@ func search[T any](this *header[T], key []byte) (value T, ok bool) {
 			return
 		}
 
-		key = key[this.prefixLen:]
+		key = key[this.prefixLen():]
 		if len(key) == 0 {
 			if leaf := this.getLeaf(); leaf != nil {
 				return leaf.value, true
@@ -681,7 +701,7 @@ func searchWatch[T any](root *header[T], rootWatch *atomicWatchPointer, key []by
 		}
 
 		// Consume the prefix
-		key = key[this.prefixLen:]
+		key = key[this.prefixLen():]
 
 		if len(key) == 0 {
 			if leaf := this.getLeaf(); leaf != nil {
