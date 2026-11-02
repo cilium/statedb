@@ -296,7 +296,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	newValueOut = newValue
 
 	if root == nil {
-		leaf := newLeaf(txn.opts, key, fullKey, newValue)
+		leaf := newLeaf(txn.opts, fullKey, 0, newValue)
 		return oldValue, newValueOut, false, watchTarget{lazy: &leaf.watch}, leaf.self()
 	}
 
@@ -330,7 +330,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 				// Node is big enough, clone it so we can mutate it
 				this = txn.cloneNode(this)
 			}
-			leaf := newLeaf(txn.opts, key, fullKey, newValue)
+			leaf := newLeaf(txn.opts, fullKey, uint16(this.prefixEnd()), newValue)
 			this.insert(idx, leaf.self())
 			*thisp = this
 			watch = watchTarget{lazy: &leaf.watch}
@@ -372,7 +372,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 			}
 		} else {
 			// Set the leaf
-			leaf := newLeaf(txn.opts, this.prefix(), fullKey, newValue)
+			leaf := newLeaf(txn.opts, fullKey, this.prefixStart, newValue)
 			watch = watchTarget{lazy: &leaf.watch}
 			this.setLeaf(leaf)
 		}
@@ -389,14 +389,17 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	} else {
 		this = txn.cloneNode(this)
 	}
-	this.setPrefix(this.prefix()[len(common):])
+	prefixStart := this.prefixStart
+	split := prefixStart + uint16(len(common))
+	this.setPrefix(split, this.prefixEnd())
 	key = key[len(common):]
 
-	newLeaf := newLeaf(txn.opts, key, fullKey, newValue)
+	newLeaf := newLeaf(txn.opts, fullKey, split, newValue)
 	watch = watchTarget{lazy: &newLeaf.watch}
 	newNode := &node4[T]{}
 	newNode.txnID = txn.txnID
-	newNode.setPrefix(common)
+	newNode.keyP = this.keyP
+	newNode.setPrefix(prefixStart, int(split))
 	newNode.setKind(nodeKind4)
 	if txn.opts.rootOnlyWatch() {
 		newNode.watch.disable()
@@ -513,7 +516,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			// the root with the child.
 			child := root.children()[0]
 			childClone := child.cloneWithSharedWatch()
-			childClone.setPrefix(slices.Concat(root.prefix(), childClone.prefix()))
+			childClone.setPrefix(root.prefixStart, childClone.prefixEnd())
 			newRoot = childClone
 		default:
 			// Root is a non-leaf node with many children. Just drop the leaf.
@@ -535,7 +538,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 		txn.addWatch(&this.node.watch)
 		child := this.node.children()[0]
 		childClone := child.cloneWithSharedWatch()
-		childClone.setPrefix(slices.Concat(this.node.prefix(), childClone.prefix()))
+		childClone.setPrefix(this.node.prefixStart, childClone.prefixEnd())
 		parent.node = txn.cloneNode(parent.node)
 		parent.node.children()[this.index] = childClone
 	} else if this.node.size() > 0 {
@@ -608,7 +611,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 		// The node must not be treated as writable since we didn't clone
 		// the watch.
 		childClone := child.cloneWithSharedWatch()
-		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
+		childClone.setPrefix(parent.prefixStart, childClone.prefixEnd())
 		return childClone
 
 	case parent.kind() == nodeKind256 && size <= 129:
@@ -710,6 +713,17 @@ func validateTree[T any](node *header[T], parents []*header[T], watches []*lazyW
 			node.printTree(0)
 			panic(fmt.Sprintf(f, args...))
 		}
+	}
+
+	if node.prefixLen > 0 {
+		assert(node.key() == node.prefix()[0], "cached prefix byte does not match key")
+	}
+	if len(parents) == 0 {
+		assert(node.prefixStart == 0, "root prefix starts at %d", node.prefixStart)
+	} else {
+		parent := parents[len(parents)-1]
+		assert(int(node.prefixStart) == parent.prefixEnd(),
+			"child prefix starts at %d, parent prefix ends at %d", node.prefixStart, parent.prefixEnd())
 	}
 
 	// A leaf node's key is the sum of all prefixes in path

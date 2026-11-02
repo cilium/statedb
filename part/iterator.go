@@ -64,11 +64,16 @@ func (it Iterator[T]) All(yield func(key []byte, value T) bool) {
 		}
 
 		node := edges[0]
-		if node.size() > 0 {
-			// Node has children, add them to queue.
-			next = append(next, node.children())
+		var leaf *leaf[T]
+		if node.isLeaf() {
+			leaf = node.asLeaf()
+		} else {
+			if node.size() > 0 {
+				next = append(next, node.children())
+			}
+			leaf = node.getLeaf()
 		}
-		if leaf := node.getLeaf(); leaf != nil {
+		if leaf != nil {
 			if !yield(leaf.fullKey(), leaf.value) {
 				return
 			}
@@ -146,7 +151,8 @@ func prefixSearch[T any](root *header[T], rootWatch *atomicWatchPointer, prefix 
 	watch := watchTarget{direct: rootWatch}
 	for {
 		// Does the node have part of the prefix we're looking for?
-		commonPrefix := this.prefix()[:min(len(prefix), int(this.prefixLen))]
+		nodePrefix := this.prefix()
+		commonPrefix := nodePrefix[:min(len(prefix), len(nodePrefix))]
 		if !bytes.HasPrefix(prefix, commonPrefix) {
 			// Mismatching prefix, return the watch channel from the previous matching node.
 			return newIterator[T](nil), watch
