@@ -198,7 +198,8 @@ type Status struct {
 	UpdatedAt time.Time `json:"updated-at" yaml:"updated-at"`
 	Error     *string   `json:"error,omitempty" yaml:"error,omitempty"`
 
-	// id is a unique identifier for a pending object.
+	// ID identifies a pending or refreshing reconciliation request and is
+	// preserved when the reconciler sets its Done or Error status.
 	// The reconciler uses this to compare whether the object
 	// has really changed when committing the resulting status.
 	// This allows multiple reconcilers to exist for a single
