@@ -311,13 +311,13 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	// we stop. 'this' points to that node, and 'thisp' to its memory location. It has
 	// not been cloned.
 	for len(key) > 0 && !this.isLeaf() && bytes.HasPrefix(key, this.prefix()) {
-		if len(key) == int(this.prefixLen) {
+		if len(key) == int(this.prefixLen()) {
 			// Exact match
 			break
 		}
 
 		// Prefix matched. Consume it and go further.
-		key = key[this.prefixLen:]
+		key = key[this.prefixLen():]
 
 		child, idx := this.findIndex(key[0])
 		if child == nil {
@@ -352,7 +352,7 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	// have been cloned.
 	//
 	// Check first if it's an exact match.
-	if len(key) == len(common) && len(key) == int(this.prefixLen) {
+	if len(key) == len(common) && len(key) == int(this.prefixLen()) {
 		this = txn.cloneNode(this)
 		*thisp = this
 		if leaf := this.getLeaf(); leaf != nil {
@@ -389,21 +389,22 @@ func (txn *Txn[T]) modify(root *header[T], key []byte, newValue T, mod func(T, T
 	} else {
 		this = txn.cloneNode(this)
 	}
-	this.setPrefix(this.prefix()[len(common):])
+	this.setPrefix(this.prefixStart+uint16(len(common)), this.prefixEnd)
 	key = key[len(common):]
 
 	newLeaf := newLeaf(txn.opts, key, fullKey, newValue)
 	watch = watchTarget{lazy: &newLeaf.watch}
 	newNode := &node4[T]{}
 	newNode.txnID = txn.txnID
-	newNode.setPrefix(common)
+	newNode.keyP = this.keyP
+	newNode.setPrefix(this.prefixStart-uint16(len(common)), this.prefixStart)
 	newNode.setKind(nodeKind4)
 	if txn.opts.rootOnlyWatch() {
 		newNode.watch.disable()
 	}
 
 	switch {
-	case this.prefixLen == 0:
+	case this.prefixLen() == 0:
 		// target has shorter key than new leaf
 		newNode.setLeaf(this.getLeaf())
 		newNode.children[0] = newLeaf.self()
@@ -470,7 +471,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 	var leaf *leaf[T]
 	for {
 		if bytes.HasPrefix(key, target.prefix()) {
-			key = key[target.prefixLen:]
+			key = key[target.prefixLen():]
 			if len(key) == 0 {
 				leaf = target.getLeaf()
 				if leaf == nil {
@@ -513,7 +514,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 			// the root with the child.
 			child := root.children()[0]
 			childClone := child.cloneWithSharedWatch()
-			childClone.setPrefix(slices.Concat(root.prefix(), childClone.prefix()))
+			childClone.setPrefix(root.prefixStart, childClone.prefixEnd)
 			newRoot = childClone
 		default:
 			// Root is a non-leaf node with many children. Just drop the leaf.
@@ -535,7 +536,7 @@ func (txn *Txn[T]) delete(root *header[T], key []byte) (oldValue T, hadOld bool,
 		txn.addWatch(&this.node.watch)
 		child := this.node.children()[0]
 		childClone := child.cloneWithSharedWatch()
-		childClone.setPrefix(slices.Concat(this.node.prefix(), childClone.prefix()))
+		childClone.setPrefix(this.node.prefixStart, childClone.prefixEnd)
 		parent.node = txn.cloneNode(parent.node)
 		parent.node.children()[this.index] = childClone
 	} else if this.node.size() > 0 {
@@ -608,7 +609,7 @@ func (txn *Txn[T]) removeChild(parent *header[T], index int) (newParent *header[
 		// The node must not be treated as writable since we didn't clone
 		// the watch.
 		childClone := child.cloneWithSharedWatch()
-		childClone.setPrefix(slices.Concat(parent.prefix(), childClone.prefix()))
+		childClone.setPrefix(parent.prefixStart, childClone.prefixEnd)
 		return childClone
 
 	case parent.kind() == nodeKind256 && size <= 129:
@@ -710,6 +711,19 @@ func validateTree[T any](node *header[T], parents []*header[T], watches []*lazyW
 			node.printTree(0)
 			panic(fmt.Sprintf(f, args...))
 		}
+	}
+
+	assert(node.prefixStart <= node.prefixEnd, "invalid prefix range [%d:%d]", node.prefixStart, node.prefixEnd)
+	assert(node.prefixLen() == node.prefixEnd-node.prefixStart, "cached prefix length does not match range")
+	if node.prefixLen() > 0 {
+		assert(node.key() == node.prefix()[0], "cached prefix byte does not match key")
+	}
+	if len(parents) == 0 {
+		assert(node.prefixStart == 0, "root prefix starts at %d", node.prefixStart)
+	} else {
+		parent := parents[len(parents)-1]
+		assert(node.prefixStart == parent.prefixEnd,
+			"child prefix starts at %d, parent prefix ends at %d", node.prefixStart, parent.prefixEnd)
 	}
 
 	// A leaf node's key is the sum of all prefixes in path
