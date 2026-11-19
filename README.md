@@ -373,6 +373,49 @@ for obj, revision := range objs { ... }
 <-watch
 ```
 
+### Composing queries
+
+For queries that combine filtering, projection, and joins, `From` creates a
+lazy, typed pipeline from an index query. Pipelines do not change the `Table`
+API and are evaluated against a `ReadTxn` when `All` is called. Use `FromAll`
+when the pipeline should scan every row in the table.
+
+```go
+type UserOrder struct {
+  User  *User
+  Order *Order
+}
+
+rows := statedb.From(users, usersByRegion.Query(region)).
+  Where(func(user *User) bool { return user.Active }).
+  JoinList(orders, func(user *User) statedb.Query[*Order] {
+    return ordersByUser.Query(user.ID)
+  }, func(user *User, order *Order) UserOrder {
+    return UserOrder{User: user, Order: order}
+  }).
+  Select(func(row UserOrder) string {
+    return row.User.Name + ": " + row.Order.ID
+  })
+
+watchSet := statedb.NewWatchSet()
+for description := range rows.AllWatch(txn, watchSet) {
+  // ...
+}
+
+// After consuming the full result sequence, wait for any source or join
+// query to be invalidated.
+_, err := watchSet.Wait(ctx, 0)
+```
+
+`JoinList` uses exact-match results from `List`. Use `JoinLowerBound` or
+`JoinPrefix` to use the corresponding table query operation instead. Each
+matching right-hand row produces an output row. Use `Map` as an alias for
+`Select` when that reads more naturally. Pipeline results contain values
+without revisions; a joined row can depend on multiple table revisions.
+`AllWatch` adds watches for the source query and all join lookups to a
+`WatchSet`. Since pipelines are lazy, consume the full result sequence before
+waiting on the set.
+
 `Prefix` or `PrefixWatch` can be used to iterate over objects that match a given prefix.
 
 ```go
