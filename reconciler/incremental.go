@@ -46,7 +46,7 @@ type opResult struct {
 	original any              // the original object
 	rev      statedb.Revision // revision of the object
 	err      error
-	id       uint64 // the "pending" identifier
+	id       uint64 // identifier of the reconciliation work
 }
 
 func (incr *incremental[Obj]) run(ctx context.Context, txn statedb.ReadTxn, changes iter.Seq2[statedb.Change[Obj], statedb.Revision]) (errs []error, retryLowWatermark statedb.Revision) {
@@ -255,10 +255,13 @@ func (incr *incremental[Obj]) commitStatus() (numErrors int) {
 			status = StatusError(result.err)
 			numErrors++
 		}
+		// Keep the work identifier across attempts so a retry can recognize
+		// its error status after another reconciler changes the object revision.
+		status.ID = result.id
 
 		current, exists, err := incr.table.CompareAndSwap(wtxn, result.rev, incr.config.SetObjectStatus(obj, status))
 		if errors.Is(err, statedb.ErrRevisionNotEqual) && exists {
-			// The object had changed. Check if the pending status still carries the same
+			// The object had changed. Check if the status still carries the same work
 			// identifier and if so update the object. This is an optimization for supporting
 			// multiple reconcilers per object to avoid repeating work when only the
 			// reconciliation status had changed.
@@ -267,10 +270,18 @@ func (incr *incremental[Obj]) commitStatus() (numErrors int) {
 			// modifying the object during reconciliation as the following will forget
 			// the changes.
 			currentStatus := incr.config.GetObjectStatus(current)
-			if currentStatus.Kind == StatusKindPending && currentStatus.ID == result.id {
+			if currentStatus.ID == result.id &&
+				(currentStatus.IsPendingOrRefreshing() || currentStatus.Kind == StatusKindError) {
 				current = incr.config.CloneObject(current)
 				current = incr.config.SetObjectStatus(current, status)
 				_, _, err = incr.table.Insert(wtxn, current)
+				if err == nil && result.err != nil {
+					// Carry the merged object into the next retry so it cannot
+					// revert changes from other reconcilers. Keep the original
+					// status hint, e.g. Refreshing, for the retry operation.
+					originalStatus := incr.config.GetObjectStatus(result.original.(Obj))
+					result.original = incr.config.SetObjectStatus(incr.config.CloneObject(current), originalStatus)
+				}
 			}
 		}
 
