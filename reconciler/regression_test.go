@@ -441,3 +441,57 @@ func TestRetryStatusConflict(t *testing.T) {
 		}
 	}
 }
+
+func TestRetryLowWatermarkPreservesOriginalRevision(t *testing.T) {
+	for _, batch := range []bool{false, true} {
+		t.Run(fmt.Sprintf("batch=%v", batch), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newRetryRegressionFixture(t, batch)
+				failure := errors.New("update failed")
+				failAll := func(*retryRegressionObject) error { return failure }
+				f.ops.update = failAll
+				firstRev := f.insert(t, &retryRegressionObject{ID: 1, Status: StatusPending()})
+				secondRev := f.insert(t, &retryRegressionObject{ID: 2, Status: StatusPending()})
+
+				// Read the committed status changes in a second round so the
+				// returned watermark includes failures from the preceding retry.
+				reconcile := func() statedb.Revision {
+					f.round()
+					_, low := f.round()
+					return low
+				}
+				require.Equal(t, firstRev, reconcile())
+				for attempt := 1; attempt <= 3; attempt++ {
+					time.Sleep(time.Second)
+					require.Equal(t, firstRev, reconcile(), "repeated failures must retain the original revision")
+					require.Len(t, f.ops.calls, 2*(attempt+1), "both objects must actually have been retried")
+				}
+
+				// Resolving the oldest failure must reveal the next object's
+				// original revision, rather than the revision of an Error status.
+				f.ops.update = func(obj *retryRegressionObject) error {
+					if obj.ID == 1 {
+						return nil
+					}
+					return failure
+				}
+				time.Sleep(time.Second)
+				require.Equal(t, secondRev, reconcile())
+
+				f.ops.update = func(*retryRegressionObject) error { return nil }
+				time.Sleep(time.Second)
+				require.Zero(t, reconcile(), "all failures have recovered")
+				require.Empty(t, f.incr.retries.errors())
+
+				// A new request for the same key must start a new watermark,
+				// both after recovery and when superseding an unresolved failure.
+				f.ops.update = failAll
+				for range 2 {
+					rev := f.insert(t, &retryRegressionObject{ID: 1, Status: StatusPending()})
+					require.Greater(t, rev, secondRev)
+					require.Equal(t, rev, reconcile(), "new work must not inherit a previous request's revision")
+				}
+			})
+		})
+	}
+}
