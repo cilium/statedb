@@ -48,7 +48,7 @@ func (n *header[T]) isPrefixOf(key []byte) bool {
 	default:
 		// This is essentially same as bytes.HasPrefix(key, this.prefix()), but slight bit
 		// faster as we don't need to construct the slice header for length comparison.
-		return uint16(len(key)) >= n.prefixLen && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
+		return len(key) >= int(n.prefixLen) && unsafe.String(n.prefixP, n.prefixLen) == string(key[:n.prefixLen])
 	}
 }
 

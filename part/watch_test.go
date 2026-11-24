@@ -203,3 +203,24 @@ func TestLateWatchAfterWatchPreservingRewrite(t *testing.T) {
 		t.Fatal("watch on rewritten old snapshot is open after key changed")
 	}
 }
+
+func TestGetWatchLongMissingKey(t *testing.T) {
+	tree := New[int]()
+	for _, key := range []string{"foo/a", "foo/b", "other"} {
+		_, _, tree = tree.Insert([]byte(key), 1)
+	}
+
+	_, watch, found := tree.GetWatch([]byte("foo/z"))
+	if found || watch == nil || watch == tree.RootWatch() {
+		t.Fatal("expected a miss with a subtree watch")
+	}
+
+	// The query is longer than a stored prefix can be. Its length must
+	// still be compared in full when selecting the closest watch.
+	longKey := make([]byte, 1<<16)
+	copy(longKey, "foo/z")
+	_, longWatch, found := tree.GetWatch(longKey)
+	if found || longWatch != watch {
+		t.Fatal("expected a long missing key to select the same subtree watch")
+	}
+}
